@@ -54,6 +54,9 @@ func NewServer(cfg config.Config, svc *application.Service, tenancy *application
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, X-Empresa-ID, X-Sede-ID, X-Almacen-ID",
 		AllowMethods:     "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 	}))
+	// CSRF: la cookie de sesión es SameSite=None (Hubmy nos embebe cross-site), así que
+	// las escrituras se acotan por Sec-Fetch-Site/Origin. Ver csrf.go.
+	app.Use(guardCSRF(cfg.FrontendURL))
 	app.Use(limiter.New(limiter.Config{
 		Max:          300,
 		Expiration:   time.Minute,

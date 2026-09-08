@@ -296,6 +296,13 @@ func TestCancelarItem_SoloAntesDeEnviarParaElMesonero(t *testing.T) {
 	if len(out.Items) != len(enviado.Items) {
 		t.Error("un renglón ya enviado no se borra: se marca cancelado para que quede rastro")
 	}
+	// Y queda en «cancelado», no en cualquier otro estado: sin esta comprobación, un
+	// renglón que quedara «servido» pasaría el conteo de arriba y se cobraría igual.
+	for _, it := range out.Items {
+		if it.ID == enviado.Items[0].ID && it.Estado != cuenta.ItemCancelado {
+			t.Errorf("el renglón anulado por la caja debe quedar %q, quedó %q", cuenta.ItemCancelado, it.Estado)
+		}
+	}
 	if out.Items[0].Estado != cuenta.ItemCancelado {
 		t.Errorf("el renglón debe quedar «cancelado», quedó %q", out.Items[0].Estado)
 	}
