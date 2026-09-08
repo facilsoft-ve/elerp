@@ -2,15 +2,21 @@ package inmem
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mornix/elerp/internal/application"
 	"github.com/mornix/elerp/internal/domain/aplicacion"
+	"github.com/mornix/elerp/internal/domain/caja"
 	"github.com/mornix/elerp/internal/domain/cliente"
+	"github.com/mornix/elerp/internal/domain/credencial"
+	"github.com/mornix/elerp/internal/domain/cuenta"
 	"github.com/mornix/elerp/internal/domain/empresa"
+	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/inventario"
 	"github.com/mornix/elerp/internal/domain/mesa"
 	"github.com/mornix/elerp/internal/domain/organizacion"
+	"github.com/mornix/elerp/internal/domain/proveedor"
 	"github.com/mornix/elerp/internal/domain/sede"
 	"github.com/mornix/elerp/internal/domain/usuario"
 )
@@ -67,6 +73,10 @@ type cliNicho struct {
 	nombre, tipoDoc, doc, telefono string
 }
 
+type provNicho struct {
+	nombre, doc, telefono string
+}
+
 // especNicho es la receta completa de una empresa demo.
 type especNicho struct {
 	orgID, empID, sedeID string
@@ -74,11 +84,20 @@ type especNicho struct {
 	giro                 string
 	direccion            string
 	colorMarca           string
-	rubros               []string
-	productos            []prodNicho
-	platos               []platoNicho
-	clientes             []cliNicho
-	modulos              []string
+	// slug identifica al tenant en los emails de sus usuarios demo
+	// (vendedor@<slug>.test) y en los datos de sus cuentas de cobro.
+	slug string
+	// telefonoBanco es el número que decora las cuentas de cobro sembradas.
+	telefonoBanco string
+	// Nombres del personal demo. El cajero firma las facturas sembradas.
+	cajero, supervisor, vendedor, contadora, mesonero string
+	proveedores                                       []provNicho
+	facturas                                          []emisionNicho
+	rubros                                            []string
+	productos                                         []prodNicho
+	platos                                            []platoNicho
+	clientes                                          []cliNicho
+	modulos                                           []string
 	// Salón (solo restaurante): grilla + mesas.
 	filas, columnas int
 	bloqueadas      []mesa.Celda
@@ -89,6 +108,17 @@ type mesaNicho struct {
 	nombre, zona, forma string
 	capacidad           int
 	columna, fila       int
+}
+
+// costoDe devuelve el costo sembrado de un SKU. Se usa como costo del movimiento de
+// salida: si no se pasa, el Kardex calcularía margen contra cero.
+func (e especNicho) costoDe(sku string) float64 {
+	for _, p := range e.productos {
+		if p.sku == sku {
+			return p.costo
+		}
+	}
+	return 0
 }
 
 // seedNichos siembra las empresas demo de los rubros que no cubre la bodega.
@@ -186,6 +216,10 @@ func (s *Store) seedEmpresaNicho(e especNicho) {
 			})
 		}
 	}
+
+	// Datos de OPERACIÓN (caja, credenciales, cobros, facturación). Ver
+	// seed_nichos_operacion.go.
+	s.seedOperacionNicho(e)
 }
 
 // --- Exposición para el seed de Mongo --------------------------------------
@@ -221,6 +255,21 @@ type SnapshotEmpresa struct {
 	Mesas       []mesa.Mesa
 	Plano       mesa.Plano
 	TienePlano  bool
+
+	// Operación (ver seed_nichos_operacion.go).
+	Usuarios     []usuario.Usuario
+	Credenciales []credencial.Credencial
+	Cajas        []caja.Caja
+	Cajeros      []caja.Cajero
+	CuentasCobro []fiscal.CuentaCobro
+	MetodosPago  []fiscal.MetodoPago
+	Proveedores  []proveedor.Proveedor
+	Documentos   []fiscal.Documento
+	CuentasMesa  []cuenta.Cuenta
+	// Contadores es el estado del numerador fiscal de ESTA empresa tras sembrar
+	// ("empresa|sede|serie" → último folio). Sin ellos, la primera factura real del
+	// prospecto reiniciaría en 1 y colisionaría con un folio sembrado.
+	Contadores map[string]int
 }
 
 // SnapshotNicho recoge todo lo sembrado para una empresa demo por rubro.
@@ -228,6 +277,29 @@ func (s *Store) SnapshotNicho(n NichoDemo) SnapshotEmpresa {
 	org, _ := s.Organizaciones.ByID(n.OrgID)
 	emp, _ := s.Empresas.ByID(n.EmpresaID)
 	plano, tiene := s.Planos.Get(n.EmpresaID, n.SedeID)
+
+	// Los usuarios y sus credenciales se derivan de las membresías de la empresa: el
+	// repositorio de usuarios es global (no lleva empresaID).
+	membresias := s.Membresias.ByEmpresa(n.EmpresaID)
+	usuarios := make([]usuario.Usuario, 0, len(membresias))
+	creds := make([]credencial.Credencial, 0, len(membresias))
+	for _, m := range membresias {
+		if u, ok := s.Usuarios.ByID(m.UsuarioID); ok {
+			usuarios = append(usuarios, u)
+		}
+		if c, ok := s.Credenciales.ByEmail(m.Email); ok {
+			creds = append(creds, c)
+		}
+	}
+
+	// Contadores del numerador que pertenecen a esta empresa (clave con su prefijo).
+	contadores := map[string]int{}
+	for k, v := range s.Numerador.Estado() {
+		if strings.HasPrefix(k, n.EmpresaID+"|") {
+			contadores[k] = v
+		}
+	}
+
 	return SnapshotEmpresa{
 		Org: org, Empresa: emp,
 		Sedes:       s.Sedes.List(n.EmpresaID),
@@ -239,5 +311,16 @@ func (s *Store) SnapshotNicho(n NichoDemo) SnapshotEmpresa {
 		Modulos:     s.Modulos.List(n.EmpresaID),
 		Mesas:       s.Mesas.List(n.EmpresaID, ""),
 		Plano:       plano, TienePlano: tiene,
+
+		Usuarios:     usuarios,
+		Credenciales: creds,
+		Cajas:        s.Cajas.List(n.EmpresaID),
+		Cajeros:      s.Cajeros.List(n.EmpresaID),
+		CuentasCobro: s.CuentasCobro.List(n.EmpresaID),
+		MetodosPago:  s.MetodosPago.List(n.EmpresaID),
+		Proveedores:  s.Proveedores.List(n.EmpresaID),
+		Documentos:   s.Documentos.List(n.EmpresaID),
+		CuentasMesa:  s.Cuentas.Abiertas(n.EmpresaID, n.SedeID),
+		Contadores:   contadores,
 	}
 }

@@ -341,7 +341,7 @@ func Seed(db *gomongo.Database) {
 			// Plano demo (grilla 8×6 con celdas bloqueadas), espejo del seed in-memory.
 			st.Planos.Upsert(mesadom.Plano{
 				EmpresaID: demoID, SedeID: sedeDemo, Filas: 6, Columnas: 8,
-				Bloqueadas: []mesadom.Celda{{Columna: 4, Fila: 2}, {Columna: 5, Fila: 2}, {Columna: 6, Fila: 2}, {Columna: 3, Fila: 4}},
+				Bloqueadas:  []mesadom.Celda{{Columna: 4, Fila: 2}, {Columna: 5, Fila: 2}, {Columna: 6, Fila: 2}, {Columna: 3, Fila: 4}},
 				Actualizada: snap.Mesas[0].Creada,
 			})
 			log.Printf("Mongo: sembradas %d mesas demo, plano y activado el módulo Restaurante", len(snap.Mesas))

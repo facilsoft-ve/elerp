@@ -223,3 +223,119 @@ func TestExistencias_ExcluyeCombosYPlatos(t *testing.T) {
 		t.Error("los insumos del restaurante deben aparecer en existencias")
 	}
 }
+
+// Cada rubro tiene que poder VENDER: caja habilitada y un cajero cuyo PIN sea el de
+// demostración. Sin esto el prospecto abre el POS y no puede facturar nada.
+func TestDemosNicho_CadaRubroPuedeAbrirCaja(t *testing.T) {
+	for _, emp := range []string{"emp_demo_rest", "emp_demo_ferr", "emp_demo_farm"} {
+		svc, st := nuevoServicio(t)
+		cajas := st.Cajas.List(emp)
+		if len(cajas) == 0 {
+			t.Fatalf("%s: no tiene ninguna caja; no se puede facturar", emp)
+		}
+		if _, err := svc.AbrirCaja(emp, actorA, origenTst, cajas[0].ID, "OP-001", inmem.PinDemo); err != nil {
+			t.Errorf("%s: el PIN de demostración debe abrir la caja: %v", emp, err)
+		}
+	}
+}
+
+// El numerador tiene que quedar ADELANTADO sobre el folio más alto sembrado. Si no, la
+// primera factura real del prospecto reiniciaría en 1 y chocaría con un folio ya emitido
+// — y los documentos son append-only: eso no se arregla después.
+func TestDemosNicho_NumeradorAdelantado(t *testing.T) {
+	_, st := nuevoServicio(t)
+	for _, caso := range []struct{ emp, sede string }{
+		{"emp_demo_rest", "sede_demo_rest"},
+		{"emp_demo_ferr", "sede_demo_ferr"},
+		{"emp_demo_farm", "sede_demo_farm"},
+	} {
+		maxPorSerie := map[string]int{}
+		for _, d := range st.Documentos.List(caso.emp) {
+			if d.Numero > maxPorSerie[d.Serie] {
+				maxPorSerie[d.Serie] = d.Numero
+			}
+		}
+		if len(maxPorSerie) == 0 {
+			t.Errorf("%s: no hay documentos sembrados; el rubro se vería vacío", caso.emp)
+			continue
+		}
+		for serie, ultimo := range maxPorSerie {
+			actual := st.Numerador.Actual(caso.emp, caso.sede, serie)
+			if actual < ultimo {
+				t.Errorf("%s serie %s: el numerador está en %d pero ya hay un folio %d — la próxima factura colisionaría",
+					caso.emp, serie, actual, ultimo)
+			}
+		}
+	}
+}
+
+// La facturación sembrada debe cubrir la gama: contado, divisas con IGTF, contingencia,
+// crédito (vencido y vigente) y una reversa. Es lo que hace que Tesorería, los libros
+// fiscales y el gráfico del Inicio tengan algo que mostrar.
+func TestDemosNicho_FacturacionCubreLaGama(t *testing.T) {
+	_, st := nuevoServicio(t)
+	for _, emp := range []string{"emp_demo_rest", "emp_demo_ferr", "emp_demo_farm"} {
+		var conIGTF, contingencia, credito, reversas int
+		for _, d := range st.Documentos.List(emp) {
+			if d.IGTF > 0 {
+				conIGTF++
+			}
+			if d.Contingencia {
+				contingencia++
+			}
+			if d.Credito {
+				credito++
+			}
+			if d.RefDocumentoID != "" {
+				reversas++
+			}
+		}
+		if conIGTF == 0 {
+			t.Errorf("%s: falta una venta cobrada en divisas (IGTF)", emp)
+		}
+		if contingencia == 0 {
+			t.Errorf("%s: falta una factura de contingencia", emp)
+		}
+		if credito < 2 {
+			t.Errorf("%s: hacen falta 2 ventas a crédito (una vencida y una vigente), hay %d", emp, credito)
+		}
+		if reversas == 0 {
+			t.Errorf("%s: falta una reversa (anulación o nota de crédito)", emp)
+		}
+	}
+}
+
+// El restaurante arranca EN SERVICIO: mesas ocupadas con comandas en cocina, para que la
+// comandera y la pantalla de Cocina no se vean vacías.
+func TestDemosNicho_RestauranteEnServicio(t *testing.T) {
+	_, st := nuevoServicio(t)
+	abiertas := st.Cuentas.Abiertas("emp_demo_rest", "sede_demo_rest")
+	if len(abiertas) < 2 {
+		t.Fatalf("el restaurante debe abrir con mesas ocupadas, hay %d cuentas", len(abiertas))
+	}
+	enCocina := 0
+	for _, c := range abiertas {
+		for _, it := range c.Items {
+			if it.Estado == "en_cocina" || it.Estado == "listo" {
+				if it.EnviadoEn == "" {
+					t.Errorf("el renglón %s está en cocina sin hora de envío: la pantalla de Cocina no podría calcular la espera", it.SKU)
+				}
+				enCocina++
+			}
+		}
+	}
+	if enCocina == 0 {
+		t.Error("debe haber al menos una comanda en cocina para que el KDS muestre algo")
+	}
+	// Las mesas con cuenta abierta tienen que reflejarlo en su estado.
+	for _, c := range abiertas {
+		m, ok := st.Mesas.ByID("emp_demo_rest", c.MesaID)
+		if !ok {
+			t.Errorf("la cuenta %s apunta a una mesa que no existe", c.ID)
+			continue
+		}
+		if m.Estado == "libre" {
+			t.Errorf("la mesa %s tiene cuenta abierta pero figura como libre", m.Nombre)
+		}
+	}
+}

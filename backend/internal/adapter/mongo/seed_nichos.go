@@ -17,6 +17,15 @@ import (
 //
 // Es idempotente: correrlo dos veces no duplica nada.
 func sembrarNichos(st *Store, semilla *inmem.Store) {
+	// Credenciales de DEMOSTRACIÓN (contraseña única) de todos los tenants demo,
+	// incluida la bodega: el bloque de identidad del Seed principal solo corre en una
+	// base virgen, así que en el servidor no llegarían nunca. Aditivo por email.
+	for _, c := range semilla.Credenciales.Todas() {
+		if _, ya := st.Credenciales.ByEmail(c.Email); !ya {
+			st.Credenciales.Create(c)
+		}
+	}
+
 	for _, n := range inmem.NichosDemo() {
 		snap := semilla.SnapshotNicho(n)
 		if snap.Empresa.ID == "" {
@@ -60,6 +69,61 @@ func sembrarNichos(st *Store, semilla *inmem.Store) {
 			for _, cl := range snap.Clientes {
 				st.Clientes.c.insert(cl)
 			}
+		}
+
+		// --- Operación: caja, personal, cobros, proveedores y facturación ---
+		// Sin caja habilitada no se puede facturar, y sin documentos el rubro se ve
+		// vacío en Facturación, Ventas, Tesorería y Contabilidad.
+		if len(st.Cajas.List(n.EmpresaID)) == 0 {
+			for _, cj := range snap.Cajas {
+				st.Cajas.c.insert(cj)
+			}
+			for _, cr := range snap.Cajeros {
+				st.Cajeros.c.insert(cr)
+			}
+			log.Printf("Mongo: %s → %d cajas y %d cajeros (PIN de demostración)", n.Giro, len(snap.Cajas), len(snap.Cajeros))
+		}
+		// Usuarios por rol: aditivo por id, para no pisar a nadie que ya exista.
+		for _, u := range snap.Usuarios {
+			if _, ya := st.Usuarios.ByID(u.ID); !ya {
+				st.Usuarios.c.insert(u)
+			}
+		}
+		if len(st.CuentasCobro.List(n.EmpresaID)) == 0 {
+			for _, cc := range snap.CuentasCobro {
+				st.CuentasCobro.c.insert(cc)
+			}
+			for _, mp := range snap.MetodosPago {
+				st.MetodosPago.c.insert(mp)
+			}
+		}
+		if len(st.Proveedores.List(n.EmpresaID)) == 0 {
+			for _, pr := range snap.Proveedores {
+				st.Proveedores.c.insert(pr)
+			}
+		}
+		if len(st.Documentos.List(n.EmpresaID)) == 0 {
+			for _, d := range snap.Documentos {
+				st.Documentos.c.insert(d)
+			}
+			// Los contadores del numerador van CON los documentos: si se sembraran
+			// folios sin adelantar el contador, la primera factura real del prospecto
+			// reiniciaría en 1 y colisionaría con un folio ya emitido (y los
+			// documentos son append-only: no hay forma de arreglarlo después).
+			ctx, cancel := opctx()
+			for clave, seq := range snap.Contadores {
+				_, _ = st.Numerador.c.InsertOne(ctx, map[string]any{"id": clave, "seq": seq})
+			}
+			cancel()
+			log.Printf("Mongo: %s → %d documentos fiscales y %d contador(es) de numeración",
+				n.Giro, len(snap.Documentos), len(snap.Contadores))
+		}
+		// Cuentas de mesa abiertas (restaurante en servicio).
+		if len(snap.CuentasMesa) > 0 && len(st.Cuentas.Abiertas(n.EmpresaID, n.SedeID)) == 0 {
+			for _, c := range snap.CuentasMesa {
+				st.Cuentas.c.insert(c)
+			}
+			log.Printf("Mongo: %s → %d cuentas de mesa abiertas", n.Giro, len(snap.CuentasMesa))
 		}
 
 		// Módulos instalados (el restaurante trae el suyo activo).

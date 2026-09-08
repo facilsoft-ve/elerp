@@ -7,19 +7,19 @@ import (
 
 	"github.com/mornix/elerp/internal/application"
 	"github.com/mornix/elerp/internal/domain/cliente"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/mornix/elerp/internal/domain/aplicacion"
 	"github.com/mornix/elerp/internal/domain/caja"
 	"github.com/mornix/elerp/internal/domain/compra"
 	"github.com/mornix/elerp/internal/domain/cotizacion"
+	"github.com/mornix/elerp/internal/domain/credencial"
 	"github.com/mornix/elerp/internal/domain/cupon"
 	"github.com/mornix/elerp/internal/domain/empresa"
 	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/inventario"
 	"github.com/mornix/elerp/internal/domain/listaprecio"
-	"github.com/mornix/elerp/internal/domain/organizacion"
 	"github.com/mornix/elerp/internal/domain/mesa"
+	"github.com/mornix/elerp/internal/domain/organizacion"
 	"github.com/mornix/elerp/internal/domain/plantilla"
 	"github.com/mornix/elerp/internal/domain/promocion"
 	"github.com/mornix/elerp/internal/domain/proveedor"
@@ -902,18 +902,19 @@ func (s *Store) seedDemo() {
 	// Pedro Salas es SUPERVISOR: es quien autoriza quitar una línea del carrito o
 	// salir del modo caja cuando la empresa exige PIN de supervisor (flujo 2.4).
 	// Un cajero raso no puede autorizarse a sí mismo.
+	// TODOS los PIN de demostración son PinDemo ("1234"): un recorrido de demo no debe
+	// frenarse porque alguien no recuerda cuál de tres PINs iba en qué puesto.
 	for _, cj := range []struct {
-		id, sede, codigo, nombre, pin string
-		supervisor                    bool
+		id, sede, codigo, nombre string
+		supervisor               bool
 	}{
-		{"cjr_demo_1", demoSede1ID, "OP-001", "Luis Marcano", "1234", false},
-		{"cjr_demo_2", demoSede2ID, "OP-002", "Ana Gómez", "5678", false},
-		{"cjr_demo_3", demoSede1ID, "OP-003", "Pedro Salas", "4321", true},
+		{"cjr_demo_1", demoSede1ID, "OP-001", "Luis Marcano", false},
+		{"cjr_demo_2", demoSede2ID, "OP-002", "Ana Gómez", false},
+		{"cjr_demo_3", demoSede1ID, "OP-003", "Pedro Salas", true},
 	} {
-		hash, _ := bcrypt.GenerateFromPassword([]byte(cj.pin), bcrypt.MinCost)
 		s.Cajeros.Create(caja.Cajero{
 			ID: cj.id, EmpresaID: demoEmpID, SedeID: cj.sede, Codigo: cj.codigo,
-			Nombre: cj.nombre, PinHash: string(hash), Supervisor: cj.supervisor, Activo: true,
+			Nombre: cj.nombre, PinHash: hashDemo(), Supervisor: cj.supervisor, Activo: true,
 		})
 	}
 
@@ -932,7 +933,17 @@ func (s *Store) seedDemo() {
 			UsuarioID: u.id, Email: u.email, Nombre: u.nombre,
 			EmpresaID: demoEmpID, Rol: u.rol, SedeID: u.sede, Estado: usuario.EstadoActiva,
 		})
+		// Con contraseña, para poder ENTRAR como ese rol y ver la app desde su lado
+		// (la interfaz cambia por completo según el rol).
+		s.Credenciales.Create(credencial.Credencial{
+			Email: u.email, Hash: hashDemo(), UsuarioID: u.id, Nombre: u.nombre,
+		})
 	}
+	// La dueña también entra con contraseña (además del botón de modo demo).
+	s.Credenciales.Create(credencial.Credencial{
+		Email: application.DemoEmail, Hash: hashDemo(),
+		UsuarioID: application.DemoUserID, Nombre: application.DemoNombre,
+	})
 
 	// Listas de precio demo. Un maestro editable (no ledger): fija un precio
 	// explícito por SKU que reemplaza al precio base del catálogo; los productos
@@ -1091,7 +1102,7 @@ func (s *Store) seedDemo() {
 	// columna estructural), para mostrar la función de bloquear espacios.
 	s.Planos.Upsert(mesa.Plano{
 		EmpresaID: demoEmpID, SedeID: demoSede1ID, Filas: 6, Columnas: 8,
-		Bloqueadas: []mesa.Celda{{Columna: 4, Fila: 2}, {Columna: 5, Fila: 2}, {Columna: 6, Fila: 2}, {Columna: 3, Fila: 4}},
+		Bloqueadas:  []mesa.Celda{{Columna: 4, Fila: 2}, {Columna: 5, Fila: 2}, {Columna: 6, Fila: 2}, {Columna: 3, Fila: 4}},
 		Actualizada: fecha,
 	})
 

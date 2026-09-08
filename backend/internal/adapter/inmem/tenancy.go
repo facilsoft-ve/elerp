@@ -349,3 +349,15 @@ func (r *CredencialRepo) Create(c credencial.Credencial) credencial.Credencial {
 	r.items = append(r.items, c)
 	return c
 }
+
+// Todas devuelve todas las credenciales locales. La usa el seed de Mongo para plantar
+// de forma aditiva las credenciales de DEMOSTRACIÓN en una base ya sembrada.
+func (r *CredencialRepo) Todas() []credencial.Credencial {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]credencial.Credencial, 0, len(r.items))
+	for _, c := range r.items {
+		out = append(out, c)
+	}
+	return out
+}

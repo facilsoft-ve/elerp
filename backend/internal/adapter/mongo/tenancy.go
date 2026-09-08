@@ -23,7 +23,9 @@ func (st *Store) attachTenancy(db *gomongo.Database) {
 
 // --- Organizaciones ---
 
-type OrganizacionRepo struct{ c coll[organizacion.Organizacion] }
+type OrganizacionRepo struct {
+	c coll[organizacion.Organizacion]
+}
 
 func (r *OrganizacionRepo) List() []organizacion.Organizacion { return r.c.all(map[string]any{}) }
 func (r *OrganizacionRepo) ByID(id string) (organizacion.Organizacion, bool) {

@@ -29,8 +29,37 @@ func restauranteDemo() especNicho {
 		rif:    "J-40218765-3",
 		giro:   "restaurante", direccion: "Av. Francisco de Miranda, Caracas",
 		colorMarca: "#B3362C",
-		rubros:     []string{"Insumos", "Cocina", "Bebidas", "Postres"},
-		modulos:    []string{aplicacion.ModRestaurante, aplicacion.ModAsistenteIA},
+		slug:       "elfogon", telefonoBanco: "0414-5567",
+		cajero: "Yorman Piña", supervisor: "Rosa Delgado",
+		vendedor: "Daniel Ochoa", contadora: "Lcda. Carmen Silva", mesonero: "Keiber Rojas",
+		proveedores: []provNicho{
+			{nombre: "Distribuidora de Alimentos Del Valle, C.A.", doc: "J-30871234-5", telefono: "0212-6651122"},
+			{nombre: "Carnicería El Novillo, C.A.", doc: "J-31445566-0", telefono: "0212-7734455"},
+			{nombre: "Frutas y Verduras La Cosecha", doc: "J-29887766-3", telefono: "0414-1239876"},
+		},
+		// Un mes de servicio: contado, una noche cobrada en divisas (IGTF), una
+		// contingencia y dos cuentas corporativas a crédito.
+		facturas: []emisionNicho{
+			{diasAtras: 26, cliente: "Consumidor final", sku: "PLA-BOLONESA", cant: 3},
+			{diasAtras: 23, cliente: "Luis Bermúdez", doc: "V-14875690", sku: "PLA-MILANESA", cant: 2},
+			{diasAtras: 19, cliente: "Consumidor final", sku: "PLA-POLLO-ARROZ", cant: 4},
+			{diasAtras: 16, cliente: "Consumidor final", sku: "PLA-ENSALADA", cant: 2, divisas: true},
+			{diasAtras: 12, cliente: "Consumidor final", sku: "BEB-CERVEZA", cant: 12},
+			{diasAtras: 9, cliente: "Consumidor final", sku: "PLA-PASTA-QUESO", cant: 3},
+			{diasAtras: 6, cliente: "Consumidor final", sku: "POS-TORTA", cant: 5},
+			{diasAtras: 3, cliente: "Consumidor final", sku: "PLA-BOLONESA", cant: 2, divisas: true},
+			{diasAtras: 1, cliente: "Consumidor final", sku: "PLA-MILANESA", cant: 1},
+			// Emitida SIN conexión (serie C reservada).
+			{diasAtras: 4, serie: "C", cliente: "Consumidor final", sku: "BEB-REFRESCO", cant: 6, contingencia: true},
+			// Almuerzos corporativos a crédito: una VENCIDA con abono parcial (hace que
+			// «Por cobrar vencido» se vea en rojo) y una vigente sin abono.
+			{diasAtras: 38, cliente: "Corporación Andina de Seguros, C.A.", doc: "J-30125678-4",
+				sku: "PLA-POLLO-ARROZ", cant: 25, plazoDias: 15, abono: 200000},
+			{diasAtras: 5, cliente: "Corporación Andina de Seguros, C.A.", doc: "J-30125678-4",
+				sku: "PLA-MILANESA", cant: 18, plazoDias: 30},
+		},
+		rubros:  []string{"Insumos", "Cocina", "Bebidas", "Postres"},
+		modulos: []string{aplicacion.ModRestaurante, aplicacion.ModAsistenteIA},
 
 		// INSUMOS: lo que de verdad se stockea y se descuenta al vender un plato.
 		// Van por peso/volumen porque una receta consume gramos, no unidades.
@@ -130,8 +159,33 @@ func ferreteriaDemo() especNicho {
 		rif:    "J-31456982-7",
 		giro:   "ferreteria", direccion: "Av. Intercomunal, Valencia",
 		colorMarca: "#92600A",
-		rubros:     []string{"Herramientas", "Plomería", "Electricidad", "Construcción", "Pinturas", "Tornillería"},
-		modulos:    []string{aplicacion.ModAsistenteIA},
+		slug:       "tornillodeoro", telefonoBanco: "0241-8890",
+		cajero: "Wilmer Castillo", supervisor: "Néstor Ramírez",
+		vendedor: "Jhonny Peña", contadora: "Lcda. Yaneth Mora",
+		proveedores: []provNicho{
+			{nombre: "Importadora de Herramientas Andina, C.A.", doc: "J-30556677-8", telefono: "0241-8812233"},
+			{nombre: "Cementos y Agregados del Centro, C.A.", doc: "J-29334455-1", telefono: "0241-8845566"},
+			{nombre: "Electro Suministros Valencia, C.A.", doc: "J-31667788-2", telefono: "0241-8878899"},
+		},
+		facturas: []emisionNicho{
+			{diasAtras: 28, cliente: "Consumidor final", sku: "HER-MAR-16", cant: 3},
+			{diasAtras: 25, cliente: "Pedro Rangel (maestro de obra)", doc: "V-11298765", sku: "CON-CEM-42", cant: 20},
+			{diasAtras: 21, cliente: "Consumidor final", sku: "ELE-CAB-12", cant: 50},
+			{diasAtras: 18, cliente: "Inversiones Mardom, C.A.", doc: "J-31120987-5", sku: "HER-TAL-500", cant: 2, divisas: true},
+			{diasAtras: 14, cliente: "Consumidor final", sku: "PLO-TUB-PVC", cant: 12},
+			{diasAtras: 11, cliente: "Consumidor final", sku: "PIN-CAU-GAL", cant: 4},
+			{diasAtras: 7, cliente: "Pedro Rangel (maestro de obra)", doc: "V-11298765", sku: "TOR-AUT-1", cant: 3.5},
+			{diasAtras: 4, cliente: "Consumidor final", sku: "ELE-BRE-20", cant: 6},
+			{diasAtras: 2, cliente: "Consumidor final", sku: "HER-CIN-5M", cant: 2},
+			{diasAtras: 5, serie: "C", cliente: "Consumidor final", sku: "PLO-COD-PVC", cant: 20, contingencia: true},
+			// Obra a crédito: vencida con abono, y una vigente a 30 días.
+			{diasAtras: 42, cliente: "Constructora Los Andes, C.A.", doc: "J-29876453-1",
+				sku: "CON-CAB-3/8", cant: 80, plazoDias: 15, abono: 500000},
+			{diasAtras: 8, cliente: "Constructora Los Andes, C.A.", doc: "J-29876453-1",
+				sku: "CON-CEM-42", cant: 60, plazoDias: 30},
+		},
+		rubros:  []string{"Herramientas", "Plomería", "Electricidad", "Construcción", "Pinturas", "Tornillería"},
+		modulos: []string{aplicacion.ModAsistenteIA},
 		productos: []prodNicho{
 			{sku: "HER-TAL-500", nombre: "Taladro percutor 1/2\" 650 W", rubro: "Herramientas", unidad: "unidad", costo: 68000, precio: 112000, stock: 14},
 			{sku: "HER-MAR-16", nombre: "Martillo uña 16 oz", rubro: "Herramientas", unidad: "unidad", costo: 9800, precio: 17500, stock: 40},
@@ -175,8 +229,35 @@ func farmaciaDemo() especNicho {
 		rif:    "J-29873456-1",
 		giro:   "farmacia", direccion: "Calle 72 con Av. 15, Maracaibo",
 		colorMarca: "#166B41",
-		rubros:     []string{"Medicamentos", "Cuidado personal", "Bebé", "Vitaminas", "Material médico"},
-		modulos:    []string{aplicacion.ModAsistenteIA},
+		slug:       "santarosa", telefonoBanco: "0261-7745",
+		cajero: "Mariana Vílchez", supervisor: "Alberto Fuenmayor",
+		vendedor: "Gabriel Urdaneta", contadora: "Lcda. Zaida Pirela",
+		proveedores: []provNicho{
+			{nombre: "Droguería Nacional, C.A.", doc: "J-30112233-4", telefono: "0261-7712345"},
+			{nombre: "Laboratorios Vargas, C.A.", doc: "J-00034567-8", telefono: "0212-2029000"},
+			{nombre: "Distribuidora de Cuidado Personal Zulia, C.A.", doc: "J-31556677-9", telefono: "0261-7756789"},
+		},
+		// Mezcla a propósito ventas de EXENTOS (medicinas) y GRAVADOS (cuidado
+		// personal): así los libros fiscales muestran las dos bases separadas.
+		facturas: []emisionNicho{
+			{diasAtras: 27, cliente: "Consumidor final", sku: "MED-ACE-500", cant: 4},
+			{diasAtras: 24, cliente: "Ana Rodríguez", doc: "V-17654321", sku: "CUI-SHA-400", cant: 2},
+			{diasAtras: 20, cliente: "Consumidor final", sku: "MED-AMO-500", cant: 3},
+			{diasAtras: 17, cliente: "Consumidor final", sku: "CUI-PRO-50", cant: 2, divisas: true},
+			{diasAtras: 13, cliente: "Consumidor final", sku: "BEB-PAN-M", cant: 3},
+			{diasAtras: 10, cliente: "Ana Rodríguez", doc: "V-17654321", sku: "VIT-CVI-1000", cant: 2},
+			{diasAtras: 6, cliente: "Consumidor final", sku: "MED-OME-20", cant: 5},
+			{diasAtras: 3, cliente: "Consumidor final", sku: "MAT-JER-5", cant: 20},
+			{diasAtras: 1, cliente: "Consumidor final", sku: "CUI-CRE-DEN", cant: 6},
+			{diasAtras: 4, serie: "C", cliente: "Consumidor final", sku: "MED-LOR-10", cant: 2, contingencia: true},
+			// Convenios institucionales a crédito.
+			{diasAtras: 40, cliente: "Clínica Materno Infantil, C.A.", doc: "J-30567891-2",
+				sku: "MED-INS-FRA", cant: 8, plazoDias: 15, abono: 150000},
+			{diasAtras: 7, cliente: "Seguros Altamira, C.A.", doc: "J-31234567-8",
+				sku: "MAT-TEN-DIG", cant: 3, plazoDias: 30},
+		},
+		rubros:  []string{"Medicamentos", "Cuidado personal", "Bebé", "Vitaminas", "Material médico"},
+		modulos: []string{aplicacion.ModAsistenteIA},
 		productos: []prodNicho{
 			// Exentos: medicamentos y material médico.
 			{sku: "MED-ACE-500", nombre: "Acetaminofén 500 mg (caja x20)", rubro: "Medicamentos", unidad: "unidad", costo: 2800, precio: 5400, stock: 140, exento: true},

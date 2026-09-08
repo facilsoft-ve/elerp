@@ -57,7 +57,7 @@ func TestAbrirCaja_CodigoInexistente(t *testing.T) {
 	svc, _ := nuevoServicio(t)
 	// El error debe ser el MISMO que con PIN incorrecto: no revelar si el código
 	// existe evita enumerar cajeros válidos.
-	_, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-999", "1234")
+	_, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-999", inmem.PinDemo)
 	if !errors.Is(err, application.ErrCajeroInvalido) {
 		t.Fatalf("con código inexistente se esperaba ErrCajeroInvalido, se obtuvo: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestAbrirCaja_CodigoInexistente(t *testing.T) {
 func TestAbrirCaja_CajeroDeOtraSede(t *testing.T) {
 	svc, _ := nuevoServicio(t)
 	// OP-002 (Ana Gómez) es de Sede Este; caja1 es de Sede Principal.
-	_, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-002", "5678")
+	_, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-002", inmem.PinDemo)
 	if !errors.Is(err, application.ErrCajeroOtraSede) {
 		t.Fatalf("se esperaba ErrCajeroOtraSede, se obtuvo: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestAbrirCaja_Deshabilitada(t *testing.T) {
 	c.Estado = caja.EstadoDeshabilitada
 	st.Cajas.Update(c)
 
-	_, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", "1234")
+	_, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo)
 	if !errors.Is(err, application.ErrCajaDeshabilitada) {
 		t.Fatalf("se esperaba ErrCajaDeshabilitada, se obtuvo: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestAbrirCaja_Deshabilitada(t *testing.T) {
 
 func TestAbrirCaja_Exitosa(t *testing.T) {
 	svc, _ := nuevoServicio(t)
-	ses, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", "1234")
+	ses, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo)
 	if err != nil {
 		t.Fatalf("la apertura debía funcionar: %v", err)
 	}
@@ -103,12 +103,12 @@ func TestAbrirCaja_Exitosa(t *testing.T) {
 
 func TestAbrirCaja_TomadaPorOtroCajero(t *testing.T) {
 	svc, _ := nuevoServicio(t)
-	if _, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", "1234"); err != nil {
+	if _, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo); err != nil {
 		t.Fatalf("preparación: %v", err)
 	}
 	// OP-003 (Pedro Salas) también es de Sede Principal, así que pasa la
 	// validación de sede pero debe chocar con el turno ya abierto.
-	_, err := svc.AbrirCaja(empDemo, actorB, origenTst, caja1, "OP-003", "4321")
+	_, err := svc.AbrirCaja(empDemo, actorB, origenTst, caja1, "OP-003", inmem.PinDemo)
 	if !errors.Is(err, application.ErrCajaTomada) {
 		t.Fatalf("se esperaba ErrCajaTomada, se obtuvo: %v", err)
 	}
@@ -116,12 +116,12 @@ func TestAbrirCaja_TomadaPorOtroCajero(t *testing.T) {
 
 func TestAbrirCaja_RetomarTurnoPropioNoDuplica(t *testing.T) {
 	svc, st := nuevoServicio(t)
-	primera, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", "1234")
+	primera, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo)
 	if err != nil {
 		t.Fatalf("preparación: %v", err)
 	}
 	// El mismo cajero vuelve, quizá desde otro dispositivo.
-	segunda, err := svc.AbrirCaja(empDemo, actorB, origenTst, caja1, "OP-001", "1234")
+	segunda, err := svc.AbrirCaja(empDemo, actorB, origenTst, caja1, "OP-001", inmem.PinDemo)
 	if err != nil {
 		t.Fatalf("retomar el turno propio no debe fallar: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestAbrirCaja_RetomarTurnoPropioNoDuplica(t *testing.T) {
 
 func TestCerrarCaja_LiberaLaCaja(t *testing.T) {
 	svc, _ := nuevoServicio(t)
-	if _, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", "1234"); err != nil {
+	if _, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo); err != nil {
 		t.Fatalf("preparación: %v", err)
 	}
 	if _, err := svc.CerrarCaja(empDemo, actorA, origenTst, caja1, false); err != nil {
@@ -151,7 +151,7 @@ func TestCerrarCaja_LiberaLaCaja(t *testing.T) {
 		t.Error("tras cerrar no debe quedar sesión abierta para el actor")
 	}
 	// La caja queda libre para el siguiente turno.
-	if _, err := svc.AbrirCaja(empDemo, actorB, origenTst, caja1, "OP-003", "4321"); err != nil {
+	if _, err := svc.AbrirCaja(empDemo, actorB, origenTst, caja1, "OP-003", inmem.PinDemo); err != nil {
 		t.Errorf("otro cajero debía poder abrir la caja liberada: %v", err)
 	}
 }
@@ -167,7 +167,7 @@ func armarTurnoConArqueo(t *testing.T, svc *application.Service) caja.Sesion {
 	if _, err := svc.CargarTasaManual(empDemo, actorA, origenTst, 100, ""); err != nil {
 		t.Fatalf("tasa: %v", err)
 	}
-	ses, err := svc.AbrirCajaConFondo(empDemo, actorA, origenTst, caja1, "OP-001", "1234", 50)
+	ses, err := svc.AbrirCajaConFondo(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo, 50)
 	if err != nil {
 		t.Fatalf("abrir con fondo: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestArqueoDeSesion_VueltoMixtoSoloBajaLaGavetaLaParteBsEfectivo(t *testing.
 	if _, err := svc.CargarTasaManual(empDemo, actorA, origenTst, 100, ""); err != nil {
 		t.Fatalf("tasa: %v", err)
 	}
-	ses, err := svc.AbrirCajaConFondo(empDemo, actorA, origenTst, caja1, "OP-001", "1234", 50)
+	ses, err := svc.AbrirCajaConFondo(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo, 50)
 	if err != nil {
 		t.Fatalf("abrir con fondo: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestArqueoDeSesion_VueltoEnDivisaRebajaElBucketDeEsaDivisa(t *testing.T) {
 	if _, err := svc.CargarTasaManual(empDemo, actorA, origenTst, 100, ""); err != nil {
 		t.Fatalf("tasa: %v", err)
 	}
-	ses, err := svc.AbrirCajaConFondo(empDemo, actorA, origenTst, caja1, "OP-001", "1234", 0)
+	ses, err := svc.AbrirCajaConFondo(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo, 0)
 	if err != nil {
 		t.Fatalf("abrir: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestCrearCajero_NoExponeElPin(t *testing.T) {
 
 func TestListarCajas_MarcaOcupadaYPropia(t *testing.T) {
 	svc, _ := nuevoServicio(t)
-	if _, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", "1234"); err != nil {
+	if _, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo); err != nil {
 		t.Fatalf("preparación: %v", err)
 	}
 	// Quien abrió ve su caja como propia…
@@ -488,7 +488,7 @@ func TestListarCajas_MarcaOcupadaYPropia(t *testing.T) {
 
 func TestCambiarEstado_NoDeshabilitaConTurnoAbierto(t *testing.T) {
 	svc, _ := nuevoServicio(t)
-	if _, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", "1234"); err != nil {
+	if _, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo); err != nil {
 		t.Fatalf("preparación: %v", err)
 	}
 	// Deshabilitar con turno abierto perdería el arqueo del turno en curso.
@@ -503,20 +503,37 @@ func TestAislamientoDeTenant_NoVeCajasDeOtraEmpresa(t *testing.T) {
 		t.Errorf("una empresa ajena no debe ver ninguna caja, vio %d", len(cajas))
 	}
 	// Y no puede abrir una caja que no es suya ni con el ID correcto.
-	if _, err := svc.AbrirCaja("emp_ajena", actorA, origenTst, caja1, "OP-001", "1234"); !errors.Is(err, application.ErrCajaNoExiste) {
+	if _, err := svc.AbrirCaja("emp_ajena", actorA, origenTst, caja1, "OP-001", inmem.PinDemo); !errors.Is(err, application.ErrCajaNoExiste) {
 		t.Errorf("se esperaba ErrCajaNoExiste desde otro tenant, se obtuvo: %v", err)
 	}
+}
+
+// pinesDistintos monta una empresa aparte con UN cajero raso y UN supervisor con PIN
+// DISTINTOS. AutorizarSupervisor resuelve solo por PIN (no recibe código), así que la
+// regla «un cajero raso no se autoriza a sí mismo» únicamente se puede probar con PINes
+// diferentes. No usa el seed a propósito: sus PIN de demostración son todos iguales por
+// comodidad del recorrido, y un test de seguridad no debe depender de ese dato.
+func pinesDistintos(t *testing.T) (*application.Service, string, string) {
+	t.Helper()
+	svc, _ := nuevoServicio(t)
+	const pinRaso, pinSuper = "1111", "9999"
+	if _, err := svc.CrearCajero("emp_pins", actorA, origenTst, sede1, "Cajero Raso", "", pinRaso, "", false); err != nil {
+		t.Fatalf("crear cajero raso: %v", err)
+	}
+	if _, err := svc.CrearCajero("emp_pins", actorA, origenTst, sede1, "Supervisora", "", pinSuper, "", true); err != nil {
+		t.Fatalf("crear supervisor: %v", err)
+	}
+	return svc, pinRaso, pinSuper
 }
 
 func TestAutorizarSupervisor_SoloConElPinDeUnSupervisor(t *testing.T) {
 	// El PIN de un cajero raso NO autoriza: si autorizara, el propio cajero podría
 	// borrar líneas del carrito y la regla del flujo 2.4 no protegería nada.
-	svc, _ := nuevoServicio(t)
-	if _, err := svc.AutorizarSupervisor(empDemo, actorA, origenTst, "quitar línea", "1234"); !errors.Is(err, application.ErrPinSupervisorInvalido) {
+	svc, pinRaso, pinSuper := pinesDistintos(t)
+	if _, err := svc.AutorizarSupervisor("emp_pins", actorA, origenTst, "quitar línea", pinRaso); !errors.Is(err, application.ErrPinSupervisorInvalido) {
 		t.Errorf("el PIN de un cajero no supervisor no debe autorizar, se obtuvo: %v", err)
 	}
-	// Pedro Salas (C-003 / 4321) está sembrado como supervisor.
-	nombre, err := svc.AutorizarSupervisor(empDemo, actorA, origenTst, "quitar línea", "4321")
+	nombre, err := svc.AutorizarSupervisor("emp_pins", actorA, origenTst, "quitar línea", pinSuper)
 	if err != nil {
 		t.Fatalf("el PIN del supervisor debía autorizar: %v", err)
 	}
@@ -526,12 +543,12 @@ func TestAutorizarSupervisor_SoloConElPinDeUnSupervisor(t *testing.T) {
 }
 
 func TestAutorizarSupervisor_QuedaEnLaAuditoria(t *testing.T) {
-	svc, _ := nuevoServicio(t)
-	if _, err := svc.AutorizarSupervisor(empDemo, actorA, origenTst, "vaciar el carrito", "4321"); err != nil {
+	svc, _, pinSuper := pinesDistintos(t)
+	if _, err := svc.AutorizarSupervisor("emp_pins", actorA, origenTst, "vaciar el carrito", pinSuper); err != nil {
 		t.Fatalf("autorizar: %v", err)
 	}
 	encontrado := false
-	for _, e := range svc.Auditoria(empDemo) {
+	for _, e := range svc.Auditoria("emp_pins") {
 		if e.Accion == "caja.autorizacion" && e.Entidad == "vaciar el carrito" {
 			encontrado = true
 		}
