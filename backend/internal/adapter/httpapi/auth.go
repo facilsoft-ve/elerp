@@ -3,6 +3,9 @@ package httpapi
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"log"
+	"sort"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -34,6 +37,20 @@ func (s *Server) issueSession(c *fiber.Ctx, p authn.Principal, hubmyToken string
 		Name: s.cfg.CookieName, Value: sess.ID, Path: "/", Domain: s.cfg.CookieDomain,
 		HTTPOnly: true, Secure: s.cfg.CookieSecure, SameSite: s.sameSite(), Expires: sess.ExpiresAt,
 	})
+}
+
+// nombresDeQuery lista los NOMBRES de los parámetros de la URL, nunca sus valores: uno
+// de ellos es el JWT de Hubmy y no debe terminar en un log.
+func nombresDeQuery(c *fiber.Ctx) string {
+	nombres := []string{}
+	c.Context().QueryArgs().VisitAll(func(k, _ []byte) {
+		nombres = append(nombres, string(k))
+	})
+	if len(nombres) == 0 {
+		return "(ninguno)"
+	}
+	sort.Strings(nombres)
+	return strings.Join(nombres, ", ")
 }
 
 func randState() string {
@@ -79,6 +96,17 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 		HTTPOnly: true, Secure: s.cfg.CookieSecure, SameSite: s.sameSite(), MaxAge: -1,
 	})
 	if want == "" || got != want {
+		// Se registra la CAUSA, no los valores: sin esto los dos rechazos de abajo dan
+		// el mismo 400 en la consola del navegador y no hay forma de saber cuál fue.
+		//   · falta la cookie ⇒ el flujo no arrancó en /api/auth/login (login iniciado
+		//     por la plataforma), o la cookie no viajó (SameSite en un contexto
+		//     embebido).
+		//   · no coincide ⇒ el nonce es de otra sesión o se reusó un enlace viejo.
+		motivo := "cookie de state ausente (¿el flujo no arrancó en /api/auth/login?)"
+		if want != "" {
+			motivo = "el state no coincide con el emitido"
+		}
+		log.Printf("auth/callback rechazado: %s · params recibidos: %s", motivo, nombresDeQuery(c))
 		return c.Status(fiber.StatusBadRequest).SendString("state inválido")
 	}
 
@@ -89,6 +117,7 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 		token = c.Query("token") // compatibilidad
 	}
 	if token == "" {
+		log.Printf("auth/callback rechazado: sin `session` ni `token` en la URL · params recibidos: %s", nombresDeQuery(c))
 		return c.Status(fiber.StatusBadRequest).SendString("falta la sesión de Hubmy")
 	}
 	user, _, err := s.hubmy.Validate(c.Context(), token)
