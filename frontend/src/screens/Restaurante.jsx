@@ -655,7 +655,8 @@ export function Comandera() {
       <CuentaDetalle cuenta={cuenta} busy={busy} onVolver={() => setCuenta(null)}
         onAgregar={() => setMenuOpen(true)} onCancelar={cancelarItem} onEnviar={enviar} onCerrar={cerrar}
         onCobrar={() => setCobroOpen(true)} onPedirCuenta={() => setDivisionOpen(true)}
-        onVolverAServicio={volverAServicio} puedeCobrar={puedeCobrar} />
+        onVolverAServicio={volverAServicio} puedeCobrar={puedeCobrar}
+        puedeAnularEnviado={ui.rol !== 'mesonero'} />
       {divisionOpen ? <DivisionModal cuenta={cuenta} busy={busy}
         onClose={() => setDivisionOpen(false)} onConfirmar={pedirCuenta} /> : null}
       {menuOpen ? <MenuProductos productos={vendibles(db.PRODUCTOS)} monedaEmpresa={monedaEmpresa}
@@ -701,7 +702,7 @@ export function Comandera() {
   )
 }
 
-function CuentaDetalle({ cuenta, busy, onVolver, onAgregar, onCancelar, onEnviar, onCerrar, onCobrar, onPedirCuenta, onVolverAServicio, puedeCobrar }) {
+function CuentaDetalle({ cuenta, busy, onVolver, onAgregar, onCancelar, onEnviar, onCerrar, onCobrar, onPedirCuenta, onVolverAServicio, puedeCobrar, puedeAnularEnviado }) {
   const items = cuenta.items || []
   const pendientes = items.filter((it) => it.estado === 'pendiente')
   // Cuenta ya pedida (prefacturada): no se agregan renglones y lo que queda es cobrar.
@@ -738,10 +739,21 @@ function CuentaDetalle({ cuenta, busy, onVolver, onAgregar, onCancelar, onEnviar
                     </div>
                     <span className={`text-[10.5px] px-2 py-0.5 rounded-full font-semibold ${ITEM_COLOR[it.estado] || ITEM_COLOR.pendiente}`}>{ITEM_LABEL[it.estado] || it.estado}</span>
                     <span className="text-[12.5px] font-medium tabular-nums w-20 text-right">{fmtCurrency((it.precioUnitario || 0) * (it.cantidad || 0), 'VES')}</span>
-                    {it.estado !== 'cancelado' ? (
-                      <button onClick={() => onCancelar(it)} title="Quitar" aria-label={`Quitar ${it.nombre}`}
-                        className={`${T.icono} text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 shrink-0`}><Icon.Trash size={18} /></button>
-                    ) : null}
+                    {/* Quitar: libre mientras el renglón NO fue a cocina. Ya enviado, el
+                        mesonero no lo anula solo (cuesta comida) — lo autoriza la caja.
+                        Al mesonero no se le muestra un botón que el servidor va a
+                        rechazar: se le explica por qué no está. */}
+                    {it.estado === 'cancelado' ? null
+                      : it.estado === 'pendiente' || puedeAnularEnviado ? (
+                        <button onClick={() => onCancelar(it)} title={it.estado === 'pendiente' ? 'Quitar' : 'Anular (ya está en cocina)'}
+                          aria-label={`Quitar ${it.nombre}`}
+                          className={`${T.icono} text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 shrink-0`}><Icon.Trash size={18} /></button>
+                      ) : (
+                        <span title="Ya está en cocina: pedí a la caja que lo anule"
+                          className={`${T.icono} text-slate-300 dark:text-slate-600 shrink-0 cursor-not-allowed`}>
+                          <Icon.Lock size={16} />
+                        </span>
+                      )}
                   </div>
                 ))}
               </div>

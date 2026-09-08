@@ -10,6 +10,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/cuenta"
 	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/mesa"
+	"github.com/mornix/elerp/internal/domain/usuario"
 )
 
 var (
@@ -18,7 +19,10 @@ var (
 	ErrCuentaCerrada       = errors.New("la cuenta ya está cerrada")
 	ErrItemCuentaNoExiste  = errors.New("ese renglón no existe en la cuenta")
 	ErrSinPendientes       = errors.New("no hay renglones nuevos para enviar a cocina")
-	ErrItemSinCantidad     = errors.New("cada renglón necesita una cantidad mayor que cero")
+	// ErrItemYaEnviado: el renglón ya está en cocina. Un mesonero no lo anula solo —
+	// anularlo cuesta comida, así que lo autoriza la caja o la dueña.
+	ErrItemYaEnviado   = errors.New("el renglón ya fue enviado a cocina: pedí a la caja que lo anule")
+	ErrItemSinCantidad = errors.New("cada renglón necesita una cantidad mayor que cero")
 )
 
 // ConCuentas cablea el repositorio de cuentas de mesa (módulo Restaurante).
@@ -242,7 +246,15 @@ func (s *Service) EnviarACocina(empresaID, cuentaID, actor, origen string) (cuen
 
 // CancelarItem quita un renglón: si aún estaba pendiente se elimina; si ya fue a
 // cocina, se marca cancelado (queda la traza, no aporta al total).
-func (s *Service) CancelarItem(empresaID, cuentaID, itemID, actor, origen string) (cuenta.Cuenta, error) {
+// `rolActor` decide hasta dónde puede llegar quien cancela:
+//
+//   - Renglón PENDIENTE (todavía no fue a cocina): se ELIMINA. Corregir lo que se acaba
+//     de tocar es parte de tomar el pedido y no deja rastro que valga la pena guardar.
+//   - Renglón YA ENVIADO: la cocina lo está preparando (o ya lo hizo), así que anularlo
+//     es una decisión con costo — comida tirada. El MESONERO no puede; la caja o la
+//     dueña sí, y queda como `cancelado` en la cuenta (no se borra) para que el arqueo
+//     pueda explicar el faltante.
+func (s *Service) CancelarItem(empresaID, cuentaID, itemID, actor, rolActor, origen string) (cuenta.Cuenta, error) {
 	c, err := s.cuentaAbierta(empresaID, cuentaID)
 	if err != nil {
 		return cuenta.Cuenta{}, err
@@ -260,6 +272,9 @@ func (s *Service) CancelarItem(empresaID, cuentaID, itemID, actor, origen string
 	if c.Items[idx].Estado == cuenta.ItemPendiente {
 		c.Items = append(c.Items[:idx], c.Items[idx+1:]...)
 	} else {
+		if rolActor == usuario.RolMesonero {
+			return cuenta.Cuenta{}, ErrItemYaEnviado
+		}
 		c.Items[idx].Estado = cuenta.ItemCancelado
 	}
 	out, ok := s.cuentasMesa.Update(c)

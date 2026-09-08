@@ -162,7 +162,7 @@ func TestPrefactura_IgnoraRenglonesCancelados(t *testing.T) {
 	if _, _, err := svc.EnviarACocina(empSalon, c.ID, "usr_meso", origenTst); err != nil {
 		t.Fatalf("enviar a cocina: %v", err)
 	}
-	if _, err := svc.CancelarItem(empSalon, c.ID, c.Items[1].ID, "usr_meso", origenTst); err != nil {
+	if _, err := svc.CancelarItem(empSalon, c.ID, c.Items[1].ID, "usr_caja", usuario.RolCajero, origenTst); err != nil {
 		t.Fatalf("cancelar renglón: %v", err)
 	}
 	_, prefs, err := svc.PrefacturarCuenta(empSalon, c.ID, "usr_meso", origenTst,
@@ -258,5 +258,45 @@ func TestPrefactura_DivididaLiberaLaMesaAlCobrarTodas(t *testing.T) {
 	}
 	if m, ok := st.Mesas.ByID(empSalon, c.MesaID); ok && m.Estado != mesa.EstadoLibre {
 		t.Errorf("la mesa debe quedar libre, quedó %q", m.Estado)
+	}
+}
+
+// Antes de enviar a cocina el mesonero corrige el pedido libremente; después NO. Anular
+// algo que la cocina ya está preparando cuesta comida, así que lo autoriza la caja.
+func TestCancelarItem_SoloAntesDeEnviarParaElMesonero(t *testing.T) {
+	svc, st := servicioSalon(t)
+	c := cuentaConPedido(t, svc, st, "2")
+
+	// PENDIENTE: el mesonero lo elimina, y desaparece de la cuenta (no queda rastro:
+	// corregir lo que se acaba de tocar es parte de tomar el pedido).
+	out, err := svc.CancelarItem(empSalon, c.ID, c.Items[0].ID, "usr_meso", usuario.RolMesonero, origenTst)
+	if err != nil {
+		t.Fatalf("un renglón pendiente debe poder eliminarse: %v", err)
+	}
+	if len(out.Items) != len(c.Items)-1 {
+		t.Errorf("el renglón pendiente debe ELIMINARSE, quedaron %d de %d", len(out.Items), len(c.Items))
+	}
+
+	// Enviado a cocina: el mesonero ya no puede.
+	if _, _, err := svc.EnviarACocina(empSalon, c.ID, "usr_meso", origenTst); err != nil {
+		t.Fatalf("enviar a cocina: %v", err)
+	}
+	enviado, _ := st.Cuentas.ByID(empSalon, c.ID)
+	_, err = svc.CancelarItem(empSalon, c.ID, enviado.Items[0].ID, "usr_meso", usuario.RolMesonero, origenTst)
+	if !errors.Is(err, application.ErrItemYaEnviado) {
+		t.Fatalf("el mesonero no debe anular un renglón ya en cocina, se obtuvo: %v", err)
+	}
+
+	// La CAJA sí, y el renglón queda marcado «cancelado» (no se borra): el arqueo tiene
+	// que poder explicar el faltante.
+	out, err = svc.CancelarItem(empSalon, c.ID, enviado.Items[0].ID, "usr_caja", usuario.RolCajero, origenTst)
+	if err != nil {
+		t.Fatalf("la caja debe poder anularlo: %v", err)
+	}
+	if len(out.Items) != len(enviado.Items) {
+		t.Error("un renglón ya enviado no se borra: se marca cancelado para que quede rastro")
+	}
+	if out.Items[0].Estado != cuenta.ItemCancelado {
+		t.Errorf("el renglón debe quedar «cancelado», quedó %q", out.Items[0].Estado)
 	}
 }

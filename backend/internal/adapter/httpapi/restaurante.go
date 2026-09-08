@@ -139,7 +139,7 @@ func (s *Server) handleEnviarCocina(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleCancelarItem(c *fiber.Ctx) error {
-	out, err := s.svc.CancelarItem(empresaIDOf(c), c.Params("id"), c.Params("itemId"), principalOf(c).UserID, origen(c))
+	out, err := s.svc.CancelarItem(empresaIDOf(c), c.Params("id"), c.Params("itemId"), principalOf(c).UserID, rolOf(c), origen(c))
 	if err != nil {
 		return cuentaErr(c, err)
 	}
