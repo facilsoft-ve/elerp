@@ -131,6 +131,8 @@ export function Cotizaciones({ navigate, etapaInicial }) {
         || (c.numeroCompleto || '').toLowerCase().includes(term)
         || (c.clienteNombre || '').toLowerCase().includes(term)
         || (c.clienteDocumento || '').toLowerCase().includes(term)
+        // Prefactura de restaurante: el cajero no busca «COT-000003», busca «mesa 3».
+        || (c.mesaNombre ? ('mesa ' + c.mesaNombre).toLowerCase().includes(term) : false)
       const okF = filtro === 'todos' || c.estado === filtro
       return okQ && okF
     })
@@ -204,7 +206,7 @@ export function Cotizaciones({ navigate, etapaInicial }) {
             )
           })}
         </div>
-        <Input className="w-64" icon={<Icon.Search size={15} />} placeholder="Buscar por número, cliente o documento…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Input className="w-64" icon={<Icon.Search size={15} />} placeholder="Buscar por número, mesa, cliente o documento…" value={q} onChange={(e) => setQ(e.target.value)} />
         {gestiona ? <Button className="ml-auto" icon={<Icon.Plus size={16} />} onClick={() => setNueva(true)}>Nueva cotización</Button> : null}
       </div>
 
@@ -254,12 +256,19 @@ export function Cotizaciones({ navigate, etapaInicial }) {
           },
           {
             key: 'cliente', header: 'Cliente', sortable: true,
-            sortValue: (c) => c.clienteNombre || 'Consumidor final',
-            csv: (c) => `${c.clienteNombre || 'Consumidor final'}${c.clienteDocumento ? ' · ' + c.clienteDocumento : ''}`,
+            sortValue: (c) => c.mesaNombre ? `Mesa ${c.mesaNombre}` : (c.clienteNombre || 'Consumidor final'),
+            csv: (c) => `${c.mesaNombre ? `Mesa ${c.mesaNombre} · ` : ''}${c.clienteNombre || 'Consumidor final'}${c.clienteDocumento ? ' · ' + c.clienteDocumento : ''}`,
             cell: (c) => (
               <>
-                <div className="text-[13px] truncate max-w-[200px]">{c.clienteNombre || 'Consumidor final'}</div>
+                <div className="text-[13px] truncate max-w-[220px] flex items-center gap-1.5">
+                  {/* La MESA va primero y destacada: una prefactura de restaurante se
+                      busca por mesa, no por número de cotización ni por cliente (que
+                      casi siempre es «Consumidor final» y no distingue nada). */}
+                  {c.mesaNombre ? <Badge size="sm" color="huberp">Mesa {c.mesaNombre}</Badge> : null}
+                  <span className="truncate">{c.clienteNombre || 'Consumidor final'}</span>
+                </div>
                 {c.clienteDocumento ? <div className="text-[11px] text-slate-500 num">{c.clienteDocumento}</div> : null}
+                {c.notas && c.mesaNombre ? <div className="text-[11px] text-slate-500 truncate max-w-[220px]">{c.notas}</div> : null}
               </>
             ),
           },
