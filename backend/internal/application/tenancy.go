@@ -77,9 +77,13 @@ type SedeView = sede.Sede
 
 // EmpresaView es una empresa con el rol del usuario y sus sedes.
 type EmpresaView struct {
-	ID      string      `json:"id"`
-	Nombre  string      `json:"nombre"`
-	RIF     string      `json:"rif"`
+	ID     string `json:"id"`
+	Nombre string `json:"nombre"`
+	RIF    string `json:"rif"`
+	// Giro es el rubro del negocio (bodega|ferreteria|farmacia|restaurante…). El
+	// selector lo usa para rotular la empresa, y el modo demo para ofrecer «ver otro
+	// rubro» sin que el frontend tenga que conocer IDs sembrados.
+	Giro    string      `json:"giro"`
 	Rol     string      `json:"rol"`
 	Sandbox bool        `json:"sandbox"` // empresa de prueba (QA): se rotula en el selector
 	Sedes   []sede.Sede `json:"sedes"`
@@ -116,7 +120,7 @@ func (t *TenancyService) Me(p authn.Principal) MeView {
 		if !ok {
 			continue
 		}
-		ev := EmpresaView{ID: emp.ID, Nombre: emp.Nombre, RIF: emp.RIF, Rol: m.Rol, Sandbox: emp.Sandbox, Sedes: t.sedes.List(emp.ID)}
+		ev := EmpresaView{ID: emp.ID, Nombre: emp.Nombre, RIF: emp.RIF, Giro: emp.Giro, Rol: m.Rol, Sandbox: emp.Sandbox, Sedes: t.sedes.List(emp.ID)}
 		if o, seen := byOrg[org.ID]; seen {
 			o.Empresas = append(o.Empresas, ev)
 		} else {

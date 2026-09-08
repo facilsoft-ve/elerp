@@ -55,16 +55,58 @@ function ErrorScreen({ error, onRetry }) {
 // fina bajo el topbar, presente en toda la app mientras la sesión sea demo. No
 // interrumpe el trabajo (no es un modal), solo declara que es una sesión de
 // prueba con datos de muestra. Contraste AA en claro y oscuro.
+// Rubros con demo precargada. El orden es el del selector; la etiqueta es lo que lee
+// el visitante (el `giro` es el valor que trae el backend en /api/me).
+const RUBROS_DEMO = [
+  { giro: 'bodega', label: 'Bodega' },
+  { giro: 'restaurante', label: 'Restaurante' },
+  { giro: 'ferreteria', label: 'Ferretería' },
+  { giro: 'farmacia', label: 'Farmacia' },
+]
+
 function DemoBanner() {
+  const { empresas, activeEmpresa, setActiveEmpresa } = useAuth()
+
+  // Una entrada por rubro que EXISTA entre las empresas de la sesión. Se resuelve por
+  // `giro`, no por IDs sembrados: el frontend no tiene por qué conocerlos.
+  const rubros = RUBROS_DEMO
+    .map((r) => ({ ...r, empresa: empresas.find((e) => e.giro === r.giro) }))
+    .filter((r) => r.empresa)
+
   return (
-    <div className="shrink-0 flex items-center gap-2 px-4 py-1.5 text-[12.5px] border-b
+    <div className="shrink-0 flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-1.5 text-[12.5px] border-b
       border-teal-200 dark:border-teal-900/60 bg-teal-50 dark:bg-teal-950/40 text-teal-900 dark:text-teal-100">
       <Icon.Sparkles size={14} className="shrink-0 text-teal-600 dark:text-teal-300" />
       <span className="min-w-0">
         <span className="font-semibold">Estás en una demostración</span>
         <span className="text-teal-700 dark:text-teal-300"> · sesión limitada con datos de muestra.</span>
       </span>
-      <a href="https://mornix.tech" target="_blank" rel="noreferrer"
+
+      {/* Selector de RUBRO: cada uno es una empresa demo con su propio catálogo. Cambiar
+          de rubro es cambiar de empresa activa (mismo mecanismo que el selector del
+          topbar), así el prospecto ve el ERP con datos parecidos a los de su negocio. */}
+      {rubros.length > 1 ? (
+        <span className="flex items-center gap-1 flex-wrap">
+          <span className="text-teal-700 dark:text-teal-300">Ver otro rubro:</span>
+          {rubros.map((r) => {
+            const activo = activeEmpresa?.id === r.empresa.id
+            return (
+              <button key={r.giro} type="button"
+                onClick={() => setActiveEmpresa(r.empresa.id)}
+                aria-current={activo ? 'true' : undefined}
+                title={r.empresa.nombre}
+                className={`h-5 px-2 rounded-full text-[11.5px] font-semibold ring-focus transition-colors border ${
+                  activo
+                    ? 'bg-teal-600 text-white border-teal-600 dark:bg-teal-400 dark:text-teal-950 dark:border-teal-400'
+                    : 'border-teal-300 text-teal-800 hover:bg-teal-100 dark:border-teal-800 dark:text-teal-200 dark:hover:bg-teal-900/60'}`}>
+                {r.label}
+              </button>
+            )
+          })}
+        </span>
+      ) : null}
+
+      <a href="https://elerp.tech/#demo" target="_blank" rel="noreferrer"
         className="ml-auto shrink-0 inline-flex items-center gap-1 font-semibold underline underline-offset-2 hover:text-teal-700 dark:hover:text-white ring-focus rounded">
         Solicitar acceso <Icon.ArrowRight size={13} />
       </a>

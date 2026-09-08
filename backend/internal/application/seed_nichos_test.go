@@ -1,6 +1,7 @@
 package application_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mornix/elerp/internal/adapter/inmem"
@@ -194,5 +195,31 @@ func TestDemosNicho_SalonCoherente(t *testing.T) {
 		if m.Capacidad <= 0 {
 			t.Errorf("la mesa %s necesita capacidad de comensales", m.Nombre)
 		}
+	}
+}
+
+// Un plato no se stockea, así que NO puede aparecer en la proyección de existencias:
+// si aparece, sale con cantidad 0 y todo el menú se reporta «agotado» (en el Inicio, en
+// existencias y en los reportes).
+func TestExistencias_ExcluyeCombosYPlatos(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	existencias := svc.Existencias("emp_demo_rest", "sede_demo_rest")
+	if len(existencias) == 0 {
+		t.Fatal("la demo de restaurante debe proyectar existencias de sus insumos")
+	}
+	for _, e := range existencias {
+		if strings.HasPrefix(e.SKU, "PLA-") {
+			t.Errorf("el plato %s aparece en existencias: los platos no se stockean", e.SKU)
+		}
+	}
+	// Y los insumos sí están.
+	var insumos int
+	for _, e := range existencias {
+		if strings.HasPrefix(e.SKU, "INS-") {
+			insumos++
+		}
+	}
+	if insumos == 0 {
+		t.Error("los insumos del restaurante deben aparecer en existencias")
 	}
 }

@@ -69,13 +69,21 @@ const ACCIONES = {
  * falla, los KPIs quedan en cero declarando que no se pudo consultar, en vez de
  * inventar un número. */
 function useTesoreriaKpis() {
+  // Depende del TENANT activo: con la lista de dependencias vacía, al cambiar de
+  // empresa el Inicio seguía mostrando las cifras de Tesorería de la empresa anterior
+  // (el Dashboard no se desmonta al cambiar). Parecía una fuga entre tenants y era
+  // caché del cliente: los datos se piden con los headers X-Empresa-ID/X-Sede-ID.
+  const { activeEmpresaId, activeSedeId } = useAuth()
   const [estado, setEstado] = useState({ cargado: false, porCobrar: null, saldos: null })
   useEffect(() => {
     let vivo = true
+    // Limpiar antes de consultar: mientras carga es mejor «sin datos» que el número
+    // de otra empresa.
+    setEstado({ cargado: false, porCobrar: null, saldos: null })
     Promise.all([api.porCobrar().catch(() => null), api.saldosTesoreria().catch(() => null)])
       .then(([porCobrar, saldos]) => { if (vivo) setEstado({ cargado: true, porCobrar, saldos }) })
     return () => { vivo = false }
-  }, [])
+  }, [activeEmpresaId, activeSedeId])
   return estado
 }
 

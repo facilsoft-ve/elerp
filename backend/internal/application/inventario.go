@@ -428,9 +428,11 @@ func (s *Service) Existencias(empresaID, sedeID string) []ExistenciaView {
 	prods := s.productos.List(empresaID)
 	out := make([]ExistenciaView, 0, len(prods))
 	for _, p := range prods {
-		// Un combo no se stockea: no tiene existencia propia (su stock es el de
-		// sus componentes). Se excluye de la proyección para no listarlo con saldo.
-		if p.EsCombo {
+		// Ni un combo ni un PLATO se stockean: no tienen existencia propia (su stock
+		// es el de sus componentes/insumos). Se excluyen de la proyección para no
+		// listarlos con saldo — si no, todo plato aparece «agotado» en existencias,
+		// en los avisos del Inicio y en los reportes, que es justo lo que pasaba.
+		if p.EsCombo || p.EsPlato {
 			continue
 		}
 		movs := s.movimientos.List(empresaID, inventario.FiltroMovimiento{SedeID: sedeID, ProductoID: p.ID})
