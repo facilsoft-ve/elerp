@@ -448,6 +448,8 @@ export const api = {
   guardarImpresoraComandas: (body) => request('/api/restaurante/impresora', { method: 'PUT', body: JSON.stringify(body) }),
   // Cuentas de mesa (comandera)
   cuentasAbiertas: () => request('/api/restaurante/cuentas'),
+  prefacturarCuenta: (id, body) => request(`/api/restaurante/cuentas/${encodeURIComponent(id)}/prefacturar`, { method: 'POST', body: JSON.stringify(body) }),
+  cancelarPrefactura: (id) => request(`/api/restaurante/cuentas/${encodeURIComponent(id)}/prefacturar/cancelar`, { method: 'POST' }),
   cuenta: (id) => request(`/api/restaurante/cuentas/${encodeURIComponent(id)}`),
   abrirCuenta: (body) => request('/api/restaurante/cuentas', { method: 'POST', body: JSON.stringify(body) }),
   agregarItemsCuenta: (id, items) => request(`/api/restaurante/cuentas/${encodeURIComponent(id)}/items`, { method: 'POST', body: JSON.stringify({ items }) }),
