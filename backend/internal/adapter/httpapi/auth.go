@@ -39,6 +39,24 @@ func (s *Server) issueSession(c *fiber.Ctx, p authn.Principal, hubmyToken string
 	})
 }
 
+// aceptarState decide si el callback puede seguir, y de qué flujo viene.
+//
+//	want = el nonce de NUESTRA cookie ("" si no hay ninguna)
+//	got  = el `state` que devuelve Hubmy
+//
+// Devuelve (iniciadoPorPlataforma, aceptar). Está aparte del handler para poder probar
+// la matriz completa sin montar el servidor: es la regla de seguridad del login y
+// conviene que esté fijada por escrito.
+func aceptarState(want, got string) (bool, bool) {
+	if want == "" {
+		// Sin cookie propia no hay nada que comparar: es el launcher de Hubmy entrando
+		// directo. Se acepta y la prueba de identidad pasa a ser el JWT.
+		return true, true
+	}
+	// Nosotros iniciamos el flujo: se exige que el nonce vuelva idéntico.
+	return false, got == want
+}
+
 // nombresDeQuery lista los NOMBRES de los parámetros de la URL, nunca sus valores: uno
 // de ellos es el JWT de Hubmy y no debe terminar en un log.
 func nombresDeQuery(c *fiber.Ctx) string {
@@ -95,18 +113,25 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 		Name: s.stateCookieName(), Value: "", Path: "/", Domain: s.cfg.CookieDomain,
 		HTTPOnly: true, Secure: s.cfg.CookieSecure, SameSite: s.sameSite(), MaxAge: -1,
 	})
-	if want == "" || got != want {
-		// Se registra la CAUSA, no los valores: sin esto los dos rechazos de abajo dan
-		// el mismo 400 en la consola del navegador y no hay forma de saber cuál fue.
-		//   · falta la cookie ⇒ el flujo no arrancó en /api/auth/login (login iniciado
-		//     por la plataforma), o la cookie no viajó (SameSite en un contexto
-		//     embebido).
-		//   · no coincide ⇒ el nonce es de otra sesión o se reusó un enlace viejo.
-		motivo := "cookie de state ausente (¿el flujo no arrancó en /api/auth/login?)"
-		if want != "" {
-			motivo = "el state no coincide con el emitido"
-		}
-		log.Printf("auth/callback rechazado: %s · params recibidos: %s", motivo, nombresDeQuery(c))
+	// Hay DOS flujos legítimos y se exige distinto en cada uno:
+	//
+	//   · Iniciado por LA APP (el usuario apretó «Entrar con Hubmy»): nosotros emitimos
+	//     el nonce en /api/auth/login, así que la cookie EXISTE y se exige que coincida.
+	//     Protección anti-CSRF completa.
+	//   · Iniciado por LA PLATAFORMA (el launcher de Hubmy abre la app y salta directo
+	//     acá con session+state+user_id): nunca pasó por nuestro /login, así que no hay
+	//     cookie ni nonce propio con el que comparar. Exigir uno rechazaría todo login
+	//     desde el launcher — que es exactamente lo que pasaba (400 en cada intento).
+	//     Acá la prueba de identidad es el JWT, que se valida contra Hubmy más abajo.
+	//
+	// RIESGO ASUMIDO a conciencia: sin nonce queda abierto el login-CSRF — alguien puede
+	// hacer que una víctima abra un enlace con el JWT DEL ATACANTE y quede con sesión en
+	// la cuenta ajena. NO expone los datos de la víctima (la sesión es del atacante),
+	// pero sirve para engaño o para plantar datos. Se acepta para poder entrar desde el
+	// launcher, y cada caso queda registrado para poder auditarlo.
+	iniciadoPorPlataforma, ok := aceptarState(want, got)
+	if !ok {
+		log.Printf("auth/callback rechazado: el state no coincide con el emitido · params recibidos: %s", nombresDeQuery(c))
 		return c.Status(fiber.StatusBadRequest).SendString("state inválido")
 	}
 
@@ -127,6 +152,11 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 	nombre := user.Name
 	if nombre == "" {
 		nombre = user.DisplayName
+	}
+	if iniciadoPorPlataforma {
+		// Queda en el log para poder auditar el riesgo que se asumió: quién entró sin
+		// nonce. El token ya está validado contra Hubmy en este punto.
+		log.Printf("auth/callback: login iniciado por la PLATAFORMA (sin nonce propio) · usuario %s", user.ID)
 	}
 	p := authn.Principal{UserID: user.ID, Nombre: nombre, Email: user.Email}
 	s.tenancy.ClaimInvitations(user.Email, user.ID, nombre)
