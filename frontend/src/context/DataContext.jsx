@@ -19,10 +19,24 @@ export function DataProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const cargadoAlguna = useRef(false)
+  // Empresa a la que pertenece el `db` que está en memoria. Cambiar de empresa NO es un
+  // refresco: TODO el db pasa a ser de otro tenant (catálogo, documentos, módulos
+  // activos…), así que mostrarlo mientras llega el nuevo es mostrar datos de otra
+  // empresa. En ese caso se vacía y se bloquea con la pantalla de carga.
+  const empresaDelDb = useRef(null)
   const [error, setError] = useState(null)
 
   const load = useCallback(async () => {
     if (!activeEmpresaId) { setLoading(false); return }
+    const cambioDeEmpresa = empresaDelDb.current !== null && empresaDelDb.current !== activeEmpresaId
+    if (cambioDeEmpresa) {
+      setDb({})
+      setRefreshing(false)
+      setLoading(true)
+      // Se vuelve a tratar como primera carga: la de esta empresa.
+      cargadoAlguna.current = false
+      empresaDelDb.current = null
+    }
     // Esperar a que AuthContext auto-seleccione la sede: sin X-Sede-ID la
     // consulta de existencias devuelve 400 y rompería toda la carga (carrera
     // entre el montaje de DataProvider y el efecto que fija la sede).
@@ -145,6 +159,8 @@ export function DataProvider({ children }) {
         TASAS: tasas || null,
       })
       cargadoAlguna.current = true
+      // Queda registrado a qué empresa pertenece el db en memoria.
+      empresaDelDb.current = activeEmpresaId
     } catch (e) {
       // Un refresco que falla no borra los datos que ya están en pantalla: se
       // sigue operando con lo último bueno, igual que con la tasa.

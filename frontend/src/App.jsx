@@ -117,6 +117,9 @@ function DemoBanner() {
 // Shell autenticado: sidebar + topbar + ruteo por estado (patrón del prototipo).
 function Shell() {
   const { db, loading, refreshing, error, reload } = useData()
+  // La empresa activa se usa para nombrarla en la pantalla de carga: al cambiar de
+  // rubro en la demo, ver «Cargando Farmacia Santa Rosa…» explica la espera.
+  const { activeEmpresa } = useAuth()
   // El rol EFECTIVO es el de la UI (permite «Ver la app como…» para revisar la
   // experiencia de cada rol). El servidor sigue autorizando con el rol real: esto
   // solo decide qué se muestra.
@@ -153,11 +156,18 @@ function Shell() {
     if (esCajero) setRoute('pos')
   }, [esCajero])
 
-  // Guard de rol: si la ruta no está permitida para el rol activo, al inicio.
+  // Guard de ruta: por ROL y por MÓDULO activo. Lo segundo importa al cambiar de empresa
+  // (o de rubro en la demo): si estabas en Restaurante › Cocina y pasás a una empresa sin
+  // ese módulo, el Sidebar lo oculta pero la pantalla seguía renderizándose vacía. Acá se
+  // vuelve al inicio, que es lo que corresponde.
+  const modulosActivos = (db?.MODULOS || []).join(',')
   useEffect(() => {
     const item = NAV.find((n) => n.id === baseRoute(route))
-    if (item && !item.roles.includes(rol)) setRoute(rol === 'cajero' ? 'pos' : 'dashboard')
-  }, [route, rol])
+    if (!item) return
+    const okRol = item.roles.includes(rol)
+    const okModulo = !item.modulo || modulosActivos.split(',').includes(item.modulo)
+    if (!okRol || !okModulo) setRoute(rol === 'cajero' ? 'pos' : 'dashboard')
+  }, [route, rol, modulosActivos])
 
   // Paleta de comandos global (Ctrl/⌘+K).
   useEffect(() => {
@@ -171,7 +181,7 @@ function Shell() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  if (loading) return <Splash text="Cargando datos de la empresa…" />
+  if (loading) return <Splash text={activeEmpresa?.nombre ? `Cargando ${activeEmpresa.nombre}…` : 'Cargando datos de la empresa…'} />
   if (error) return <ErrorScreen error={error} onRetry={reload} />
 
   // Pantalla completa: sin sidebar ni topbar. El cajero solo sale si la empresa

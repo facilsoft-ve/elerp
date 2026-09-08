@@ -98,15 +98,24 @@ export function AuthProvider({ children }) {
     [orgs, activeEmpresa],
   )
 
-  const setActiveEmpresa = useCallback((id) => setActiveEmpresaId(id), [])
+  // Cambiar de empresa LIMPIA la sede en el mismo cambio: la sede activa pertenece a la
+  // empresa anterior y una consulta con un X-Sede-ID de otra empresa devuelve 400 (rompía
+  // la carga completa al cambiar de rubro en la demo). El efecto de más arriba elige
+  // enseguida la primera sede de la empresa nueva; mientras tanto DataContext mantiene la
+  // pantalla de carga.
+  const setActiveEmpresa = useCallback((id) => {
+    if (!id || id === activeEmpresaId) return
+    setActiveSedeId('')
+    setActiveEmpresaId(id)
+  }, [activeEmpresaId])
   const setActiveSede = useCallback((id) => setActiveSedeId(id), [])
 
   // Cambiar de organización = activar su primera empresa.
   const setActiveOrg = useCallback((orgId) => {
     const org = orgs.find((o) => o.id === orgId)
     const first = org?.empresas?.[0]
-    if (first) setActiveEmpresaId(first.id)
-  }, [orgs])
+    if (first) setActiveEmpresa(first.id)
+  }, [orgs, setActiveEmpresa])
 
   // Onboarding: crea empresa → configura giro/modalidad → primera sede → refresca.
   const onboard = useCallback(async ({ nombre, rif, giro, modalidadFacturacion, monedaPrincipal, preciosEnUsd, fuenteTasa, sede }) => {
