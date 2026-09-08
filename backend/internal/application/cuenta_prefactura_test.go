@@ -300,3 +300,49 @@ func TestCancelarItem_SoloAntesDeEnviarParaElMesonero(t *testing.T) {
 		t.Errorf("el renglón debe quedar «cancelado», quedó %q", out.Items[0].Estado)
 	}
 }
+
+// Antes de enviar a cocina el mesonero corrige libremente; después NO. Anular algo que
+// ya se está preparando cuesta comida, así que esa decisión es de la caja o la dueña —
+// y queda registrada, no se borra.
+func TestCancelarItem_MesoneroSoloAntesDeEnviar(t *testing.T) {
+	svc, st := servicioSalon(t)
+	c := cuentaConPedido(t, svc, st, "2")
+
+	// PENDIENTE: el mesonero lo elimina y desaparece de la cuenta.
+	antes := len(c.Items)
+	out, err := svc.CancelarItem(empSalon, c.ID, c.Items[1].ID, "usr_meso", usuario.RolMesonero, origenTst)
+	if err != nil {
+		t.Fatalf("un renglón pendiente lo debe poder quitar: %v", err)
+	}
+	if len(out.Items) != antes-1 {
+		t.Errorf("el renglón pendiente se elimina de verdad: quedaron %d de %d", len(out.Items), antes)
+	}
+
+	// Ya en cocina: el mesonero NO puede.
+	if _, _, err := svc.EnviarACocina(empSalon, c.ID, "usr_meso", origenTst); err != nil {
+		t.Fatalf("enviar a cocina: %v", err)
+	}
+	enviado := out.Items[0].ID
+	if _, err := svc.CancelarItem(empSalon, c.ID, enviado, "usr_meso", usuario.RolMesonero, origenTst); !errors.Is(err, application.ErrItemYaEnviado) {
+		t.Fatalf("el mesonero no debe anular lo ya enviado, se obtuvo: %v", err)
+	}
+
+	// La caja sí, y el renglón queda CANCELADO (no se borra): el arqueo tiene que poder
+	// explicar el faltante.
+	trasCaja, err := svc.CancelarItem(empSalon, c.ID, enviado, "usr_caja", usuario.RolCajero, origenTst)
+	if err != nil {
+		t.Fatalf("la caja debe poder anularlo: %v", err)
+	}
+	var visto bool
+	for _, it := range trasCaja.Items {
+		if it.ID == enviado {
+			visto = true
+			if it.Estado != cuenta.ItemCancelado {
+				t.Errorf("debe quedar cancelado, quedó %q", it.Estado)
+			}
+		}
+	}
+	if !visto {
+		t.Error("un renglón ya enviado no se borra: queda en la cuenta marcado como cancelado")
+	}
+}
