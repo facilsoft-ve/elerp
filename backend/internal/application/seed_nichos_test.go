@@ -339,3 +339,29 @@ func TestDemosNicho_RestauranteEnServicio(t *testing.T) {
 		}
 	}
 }
+
+// El módulo Restaurante solo corresponde a la demo de restaurante. Una bodega, una
+// ferretería o una farmacia con mapa de mesas no tiene sentido (y confunde al que prueba).
+func TestDemosNicho_RestauranteSoloEnElRestaurante(t *testing.T) {
+	_, st := nuevoServicio(t)
+	for _, emp := range []string{"emp_demo", "emp_demo_ferr", "emp_demo_farm"} {
+		for _, ins := range st.Modulos.List(emp) {
+			if ins.ModuloID == "restaurante" && ins.Activo {
+				t.Errorf("%s tiene el módulo Restaurante activo y no le corresponde", emp)
+			}
+		}
+		if n := len(st.Mesas.List(emp, "")); n > 0 {
+			t.Errorf("%s tiene %d mesas sembradas y no le corresponden", emp, n)
+		}
+	}
+	// Y en el restaurante sí debe estar.
+	activo := false
+	for _, ins := range st.Modulos.List("emp_demo_rest") {
+		if ins.ModuloID == "restaurante" && ins.Activo {
+			activo = true
+		}
+	}
+	if !activo {
+		t.Error("la demo de restaurante debe tener el módulo Restaurante activo")
+	}
+}

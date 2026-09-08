@@ -210,13 +210,10 @@ func (s *Store) seedDemo() {
 		Instalado: true, Activo: true, Actualizada: fecha,
 	})
 
-	// Módulo Restaurante ACTIVO en la demo, para mostrar el mapa de mesas (y, en
-	// fases siguientes, comandas y cocina). La Bodega hace también de restaurante
-	// de muestra: es una demo.
-	s.Modulos.Upsert(aplicacion.Instalacion{
-		EmpresaID: demoEmpID, ModuloID: aplicacion.ModRestaurante,
-		Instalado: true, Activo: true, Actualizada: fecha,
-	})
+	// El módulo Restaurante NO va en la bodega: vive en la demo de restaurante
+	// (emp_demo_rest), que sí tiene salón, mesas, platos con receta y comandas. Antes
+	// se activaba acá como apaño, cuando no existía una demo del rubro — y dejaba a una
+	// bodega con mapa de mesas, que no le corresponde.
 
 	for _, n := range []string{"Víveres", "Bebidas", "Limpieza", "Charcutería", "Electrónica"} {
 		s.Rubros.Create(inventario.Rubro{EmpresaID: demoEmpID, Nombre: n})
@@ -1072,39 +1069,8 @@ func (s *Store) seedDemo() {
 		s.Plantillas.Create(p)
 	}
 
-	// Mesas demo (módulo Restaurante): un plano de ejemplo en la Sede Principal
-	// sobre una grilla de 8×6 — salón principal, terraza y barra — para mostrar el
-	// mapa. Cada mesa ocupa una celda (columna, fila).
-	mesasDemo := []struct {
-		nombre, zona, forma string
-		cap                 int
-		col, fila           int
-	}{
-		{"1", "Salón principal", mesa.FormaCuadrada, 4, 0, 0},
-		{"2", "Salón principal", mesa.FormaCuadrada, 4, 1, 0},
-		{"3", "Salón principal", mesa.FormaRedonda, 2, 2, 0},
-		{"4", "Salón principal", mesa.FormaRectangular, 6, 0, 1},
-		{"5", "Salón principal", mesa.FormaRedonda, 2, 1, 1},
-		{"T1", "Terraza", mesa.FormaRedonda, 4, 6, 0},
-		{"T2", "Terraza", mesa.FormaRedonda, 4, 7, 0},
-		{"B1", "Barra", mesa.FormaCuadrada, 1, 0, 4},
-		{"B2", "Barra", mesa.FormaCuadrada, 1, 1, 4},
-		{"B3", "Barra", mesa.FormaCuadrada, 1, 2, 4},
-	}
-	for _, d := range mesasDemo {
-		s.Mesas.Create(mesa.Mesa{
-			EmpresaID: demoEmpID, SedeID: demoSede1ID, Nombre: d.nombre, Zona: d.zona,
-			Capacidad: d.cap, Forma: d.forma, Columna: d.col, Fila: d.fila,
-			Estado: mesa.EstadoLibre, Activa: true, Creada: fecha,
-		})
-	}
-	// Plano del salón demo: grilla 8×6 con algunas celdas bloqueadas (la cocina y una
-	// columna estructural), para mostrar la función de bloquear espacios.
-	s.Planos.Upsert(mesa.Plano{
-		EmpresaID: demoEmpID, SedeID: demoSede1ID, Filas: 6, Columnas: 8,
-		Bloqueadas:  []mesa.Celda{{Columna: 4, Fila: 2}, {Columna: 5, Fila: 2}, {Columna: 6, Fila: 2}, {Columna: 3, Fila: 4}},
-		Actualizada: fecha,
-	})
+	// (Sin mesas ni plano acá: el módulo Restaurante vive en su propia demo de rubro,
+	// emp_demo_rest. Una bodega con mapa de mesas no tiene sentido.)
 
 }
 

@@ -84,7 +84,7 @@ func (s *Server) handleRenombrarCuenta(c *fiber.Ctx) error {
 	return c.JSON(cuentaView{Cuenta: ct, Base: application.EsCuentaBase(ct.Codigo)})
 }
 
-func (s *Server) handleReactivarCuenta(c *fiber.Ctx) error { return s.fijarCuentaActiva(c, true) }
+func (s *Server) handleReactivarCuenta(c *fiber.Ctx) error  { return s.fijarCuentaActiva(c, true) }
 func (s *Server) handleDesactivarCuenta(c *fiber.Ctx) error { return s.fijarCuentaActiva(c, false) }
 
 func (s *Server) fijarCuentaActiva(c *fiber.Ctx, activa bool) error {

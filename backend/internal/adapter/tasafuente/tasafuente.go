@@ -3,16 +3,16 @@
 // Implementa el puerto tasa.Proveedor bajo las nueve condiciones de seguridad
 // acordadas con el cliente (backlog-ux.md → R9). Las que se cumplen AQUÍ:
 //
-//	1. Solo tráfico saliente: son peticiones GET desde el backend. No abre
-//	   ningún puerto ni endpoint entrante.
-//	3. Nada de lo que llega se ejecuta: el HTML se recorre con un extractor
-//	   estricto de números. No se parsea el DOM, no se evalúa JavaScript y no
-//	   hay navegador headless en producción.
-//	4. TLS verificado siempre: nunca InsecureSkipVerify, TLS 1.2 mínimo. Si el
-//	   certificado falla, la obtención falla y se usa la última tasa buena.
-//	5. Timeout corto y cuerpo acotado: la caja no se bloquea esperando al BCV.
-//	6. La petición no lleva nada nuestro: sin cookies, sin credenciales, sin
-//	   identificadores de tenant. Es una consulta anónima a un sitio público.
+//  1. Solo tráfico saliente: son peticiones GET desde el backend. No abre
+//     ningún puerto ni endpoint entrante.
+//  3. Nada de lo que llega se ejecuta: el HTML se recorre con un extractor
+//     estricto de números. No se parsea el DOM, no se evalúa JavaScript y no
+//     hay navegador headless en producción.
+//  4. TLS verificado siempre: nunca InsecureSkipVerify, TLS 1.2 mínimo. Si el
+//     certificado falla, la obtención falla y se usa la última tasa buena.
+//  5. Timeout corto y cuerpo acotado: la caja no se bloquea esperando al BCV.
+//  6. La petición no lleva nada nuestro: sin cookies, sin credenciales, sin
+//     identificadores de tenant. Es una consulta anónima a un sitio público.
 //
 // La validación del valor (condición 2), la auditoría (8) y la periodicidad
 // diaria (7) viven en la capa de aplicación, que es donde está la regla de

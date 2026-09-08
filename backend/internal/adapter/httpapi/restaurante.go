@@ -221,8 +221,8 @@ func (s *Server) handlePlano(c *fiber.Ctx) error {
 
 func (s *Server) handleGuardarPlano(c *fiber.Ctx) error {
 	var in struct {
-		Filas      int           `json:"filas"`
-		Columnas   int           `json:"columnas"`
+		Filas      int          `json:"filas"`
+		Columnas   int          `json:"columnas"`
 		Bloqueadas []mesa.Celda `json:"bloqueadas"`
 	}
 	if err := c.BodyParser(&in); err != nil {

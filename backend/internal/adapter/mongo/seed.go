@@ -7,8 +7,6 @@ import (
 	gomongo "go.mongodb.org/mongo-driver/mongo"
 
 	"github.com/mornix/elerp/internal/adapter/inmem"
-	"github.com/mornix/elerp/internal/domain/aplicacion"
-	mesadom "github.com/mornix/elerp/internal/domain/mesa"
 )
 
 // versionSeedDemo se sube cuando los DATOS DE DEMOSTRACIÓN cambian de forma
@@ -325,28 +323,8 @@ func Seed(db *gomongo.Database) {
 			st.Plantillas.c.insert(p)
 		}
 	}
-	// Mesas demo (módulo Restaurante) + plano del salón + activación del módulo, con
-	// su propio guard.
-	if demoID != "" && len(st.Mesas.List(demoID, "")) == 0 {
-		var sedeDemo string
-		for _, m := range snap.Mesas {
-			st.Mesas.c.insert(m)
-			sedeDemo = m.SedeID
-		}
-		if len(snap.Mesas) > 0 {
-			st.Modulos.Upsert(aplicacion.Instalacion{
-				EmpresaID: demoID, ModuloID: aplicacion.ModRestaurante,
-				Instalado: true, Activo: true, Actualizada: snap.Mesas[0].Creada,
-			})
-			// Plano demo (grilla 8×6 con celdas bloqueadas), espejo del seed in-memory.
-			st.Planos.Upsert(mesadom.Plano{
-				EmpresaID: demoID, SedeID: sedeDemo, Filas: 6, Columnas: 8,
-				Bloqueadas:  []mesadom.Celda{{Columna: 4, Fila: 2}, {Columna: 5, Fila: 2}, {Columna: 6, Fila: 2}, {Columna: 3, Fila: 4}},
-				Actualizada: snap.Mesas[0].Creada,
-			})
-			log.Printf("Mongo: sembradas %d mesas demo, plano y activado el módulo Restaurante", len(snap.Mesas))
-		}
-	}
+	// (La bodega demo ya no siembra mesas ni activa el módulo Restaurante: eso vive en
+	// la demo del rubro, emp_demo_rest. Ver sembrarNichos.)
 	// Contadores de numeración (colección `contadores`). El Numerador vive en su
 	// propia colección con documentos {id:"empresa|sede|serie", seq:n}, y arranca en
 	// 0. Aquí se inicializa ADELANTADO con el estado del mismo Numerador in-memory

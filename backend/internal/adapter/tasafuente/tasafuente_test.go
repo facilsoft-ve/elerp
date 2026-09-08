@@ -65,7 +65,7 @@ func TestExtraerBCV_RechazaCifraAlterada(t *testing.T) {
 	// Un HTML manipulado por un intermediario: donde iba la cifra hay otra cosa.
 	// El extractor no acepta nada que no sea un decimal con formato venezolano.
 	casos := map[string]string{
-		"script inyectado": `<strong>7<script>alert(1)</script>45,63</strong>`,
+		"script inyectado":     `<strong>7<script>alert(1)</script>45,63</strong>`,
 		"notación exponencial": `<strong>7e10</strong>`,
 		"cifra negativa":       `<strong>-745,63</strong>`,
 		"texto":                `<strong>consultar</strong>`,
