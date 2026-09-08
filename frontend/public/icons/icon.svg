@@ -1,0 +1,12 @@
+<!--
+  App icon / favicon ElERP — isotipo "el" en blanco sobre la teja violeta de marca.
+  Manual de marca: el color de marca es violeta eléctrico #6A2CF0; sobre fondo de
+  marca el logotipo va en blanco monocromo. El isotipo es "el" (minúscula), la
+  versión para app icons, favicons y avatares.
+-->
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" rx="14" fill="#6A2CF0"/>
+  <text x="32" y="46" text-anchor="middle"
+    font-family="Poppins, 'Segoe UI', system-ui, -apple-system, Arial, sans-serif"
+    font-size="40" font-weight="700" letter-spacing="-2" fill="#FFFFFF">el</text>
+</svg>

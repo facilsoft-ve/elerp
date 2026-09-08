@@ -1,0 +1,163 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+ * TOKENS DE DISEÑO ElERP
+ *
+ * ORDEN DE AUTORIDAD (declarado por el cliente en la entrega de julio 2026):
+ *   1. El prototipo interactivo — «si hay duda sobre cómo debe verse o
+ *      comportarse algo, se resuelve aquí». Su pantalla /design-system es la
+ *      referencia normativa de color, tipografía y componentes.
+ *   2. «03 - Especificación de Vistas» — construcción de cada vista.
+ *   3. Los PDF de marca — logotipo, paleta y gráficos complementarios.
+ * Donde discrepan, manda el prototipo (ver Documentos/sistema-visual.md).
+ *
+ * Del prototipo, verificado en el navegador: cuerpo IBM Plex Sans, títulos
+ * Poppins, códigos IBM Plex Mono, fondo #FAFBFC, tinta #1F2430.
+ * ========================================================================== */
+:root {
+  color-scheme: light;
+
+  /* Marca */
+  --hb-azul: #6A2CF0;          /* acción principal, navegación, enlaces */
+  --hb-azul-hover: #5A21DB;    /* hover del primario */
+  --hb-azul-active: #4A1AB4;   /* active */
+  --hb-azul-profundo: #2A2440; /* superficies de marca: login, Super Admin, modo dev */
+
+  /* Verde = DINERO. Exclusivo de las acciones que mueven dinero (Cobrar,
+   * Registrar pago, Liquidar, Vender ahora) y del punto vivo de estado.
+   * NO es el color de "crear algo nuevo": crear es azul. */
+  --hb-verde: #6A2CF0;
+  --hb-verde-hover: #5A21DB;
+  --hb-verde-active: #4A1AB4;
+
+  /* Semánticos del prototipo (/design-system) */
+  --hb-exito: #1E7A4C;         /* emitida, confirmado, en línea */
+  --hb-contingencia: #92600A;  /* sin conexión, advertencias, vencimientos */
+  --hb-destructivo: #B3362C;   /* anular, revertir, eliminar */
+
+  /* Neutros */
+  --hb-carbon: #1F2430;        /* texto principal */
+  --hb-gris: #5C6470;          /* texto secundario */
+  --hb-borde: #E8EAEF;         /* bordes y divisores */
+  --hb-fondo: #FAFBFC;         /* fondo de app */
+
+  /* Tintes de superficie */
+  --hb-azul-suave: #F3EFFE;    /* fondos seleccionados, hover, panel informativo */
+  --hb-azul-suave-2: #E8DEFC;  /* segundo tinte (esquina modular sobre claro) */
+  --hb-verde-suave: #F3EFFE;   /* badges de éxito, chips activos, loseta "crear" */
+
+  /* Forma */
+  --hb-radio: 8px;             /* radio base: inputs, botones */
+  --hb-radio-card: 12px;       /* cards y paneles */
+  --hb-radio-icono: 11px;      /* cuadro de icono de módulo */
+  --hb-radio-loseta: 16px;     /* losetas táctiles (POS) */
+  --hb-sombra: 0 4px 14px rgba(29, 52, 119, .10);
+
+  /* Filo de selección (card seleccionada / ítem activo del menú) */
+  --hb-filo: 4px;
+}
+html.dark { color-scheme: dark; }
+
+body {
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: #1F2430;
+  background: #FAFBFC;
+}
+html.dark body { color: #E8EAEF; background: #12151C; }
+
+/* Numerales tabulares monoespaciados — cifras fiscales, RIF, IDs, códigos, hashes
+ * (IBM Plex Mono). Es el tratamiento de identificador firma del prototipo. */
+.num, .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; letter-spacing: -0.01em; }
+/* Tabular en IBM Plex Sans — para cifras dentro de texto de cuerpo. */
+.tnum { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; }
+
+/* Modo privado — desenfoca cifras/nombres sensibles; hover revela. */
+.private .private-mask { filter: blur(7px); transition: filter .15s ease; }
+.private .private-mask:hover { filter: blur(0); }
+
+/* Scrollbars finos */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(100,116,139,.22); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(100,116,139,.45); border: 2px solid transparent; background-clip: padding-box; }
+html.dark ::-webkit-scrollbar-thumb { background: rgba(148,163,184,.18); border: 2px solid transparent; background-clip: padding-box; }
+
+/* Animaciones */
+@keyframes fadein { from { transform: translateY(4px); } to { transform: none; } }
+.fadein { animation: fadein .18s ease-out both; }
+@keyframes backdropin { from { opacity: 0.5 } to { opacity: 1 } }
+.backdrop-in { animation: backdropin .15s ease-out both; }
+@keyframes modalin { from { transform: translateY(8px) scale(.98); } to { transform: none; } }
+.modal-in { animation: modalin .18s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes drawerin { from { transform: translateX(100%); } to { transform: none; } }
+.drawer-in { animation: drawerin .22s cubic-bezier(.2,.8,.2,1) both; }
+/* Cajón de navegación móvil (sidebar como overlay): entra deslizando por la izquierda. */
+@keyframes drawerinleft { from { transform: translateX(-100%); } to { transform: none; } }
+.drawer-in-left { animation: drawerinleft .22s cubic-bezier(.2,.8,.2,1) both; }
+
+/* Respeto por «prefers-reduced-motion»: sin desplazamientos ni fundidos. */
+@media (prefers-reduced-motion: reduce) {
+  .fadein, .backdrop-in, .modal-in, .drawer-in, .drawer-in-left { animation: none !important; }
+}
+
+/* Skeleton loading */
+@keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+.skeleton { background: linear-gradient(90deg, rgba(148,163,184,.10) 25%, rgba(148,163,184,.22) 37%, rgba(148,163,184,.10) 63%); background-size: 800px 100%; animation: shimmer 1.4s infinite linear; border-radius: 6px; }
+html.dark .skeleton { background: linear-gradient(90deg, rgba(148,163,184,.06) 25%, rgba(148,163,184,.14) 37%, rgba(148,163,184,.06) 63%); background-size: 800px 100%; }
+
+/* Foco: anillo 2px verde con offset 2px (handoff §03 "Estados"). El verde señala
+ * la interacción; es el único uso de acento que no implica acción ni éxito. */
+.ring-focus:focus-visible { outline: 2px solid var(--hb-verde); outline-offset: 2px; }
+
+/* Barra de progreso: degradado azul → verde, "llegar al hub" (handoff §04).
+ * Es el ÚNICO degradado permitido en la interfaz. */
+.hb-progress-fill { background: linear-gradient(90deg, var(--hb-azul) 0%, var(--hb-verde) 100%); }
+
+/* Shimmer del prototipo para skeletons (tono neutro-verdoso). */
+@keyframes hbShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.shimmer { background: linear-gradient(90deg,#EEF0ED 25%,#F7F8F6 37%,#EEF0ED 63%); background-size: 200% 100%; animation: hbShimmer 1.1s infinite linear; }
+html.dark .shimmer { background: linear-gradient(90deg,#232834 25%,#2C323F 37%,#232834 63%); background-size: 200% 100%; }
+@keyframes hbSpin { to { transform: rotate(360deg); } }
+.spin { animation: hbSpin 1s linear infinite; }
+
+.spark path.area { opacity: .12; }
+.tbl-sticky thead th { position: sticky; top: 0; z-index: 1; }
+
+/* Las tablas de datos respiran del borde del contenedor: la primera y la última
+ * celda nunca se pegan al filo (antes la primera columna quedaba pegada a la
+ * izquierda). Aplica a toda <table class="w-full …"> de la app, presente o futura,
+ * sin tocar cada pantalla. Igual o mayor que el px-4 que algunas ya usaban. */
+table.w-full > thead > tr > th:first-child,
+table.w-full > tbody > tr > td:first-child { padding-left: 1rem; }
+table.w-full > thead > tr > th:last-child,
+table.w-full > tbody > tr > td:last-child { padding-right: 1rem; }
+
+kbd {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 1px 6px;
+  border-radius: 5px; background: #FFFFFF; color: #5C6470; border: 1px solid #E8EAEF;
+}
+html.dark kbd { background: rgba(148,163,184,.10); color: #cbd5e1; border-color: rgba(148,163,184,.18); }
+
+.row-hover:hover { background: #FAFBFC; }
+html.dark .row-hover:hover { background: rgba(35,40,52,.6); }
+
+/* Comprobante imprimible (components/ComprobantePDF.jsx). El comprobante se
+ * duplica en un portal fuera de #root (.comprobante-print-root), oculto en
+ * pantalla. Al imprimir se oculta la app entera y se muestra SOLO el comprobante:
+ * es la vía honesta y self-contained de "descargar PDF" (el navegador guarda como
+ * PDF). Un render de PDF del lado del servidor sería el siguiente paso opcional. */
+.comprobante-print-root { display: none; }
+/* El formato (cotización, factura, OC) se compone como una HOJA: columna flex con
+   alto de página, para que el pie (términos y condiciones, notas y línea de marca)
+   quede anclado abajo — todo lo que va bajo el total vive en ese pie. */
+.cmp-doc { display: flex; flex-direction: column; min-height: 260mm; }
+@media print {
+  html, body { background: #FFFFFF !important; }
+  body > #root { display: none !important; }
+  .cmp-screen-only { display: none !important; }
+  .comprobante-print-root { display: block !important; }
+  @page { margin: 14mm; }
+}

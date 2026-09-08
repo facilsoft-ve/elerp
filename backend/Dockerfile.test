@@ -1,0 +1,12 @@
+# Runner de pruebas: Go no está instalado en el toolbox, así que las pruebas
+# corren en un contenedor.
+#
+#   docker build -f backend/Dockerfile.test -t huberp-test ./backend
+#
+# Falla el build si `go vet` o alguna prueba falla.
+FROM golang:1.22-alpine
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go vet ./... && go test ./... -count=1

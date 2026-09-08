@@ -1,0 +1,13 @@
+# Contexto de build del frontend (context = raíz del repo). Mantener liviano:
+# solo se necesitan frontend/ y site/{index.html,assets,docs}.
+**/node_modules
+**/dist
+.git
+backend
+Documentos
+Logos
+*.zip
+.env
+*.log
+site/Dockerfile
+site/nginx.conf

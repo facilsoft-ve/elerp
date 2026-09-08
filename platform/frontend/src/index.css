@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* La consola es una herramienta interna: modo oscuro por defecto (menos fatiga en
+   sesiones largas), navy de marca de fondo. */
+html { color-scheme: dark; }
+body {
+  @apply bg-slate-950 text-slate-100 font-sans antialiased;
+}
+
+/* Foco visible de marca (accesibilidad). */
+.ring-focus:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #141118, 0 0 0 4px #6A2CF0;
+}

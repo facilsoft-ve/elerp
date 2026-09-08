@@ -1,0 +1,151 @@
+# ElERP — stack completo (MongoDB + Go/Fiber + React/Vite + nginx).
+# El frontend (nginx) proxya /api y /auth al backend → un único origen para que
+# las cookies de sesión viajen sin CORS. El backend persiste en MongoDB.
+#
+# Local:    docker compose up --build     → http://localhost:3000
+# Servidor: definí PUBLIC_URL/WEB_PORT/MONGO_USER/MONGO_PASS en .env y levantá.
+services:
+  mongo:
+    image: mongo:7
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${MONGO_USER:-huberp}"
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_PASS:-huberp}"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "-u", "${MONGO_USER:-huberp}", "-p", "${MONGO_PASS:-huberp}", "--authenticationDatabase", "admin", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      PORT: "8080"
+      APP_BASE_URL: "${PUBLIC_URL:-http://localhost:3000}"
+      FRONTEND_URL: "${PUBLIC_URL:-http://localhost:3000}"
+      MONGO_URI: "mongodb://${MONGO_USER:-huberp}:${MONGO_PASS:-huberp}@mongo:27017/?authSource=admin"
+      MONGO_DB: "${MONGO_DB:-elerp}"
+      # Bucket por cliente: <ARCHIVOS_DIR>/<empresaID>/productos/…
+      ARCHIVOS_DIR: "/data/archivos"
+      HUBMY_API_BASE: "${HUBMY_API_BASE:-https://apidev.hubmy.app}"
+      HUBMY_APP_ID: "${HUBMY_APP_ID:-}"
+      HUBMY_API_KEY: "${HUBMY_API_KEY:-}"
+      SESSION_TTL_MIN: "1440"
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      COOKIE_SAMESITE: "${COOKIE_SAMESITE:-}"
+      # Seguro por defecto: sin DEV_LOGIN explícito el modo demo queda apagado.
+      DEV_LOGIN: "${DEV_LOGIN:-false}"
+      # Clave M2M de la superficie interna /internal (consola de plataforma).
+      # Vacía por defecto ⇒ /internal cerrado (503). Se define solo donde corra
+      # el servicio de plataforma.
+      PLATFORM_API_KEY: "${PLATFORM_API_KEY:-}"
+      # Tasa de cambio (R9): obtención automática, una consulta al día.
+      TASA_AUTO: "${TASA_AUTO:-true}"
+      TASA_URL_BCV: "${TASA_URL_BCV:-https://www.bcv.org.ve/}"
+      TASA_URL_RESPALDO: "${TASA_URL_RESPALDO:-https://pydolarve.org/api/v1/dollar?page=bcv&monitor=usd}"
+      # El BCV envía un intermedio que no corresponde a su certificado, así que
+      # su cadena TLS no se puede verificar tal cual. Montá el intermedio
+      # correcto (Sectigo Public Server Authentication CA DV R36) y apuntalo
+      # acá: la verificación sigue siendo estricta, nunca se salta.
+      TASA_CA_EXTRA: "${TASA_CA_EXTRA:-}"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      # Las imágenes de producto deben sobrevivir a recrear el contenedor.
+      - archivos_data:/data/archivos
+    restart: unless-stopped
+    networks:
+      default:
+        aliases: [elerp-backend, huberp-backend]
+
+  frontend:
+    build:
+      # Raíz del repo: build de la app (frontend/). El SITIO público (landing+docs)
+      # se despliega aparte desde el repo doc-elerp.
+      context: .
+      dockerfile: frontend/Dockerfile
+    depends_on:
+      # platform también: nginx resuelve el upstream huberp-platform al iniciar.
+      - backend
+      - platform
+    ports:
+      # Bind a 127.0.0.1: el acceso público es SOLO por elerp.tech vía
+      # Nginx Proxy Manager (red proxy). Publicar en 0.0.0.0 saltaría el TLS.
+      - "127.0.0.1:${WEB_PORT:-3000}:80"
+    restart: unless-stopped
+    # default: para llegar al backend interno. proxy: para que Nginx Proxy
+    # Manager enrute elerp.tech → huberp-frontend:80 y termine el TLS.
+    networks:
+      default: {}
+      proxy:
+        aliases: [elerp-frontend, huberp-frontend]
+
+  # Consola de super usuario (plataforma Mornix). Servicio y base de datos APARTE del
+  # core: se separa a huberp-platform sin cambios. Autentica operadores (contraseña +
+  # MFA) y opera a todos los clientes vía el core /internal/* (con PLATFORM_API_KEY).
+  platform:
+    build:
+      context: ./platform
+    depends_on:
+      - backend
+      - mongo
+    environment:
+      PLATFORM_PORT: "8090"
+      # Se comunica con el core por la red interna (alias huberp-backend).
+      CORE_API_BASE: "http://elerp-backend:8080"
+      # Clave M2M compartida con el core (misma que arriba). NUNCA se expone al navegador.
+      PLATFORM_API_KEY: "${PLATFORM_API_KEY:-}"
+      # Persistencia propia: misma instancia Mongo, BASE DE DATOS aparte.
+      PLATFORM_MONGO_URI: "mongodb://${MONGO_USER:-huberp}:${MONGO_PASS:-huberp}@mongo:27017/?authSource=admin"
+      PLATFORM_MONGO_DB: "${PLATFORM_MONGO_DB:-elerp_platform}"
+      PLATFORM_COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      PLATFORM_COOKIE_SAMESITE: "${COOKIE_SAMESITE:-}"
+      # Se sirve como subruta /consola del dominio principal (reusa DNS + cert). Debe
+      # coincidir con el base del build de Vite (/consola).
+      PLATFORM_BASE_PATH: "${PLATFORM_BASE_PATH:-/consola}"
+      # Primer operador (para poder entrar la primera vez). Enrola su MFA al entrar.
+      PLATFORM_BOOTSTRAP_EMAIL: "${PLATFORM_BOOTSTRAP_EMAIL:-}"
+      PLATFORM_BOOTSTRAP_PASSWORD: "${PLATFORM_BOOTSTRAP_PASSWORD:-}"
+      # Operador demo (solo desarrollo). NUNCA en producción.
+      PLATFORM_DEV_LOGIN: "${PLATFORM_DEV_LOGIN:-false}"
+      # Omite el 2º factor (TOTP). TEMPORAL/INSEGURO: solo si el reloj del servidor no es
+      # confiable (TOTP no valida). Volver a false en producción.
+      PLATFORM_MFA_DISABLED: "${PLATFORM_MFA_DISABLED:-false}"
+      # Billing opt-in: con HUBMY_API_KEY el checkout de suscripciones usa Hubmy
+      # (packages → Stripe). Vacía ⇒ billing local (cobro manual).
+      HUBMY_API_BASE: "${HUBMY_API_BASE:-https://apidev.hubmy.app}"
+      HUBMY_API_KEY: "${HUBMY_API_KEY:-}"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8090/papi/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ports:
+      # Bind a 127.0.0.1: el acceso público es SOLO por su subdominio (p. ej.
+      # admin.elerp.tech) vía Nginx Proxy Manager (red proxy).
+      - "127.0.0.1:${PLATFORM_PORT:-3100}:8090"
+    restart: unless-stopped
+    networks:
+      default: {}
+      proxy:
+        aliases: [elerp-platform, huberp-platform]
+
+networks:
+  default: {}
+  proxy:
+    external: true
+
+volumes:
+  mongo_data:
+  archivos_data:
