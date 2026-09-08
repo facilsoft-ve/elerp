@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Wordmark } from './components/Logo.jsx'
 import { Sidebar } from './components/Sidebar.jsx'
 import { Topbar } from './components/Topbar.jsx'
@@ -128,8 +128,7 @@ function Shell() {
   // El CAJERO no navega la aplicación: su pantalla es la caja (R2). Arranca en
   // Modo caja a pantalla completa y no ve Inicio ni el lanzador de módulos.
   const esCajero = rol === 'cajero'
-  // El MESONERO arranca en la comandera del restaurante (su pantalla de tablet).
-  const rutaInicial = esCajero ? 'pos' : (rol === 'mesonero' ? 'restaurante:comandera' : 'dashboard')
+  const rutaInicial = esCajero ? 'pos' : 'dashboard'
   const [route, setRoute] = useState(rutaInicial)
   const [paletteOpen, setPaletteOpen] = useState(false)
   // Cajón de navegación móvil: en < md el sidebar vive como overlay deslizante que
@@ -156,18 +155,35 @@ function Shell() {
     if (esCajero) setRoute('pos')
   }, [esCajero])
 
+  // El MESONERO arranca en la COMANDERA (su pantalla de tablet). Va en un efecto y no en
+  // el estado inicial porque `ui.rol` llega DESPUÉS del primer render —el UIProvider lo
+  // sincroniza en un efecto—, así que al montar el rol todavía era el de por defecto y el
+  // mesonero se quedaba en Inicio. Se decide con el rol REAL de la membresía, y una sola
+  // vez por empresa: después el mesonero sí puede navegar a Inicio si quiere.
+  const rolReal = activeEmpresa?.rol
+  const aterrizadoEn = useRef(null)
+  useEffect(() => {
+    const empId = activeEmpresa?.id
+    if (!empId || !rolReal || aterrizadoEn.current === empId) return
+    aterrizadoEn.current = empId
+    if (rolReal === 'mesonero') setRoute('restaurante:comandera')
+  }, [activeEmpresa?.id, rolReal])
+
   // Guard de ruta: por ROL y por MÓDULO activo. Lo segundo importa al cambiar de empresa
   // (o de rubro en la demo): si estabas en Restaurante › Cocina y pasás a una empresa sin
   // ese módulo, el Sidebar lo oculta pero la pantalla seguía renderizándose vacía. Acá se
   // vuelve al inicio, que es lo que corresponde.
-  const modulosActivos = (db?.MODULOS || []).join(',')
+  // `undefined` = los módulos todavía no cargaron; `[]` = cargaron y no hay ninguno. La
+  // distinción es necesaria: mientras carga NO se puede decidir, y bloquear igual rebota
+  // al inicio en plena carga — le pasaba al mesonero, que aterriza en Restaurante.
+  const modulosCargados = Array.isArray(db?.MODULOS) ? db.MODULOS.join(',') : null
   useEffect(() => {
     const item = NAV.find((n) => n.id === baseRoute(route))
     if (!item) return
     const okRol = item.roles.includes(rol)
-    const okModulo = !item.modulo || modulosActivos.split(',').includes(item.modulo)
+    const okModulo = !item.modulo || modulosCargados === null || modulosCargados.split(',').includes(item.modulo)
     if (!okRol || !okModulo) setRoute(rol === 'cajero' ? 'pos' : 'dashboard')
-  }, [route, rol, modulosActivos])
+  }, [route, rol, modulosCargados])
 
   // Paleta de comandos global (Ctrl/⌘+K).
   useEffect(() => {
