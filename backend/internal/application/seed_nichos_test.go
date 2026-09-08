@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/mornix/elerp/internal/adapter/inmem"
+	"github.com/mornix/elerp/internal/application"
 	"github.com/mornix/elerp/internal/domain/inventario"
 	"github.com/mornix/elerp/internal/domain/usuario"
 )
@@ -363,5 +364,22 @@ func TestDemosNicho_RestauranteSoloEnElRestaurante(t *testing.T) {
 	}
 	if !activo {
 		t.Error("la demo de restaurante debe tener el módulo Restaurante activo")
+	}
+}
+
+// La consola usa la bandera `demo` para elegir QUÉ empresa clonar como demo de un
+// prospecto. Si marcara a una empresa de cliente, clonarla le copiaría sus maestros a un
+// tercero — así que la bandera tiene que distinguir exactamente las sembradas.
+func TestEsEmpresaDemo_SoloLasSembradas(t *testing.T) {
+	for _, id := range []string{"emp_demo", "emp_demo_rest", "emp_demo_ferr", "emp_demo_farm"} {
+		if !application.EsEmpresaDemo(id) {
+			t.Errorf("%s es una empresa de demostración y no se reconoce como tal", id)
+		}
+	}
+	// Ids como los que genera el onboarding de un cliente real.
+	for _, id := range []string{"emp_f2593e59223b", "emp_80daacd60a1c", "emp_6eb59d1b696f", "", "empresa_demo"} {
+		if application.EsEmpresaDemo(id) {
+			t.Errorf("%q NO es de demostración y se marcó como tal: la consola podría clonar la empresa de un cliente", id)
+		}
 	}
 }

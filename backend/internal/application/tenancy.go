@@ -606,6 +606,11 @@ type PlatformEmpresaView struct {
 	// tenants reales. ExpiraEl es su fecha de caducidad (si aplica).
 	Sandbox  bool   `json:"sandbox"`
 	ExpiraEl string `json:"expiraEl,omitempty"`
+	// Demo marca las empresas de DEMOSTRACIÓN sembradas (una por rubro). La consola las
+	// usa como PLANTILLA para abrirle un sandbox a un prospecto, y filtrar por esta
+	// bandera es lo que evita clonar por error la empresa de un cliente real que
+	// casualmente tenga el mismo giro.
+	Demo bool `json:"demo"`
 }
 
 type PlatformOrgView struct {
@@ -618,11 +623,23 @@ type PlatformOrgView struct {
 	Empresas []PlatformEmpresaView `json:"empresas"`
 }
 
+// prefijoEmpresaDemo es el que usa el seed para las empresas de demostración
+// (emp_demo, emp_demo_rest, emp_demo_ferr, emp_demo_farm). Es un contrato del seed: sus
+// IDs son fijos a propósito.
+const prefijoEmpresaDemo = "emp_demo"
+
+// EsEmpresaDemo indica si una empresa es de DEMOSTRACIÓN sembrada. Se decide en el
+// servidor, no en la consola: la decisión de qué se puede clonar como demo no debe
+// depender de una heurística del navegador.
+func EsEmpresaDemo(empresaID string) bool {
+	return strings.HasPrefix(empresaID, prefijoEmpresaDemo)
+}
+
 func (t *TenancyService) empresaPlataforma(e empresa.Empresa) PlatformEmpresaView {
 	ev := PlatformEmpresaView{
 		ID: e.ID, Nombre: e.Nombre, RIF: e.RIF, Giro: e.Giro, Modalidad: e.Modalidad,
 		Activa: e.Activa, Usuarios: len(t.members.ByEmpresa(e.ID)), Sedes: []PlatformSedeView{},
-		Sandbox: e.Sandbox, ExpiraEl: e.ExpiraEl,
+		Sandbox: e.Sandbox, ExpiraEl: e.ExpiraEl, Demo: EsEmpresaDemo(e.ID),
 	}
 	for _, s := range t.sedes.List(e.ID) {
 		ev.Sedes = append(ev.Sedes, PlatformSedeView{ID: s.ID, Nombre: s.Nombre, Activa: s.Activa})

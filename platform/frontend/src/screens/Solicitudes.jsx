@@ -55,16 +55,19 @@ export function Solicitudes() {
   }
   useEffect(cargar, [])
 
-  // Empresa demo de cada rubro: es la PLANTILLA que se clona para el prospecto. Se
-  // resuelve por `giro`, no por IDs fijos, así el día que cambien los datos sembrados
-  // esto sigue funcionando.
+  // Empresa demo de cada rubro: es la PLANTILLA que se clona para el prospecto.
+  //
+  // El filtro por `emp.demo` es lo importante y NO es cosmético: sin él se tomaba la
+  // primera empresa con ese giro, que puede ser la de un CLIENTE REAL con el mismo
+  // rubro — y clonarla le copiaría sus maestros a un prospecto. El backend decide qué
+  // es una empresa de demostración (PlatformEmpresaView.demo); acá solo se respeta.
   useEffect(() => {
     api.tenants()
       .then((r) => {
         const porGiro = {}
         for (const org of r.tenants || []) {
           for (const emp of org.empresas || []) {
-            if (emp.giro && !emp.sandbox && !porGiro[emp.giro]) porGiro[emp.giro] = emp
+            if (emp.demo && !emp.sandbox && emp.giro && !porGiro[emp.giro]) porGiro[emp.giro] = emp
           }
         }
         setDemosPorGiro(porGiro)
