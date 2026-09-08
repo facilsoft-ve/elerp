@@ -15,6 +15,7 @@ import { ImpresionFiscalModal, impresoraActivaDeSede } from './ImpresionFiscal.j
 import { usePosCanal } from './PantallaCliente.jsx'
 import { resolverTema } from '../lib/tema.js'
 import { useEspera, DejarEnEsperaModal, EsperaModal } from './Espera.jsx'
+import { Comandera } from './Restaurante.jsx'
 import { precioListaEnBs, itemDeLista, monedaDe, porCodigo } from '../lib/precio.js'
 import { explotarCombo } from '../lib/combo.js'
 import { fechaCortaVE } from '../components/tasa.jsx'
@@ -52,6 +53,10 @@ const round3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000
  */
 export function ModoCaja({ onSalir }) {
   const { db, reload, tasaDe } = useData()
+  // Salón (módulo Restaurante): el puesto de cobro puede trabajar por MESAS
+  // (comandera) además del mostrador. Solo si el módulo está activo.
+  const haySalon = (db.MODULOS || []).includes('restaurante')
+  const [vistaSalon, setVistaSalon] = useState(false)
   const { ui, setUi } = useUI()
   const { user } = useAuth()
   const tasa = useTasa()
@@ -557,13 +562,22 @@ export function ModoCaja({ onSalir }) {
             <Icon.Lock size={16} /> Cerrar caja
           </BotonCaja>
         ) : null}
+        {haySalon ? (
+          <BotonCaja onClick={() => setVistaSalon((v) => !v)}
+            title={vistaSalon ? 'Volver al mostrador' : 'Ver las mesas del salón'}>
+            <Icon.Utensils size={16} /> {vistaSalon ? 'Mostrador' : 'Mesas'}
+          </BotonCaja>
+        ) : null}
         <BotonCaja tone="danger" onClick={salir} title="Volver a la vista normal">
           <Icon.Minimize size={16} /> Salir
         </BotonCaja>
       </header>
 
-      {/* Sin turno: lo único que se puede hacer es abrir la caja */}
-      {!cargando && !sesion ? (
+      {/* Vista SALÓN (módulo Restaurante): mesa → cuenta → productos → factura.
+          No exige turno de caja: el cobro de la cuenta emite en forma libre. */}
+      {vistaSalon ? (
+        <div className="flex-1 p-4 sm:p-6 overflow-auto"><Comandera /></div>
+      ) : !cargando && !sesion ? (
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="max-w-sm text-center">
             <div className="h-14 w-14 rounded-full bg-elerp-50 dark:bg-elerp-900/40 text-elerp-500 inline-flex items-center justify-center mb-3">

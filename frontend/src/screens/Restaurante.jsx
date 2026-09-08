@@ -398,7 +398,7 @@ const ITEM_COLOR = {
 const ITEM_LABEL = { pendiente: 'Por enviar', en_cocina: 'En cocina', listo: 'Listo', servido: 'Servido', cancelado: 'Anulado' }
 const totalCuenta = (c) => (c?.items || []).reduce((a, it) => a + (it.estado === 'cancelado' ? 0 : (it.precioUnitario || 0) * (it.cantidad || 0)), 0)
 
-function Comandera() {
+export function Comandera() {
   const { db, reload, tasaDe } = useData()
   const toast = useToast()
   const confirm = useConfirm()
