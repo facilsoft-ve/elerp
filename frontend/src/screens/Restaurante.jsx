@@ -40,6 +40,26 @@ const ESTADO_COLOR = {
 }
 const colorEstado = (e) => ESTADO_COLOR[e] || ESTADO_COLOR.libre
 
+/* ESCALA TÁCTIL de la comandera.
+ *
+ * Esta pantalla se opera de pie, con la tablet en una mano y a veces con el pulgar. Un
+ * objetivo chico se falla, y un mesero que falla dos veces vuelve a la libreta de papel.
+ * WCAG 2.2 pide 44 px como mínimo; acá se usa 48-56 px, que es el cómodo. Vive en una
+ * constante para que se ajuste en un solo lugar y no se desincronice entre modales. */
+const T = {
+  // Botón de solo icono (quitar un renglón, cerrar).
+  icono: 'h-11 w-11 inline-flex items-center justify-center rounded-xl',
+  // Ficha/chip pulsable (asignar parte, elegir zona).
+  chip: 'h-12 min-w-[3rem] px-3 text-[15px] font-semibold rounded-xl',
+  // Tarjeta pulsable (mesa, producto del menú).
+  tarjeta: 'min-h-[5.5rem] p-3.5',
+}
+
+// Total de una cuenta de mesa: suma de sus renglones NO cancelados. Se recuperó del
+// historial (se había perdido en un refactor y dejaba la pantalla en blanco con
+// «totalCuenta is not defined»: la interfaz entera del módulo caía por un helper).
+const totalCuenta = (c) => (c?.items || []).reduce((a, it) => a + (it.estado === 'cancelado' ? 0 : (it.precioUnitario || 0) * (it.cantidad || 0)), 0)
+
 // `soloMesonero: true` marca las pestañas que también alcanza el mesonero. El resto son
 // de administración o de cocina: mostrárselas al mesero no aporta y confunde (el sidebar
 // ya se las oculta; acá se hace lo mismo con las pestañas del encabezado).
