@@ -297,6 +297,10 @@ func (s *Server) handleBootstrap(c *fiber.Ctx) error {
 		// Cuentas abiertas de la sede (tablero de la comandera): estado y total en
 		// vivo de cada mesa. Solo si el módulo está activo.
 		"cuentasAbiertas": cuentasSiRestaurante(s, empID, sedeIDOf(c)),
+		// Asignación de mesas por mesonero y config del módulo: la comandera las usa para
+		// destacar las mesas propias y para saber si tomar una ajena está permitido.
+		"asignacionesMesas": asignacionesSiRestaurante(s, empID, sedeIDOf(c)),
+		"configSalon":       configSalonSiRestaurante(s, empID, sedeIDOf(c)),
 	})
 }
 
@@ -325,6 +329,23 @@ func planoSiRestaurante(s *Server, empID, sedeID string) any {
 		return nil
 	}
 	return s.svc.PlanoSalon(empID, sedeID)
+}
+
+// asignacionesSiRestaurante devuelve la asignación de mesas por mesonero solo si el
+// módulo Restaurante está activo; si no, nil.
+func asignacionesSiRestaurante(s *Server, empID, sedeID string) any {
+	if !s.svc.ModuloActivo(empID, aplicacion.ModRestaurante) {
+		return nil
+	}
+	return s.svc.Asignaciones(empID, sedeID)
+}
+
+// configSalonSiRestaurante devuelve la config del módulo en la sede solo si está activo.
+func configSalonSiRestaurante(s *Server, empID, sedeID string) any {
+	if !s.svc.ModuloActivo(empID, aplicacion.ModRestaurante) {
+		return nil
+	}
+	return s.svc.ConfigSalon(empID, sedeID)
 }
 
 // impresoraSiRestaurante devuelve la config de impresora de comandas de la sede

@@ -138,6 +138,11 @@ type Service struct {
 	// planos es la configuración de la GRILLA del salón por sede (filas/columnas y
 	// celdas bloqueadas). Se cablea con ConMesas (junto al repo de mesas); ver mesa.go.
 	planos mesa.PlanoRepository
+	// asignaciones vincula cada mesonero con las mesas/zonas que atiende, y configSalon
+	// guarda si esa asignación es un candado o solo una guía. Se cablean con
+	// ConAsignacionMesas; ver mesa_asignacion.go.
+	asignaciones mesa.AsignacionRepository
+	configSalon  mesa.ConfigSalonRepository
 	// impresoras es la configuración de la impresora de comandas por sede (módulo
 	// Restaurante). Se cablea con ConImpresoras; ver cocina.go.
 	impresoras cocina.Repository

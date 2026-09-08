@@ -49,7 +49,11 @@ export function Sidebar({ route, setRoute, drawerOpen = false, onCloseDrawer }) 
   // Módulos activos de la empresa (Aplicaciones): un sub con `modulo` solo se muestra
   // si su módulo está activo (p. ej. la sub "Marketing" de Configuración).
   const modulos = db?.MODULOS || []
-  const subVisible = (s) => !s.modulo || modulos.includes(s.modulo)
+  // Un sub se ve si su módulo está activo Y —si declara `roles`— el rol lo incluye. Lo
+  // segundo existe para el MESONERO: alcanza el módulo Restaurante pero solo le
+  // corresponde la Comandera; el mapa, la cocina, las recetas y la impresora son de
+  // administración o de cocina.
+  const subVisible = (s) => (!s.modulo || modulos.includes(s.modulo)) && (!s.roles || s.roles.includes(ui.rol))
   const base = baseRoute(route)
   const sub = subOf(route)
   const colapsadoDesktop = !!ui.menuColapsado

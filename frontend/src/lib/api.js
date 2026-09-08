@@ -440,6 +440,10 @@ export const api = {
   guardarMapaMesas: (posiciones) => request('/api/restaurante/mapa', { method: 'POST', body: JSON.stringify({ posiciones }) }),
   planoSalon: () => request('/api/restaurante/plano'),
   guardarPlanoSalon: (body) => request('/api/restaurante/plano', { method: 'PUT', body: JSON.stringify(body) }),
+  asignacionesMesas: () => request('/api/restaurante/asignaciones'),
+  guardarAsignacionMesas: (body) => request('/api/restaurante/asignaciones', { method: 'PUT', body: JSON.stringify(body) }),
+  configSalon: () => request('/api/restaurante/config'),
+  guardarConfigSalon: (body) => request('/api/restaurante/config', { method: 'PUT', body: JSON.stringify(body) }),
   impresoraComandas: () => request('/api/restaurante/impresora'),
   guardarImpresoraComandas: (body) => request('/api/restaurante/impresora', { method: 'PUT', body: JSON.stringify(body) }),
   // Cuentas de mesa (comandera)

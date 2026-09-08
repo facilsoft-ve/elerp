@@ -80,6 +80,8 @@ type Store struct {
 	Plantillas       *PlantillaRepo
 	Mesas            *MesaRepo
 	Planos           *PlanoRepo
+	Asignaciones     *AsignacionRepo
+	ConfigSalon      *ConfigSalonRepo
 	Impresoras       *ImpresoraRepo
 	Cuentas          *CuentaRepo
 }
@@ -121,6 +123,8 @@ func New() *Store {
 		Plantillas:   NewPlantillaRepo(),
 		Mesas:        NewMesaRepo(),
 		Planos:       NewPlanoRepo(),
+		Asignaciones: NewAsignacionRepo(),
+		ConfigSalon:  NewConfigSalonRepo(),
 		Impresoras:   NewImpresoraRepo(),
 		Cuentas:      NewCuentaRepo(),
 	}

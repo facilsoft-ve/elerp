@@ -60,14 +60,35 @@ func (s *Service) syncMesaEstado(empresaID, mesaID, estado string) {
 	s.mesas.Update(m)
 }
 
+// AperturaCuenta son los datos para abrir la cuenta de una mesa. Es un struct y no una
+// lista de parámetros porque ya son ocho y el rol del actor se sumó después (lo necesita
+// la regla de asignación de mesas).
+type AperturaCuenta struct {
+	EmpresaID string
+	SedeID    string
+	MesaID    string
+	// MesoneroID/MesoneroNombre es quien queda como responsable de la cuenta.
+	MesoneroID     string
+	MesoneroNombre string
+	// RolActor decide si aplica la asignación de mesas: solo limita al rol mesonero.
+	RolActor   string
+	Actor      string
+	Origen     string
+	Comensales int
+}
+
 // AbrirCuenta abre (o devuelve la ya abierta) la cuenta de una mesa. Marca la mesa
 // como ocupada.
-func (s *Service) AbrirCuenta(empresaID, sedeID, mesaID, mesoneroID, mesoneroNombre, actor, origen string, comensales int) (cuenta.Cuenta, error) {
+//
+// Si la mesa está asignada a OTRO mesonero: con la configuración flexible (por defecto)
+// se permite y queda en la bitácora; con la estricta se rechaza con
+// ErrMesaDeOtroMesonero.
+func (s *Service) AbrirCuenta(in AperturaCuenta) (cuenta.Cuenta, error) {
+	empresaID, sedeID, mesaID := in.EmpresaID, in.SedeID, in.MesaID
+	mesoneroID, mesoneroNombre := in.MesoneroID, in.MesoneroNombre
+	actor, origen, comensales := in.Actor, in.Origen, in.Comensales
 	if s.cuentasMesa == nil {
 		return cuenta.Cuenta{}, ErrCuentasNoDisponible
-	}
-	if ex, ok := s.cuentasMesa.AbiertaDeMesa(empresaID, mesaID); ok {
-		return ex, nil
 	}
 	nombre := mesaID
 	if s.mesas != nil {
@@ -79,6 +100,20 @@ func (s *Service) AbrirCuenta(empresaID, sedeID, mesaID, mesoneroID, mesoneroNom
 		if sedeID == "" {
 			sedeID = m.SedeID
 		}
+		// La asignación se comprueba ANTES de devolver una cuenta ya abierta: si no,
+		// en modo estricto se le entregaría al mesonero la cuenta de otro con solo
+		// tocar la mesa, que es exactamente lo que el candado debe impedir.
+		ajena, duenos, err := s.verificarMesaDelMesonero(empresaID, sedeID, mesoneroID, in.RolActor, m)
+		if err != nil {
+			return cuenta.Cuenta{}, err
+		}
+		if ajena {
+			s.audit.Append(evento(empresaID, actor, origen, "restaurante.mesa.ajena", mesaID,
+				"mesa "+nombre+" asignada a "+nombresDe(duenos)))
+		}
+	}
+	if ex, ok := s.cuentasMesa.AbiertaDeMesa(empresaID, mesaID); ok {
+		return ex, nil
 	}
 	if comensales < 0 {
 		comensales = 0
@@ -106,10 +141,26 @@ type ItemInput struct {
 }
 
 // AgregarItems agrega renglones (estado "pendiente") a una cuenta abierta.
-func (s *Service) AgregarItems(empresaID, cuentaID, actor, origen string, items []ItemInput) (cuenta.Cuenta, error) {
+//
+// `rolActor` aplica la misma regla de asignación que AbrirCuenta: sumarle renglones a la
+// mesa de otro mesonero es tomarla igual que abrirla, así que no tendría sentido cuidar
+// una puerta y dejar la otra abierta.
+func (s *Service) AgregarItems(empresaID, cuentaID, actor, rolActor, origen string, items []ItemInput) (cuenta.Cuenta, error) {
 	c, err := s.cuentaAbierta(empresaID, cuentaID)
 	if err != nil {
 		return cuenta.Cuenta{}, err
+	}
+	if s.mesas != nil {
+		if m, ok := s.mesas.ByID(empresaID, c.MesaID); ok {
+			ajena, duenos, err := s.verificarMesaDelMesonero(empresaID, c.SedeID, actor, rolActor, m)
+			if err != nil {
+				return cuenta.Cuenta{}, err
+			}
+			if ajena {
+				s.audit.Append(evento(empresaID, actor, origen, "restaurante.mesa.ajena", c.MesaID,
+					"mesa "+m.Nombre+" asignada a "+nombresDe(duenos)))
+			}
+		}
 	}
 	now := ahora()
 	base := time.Now().UnixNano()

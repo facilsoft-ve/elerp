@@ -93,14 +93,19 @@ type especNicho struct {
 	// telefonoBanco es el número que decora las cuentas de cobro sembradas.
 	telefonoBanco string
 	// Nombres del personal demo. El cajero firma las facturas sembradas.
-	cajero, supervisor, vendedor, contadora, mesonero string
-	proveedores                                       []provNicho
-	facturas                                          []emisionNicho
-	rubros                                            []string
-	productos                                         []prodNicho
-	platos                                            []platoNicho
-	clientes                                          []cliNicho
-	modulos                                           []string
+	cajero, supervisor, vendedor, contadora string
+	// mesoneros son los del salón (dos en el restaurante, para que la asignación de
+	// mesas se pueda ver funcionando); zonasMesoneros asigna una zona a cada uno, en
+	// el mismo orden.
+	mesoneros      []string
+	zonasMesoneros []string
+	proveedores    []provNicho
+	facturas       []emisionNicho
+	rubros         []string
+	productos      []prodNicho
+	platos         []platoNicho
+	clientes       []cliNicho
+	modulos        []string
 	// Salón (solo restaurante): grilla + mesas.
 	filas, columnas int
 	bloqueadas      []mesa.Celda
@@ -111,6 +116,14 @@ type mesaNicho struct {
 	nombre, zona, forma string
 	capacidad           int
 	columna, fila       int
+}
+
+// mesoneroPrincipal es quien firma las cuentas y las facturas sembradas del salón.
+func (e especNicho) mesoneroPrincipal() string {
+	if len(e.mesoneros) > 0 {
+		return e.mesoneros[0]
+	}
+	return ""
 }
 
 // costoDe devuelve el costo sembrado de un SKU. Se usa como costo del movimiento de

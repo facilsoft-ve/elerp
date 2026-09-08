@@ -55,6 +55,8 @@ type Store struct {
 	Plantillas       *PlantillaRepo
 	Mesas            *MesaRepo
 	Planos           *PlanoRepo
+	Asignaciones     *AsignacionRepo
+	ConfigSalon      *ConfigSalonRepo
 	Impresoras       *ImpresoraRepo
 	Cuentas          *CuentaRepo
 }
@@ -87,6 +89,7 @@ func New(db *gomongo.Database) *Store {
 	st.attachPlantillas(db)   // definido en plantilla.go
 	st.attachMesas(db)        // definido en mesa.go
 	st.attachPlanos(db)       // definido en mesa.go
+	st.attachAsignaciones(db) // definido en mesa.go
 	st.attachImpresoras(db)   // definido en cocina.go
 	st.attachCuentas(db)      // definido en cuenta.go
 	return st

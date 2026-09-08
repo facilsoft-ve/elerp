@@ -135,6 +135,10 @@ export function DataProvider({ children }) {
         MESAS: boot.mesas || [],
         PLANO_SALON: boot.planoSalon || null,
         IMPRESORA_COMANDAS: boot.impresoraComandas || null,
+        // Asignación de mesas por mesonero y config del módulo: la comandera destaca las
+        // mesas propias y avisa antes de tomar una ajena.
+        ASIGNACIONES_MESAS: boot.asignacionesMesas || [],
+        CONFIG_SALON: boot.configSalon || null,
         CUENTAS_ABIERTAS: boot.cuentasAbiertas || [],
         COTIZACIONES: cotizaciones || [],
         LISTAS_PRECIO: listasPrecio || [],

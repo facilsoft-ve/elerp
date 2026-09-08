@@ -64,3 +64,53 @@ func (r *PlanoRepo) Upsert(p mesa.Plano) mesa.Plano {
 		p, options.Replace().SetUpsert(true))
 	return p
 }
+
+func (st *Store) attachAsignaciones(db *gomongo.Database) {
+	st.Asignaciones = &AsignacionRepo{coll[mesa.Asignacion]{db.Collection("asignaciones_mesas")}}
+	st.ConfigSalon = &ConfigSalonRepo{coll[mesa.ConfigSalon]{db.Collection("config_salon")}}
+}
+
+// AsignacionRepo persiste la asignación de mesas/zonas a cada mesonero. Una por
+// (empresa, sede, usuario): Upsert por ese trío. Filtro empresaid obligatorio.
+type AsignacionRepo struct {
+	c coll[mesa.Asignacion]
+}
+
+func (r *AsignacionRepo) List(empresaID, sedeID string) []mesa.Asignacion {
+	f := map[string]any{"empresaid": empresaID}
+	if sedeID != "" {
+		f["sedeid"] = sedeID
+	}
+	return r.c.all(f)
+}
+
+func (r *AsignacionRepo) Upsert(a mesa.Asignacion) mesa.Asignacion {
+	ctx, cancel := opctx()
+	defer cancel()
+	_, _ = r.c.c.ReplaceOne(ctx,
+		map[string]any{"empresaid": a.EmpresaID, "sedeid": a.SedeID, "usuarioid": a.UsuarioID},
+		a, options.Replace().SetUpsert(true))
+	return a
+}
+
+func (r *AsignacionRepo) Delete(empresaID, sedeID, usuarioID string) bool {
+	return r.c.del(map[string]any{"empresaid": empresaID, "sedeid": sedeID, "usuarioid": usuarioID})
+}
+
+// ConfigSalonRepo persiste la configuración del módulo por (empresa, sede).
+type ConfigSalonRepo struct {
+	c coll[mesa.ConfigSalon]
+}
+
+func (r *ConfigSalonRepo) Get(empresaID, sedeID string) (mesa.ConfigSalon, bool) {
+	return r.c.one(map[string]any{"empresaid": empresaID, "sedeid": sedeID})
+}
+
+func (r *ConfigSalonRepo) Upsert(c mesa.ConfigSalon) mesa.ConfigSalon {
+	ctx, cancel := opctx()
+	defer cancel()
+	_, _ = r.c.c.ReplaceOne(ctx,
+		map[string]any{"empresaid": c.EmpresaID, "sedeid": c.SedeID},
+		c, options.Replace().SetUpsert(true))
+	return c
+}

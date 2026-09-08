@@ -98,17 +98,30 @@ func (s *Store) seedOperacionNicho(e especNicho) {
 			Email: email, Hash: hashDemo(), UsuarioID: id, Nombre: u.nombre,
 		})
 	}
-	// El mesonero solo tiene sentido con el módulo Restaurante activo.
+	// Los mesoneros solo tienen sentido con el módulo Restaurante activo. Se siembran DOS
+	// para que la asignación de mesas se pueda ver funcionando: uno por zona.
 	if len(e.mesas) > 0 {
-		id, email := "usr_"+slug+"_mesonero", "mesonero@"+slug+".test"
-		s.Usuarios.Create(usuario.Usuario{ID: id, Nombre: e.mesonero, Email: email})
-		s.Membresias.Create(usuario.Membresia{
-			UsuarioID: id, Email: email, Nombre: e.mesonero,
-			EmpresaID: e.empID, Rol: usuario.RolMesonero, SedeID: e.sedeID, Estado: usuario.EstadoActiva,
-		})
-		s.Credenciales.Create(credencial.Credencial{
-			Email: email, Hash: hashDemo(), UsuarioID: id, Nombre: e.mesonero,
-		})
+		for i, nombre := range e.mesoneros {
+			sufijo := fmt.Sprintf("mesonero%d", i+1)
+			id, email := "usr_"+slug+"_"+sufijo, sufijo+"@"+slug+".test"
+			s.Usuarios.Create(usuario.Usuario{ID: id, Nombre: nombre, Email: email})
+			s.Membresias.Create(usuario.Membresia{
+				UsuarioID: id, Email: email, Nombre: nombre,
+				EmpresaID: e.empID, Rol: usuario.RolMesonero, SedeID: e.sedeID, Estado: usuario.EstadoActiva,
+			})
+			s.Credenciales.Create(credencial.Credencial{
+				Email: email, Hash: hashDemo(), UsuarioID: id, Nombre: nombre,
+			})
+			// El primero atiende el Salón, el segundo la Terraza: así el mapa muestra
+			// mesas propias y ajenas de un vistazo. La config queda FLEXIBLE (la de por
+			// defecto): se puede tomar la mesa de otro y queda registrado.
+			if i < len(e.zonasMesoneros) {
+				s.Asignaciones.Upsert(mesa.Asignacion{
+					EmpresaID: e.empID, SedeID: e.sedeID, UsuarioID: id, Nombre: nombre,
+					Zonas: []string{e.zonasMesoneros[i]}, Mesas: []string{}, Actualizada: fecha,
+				})
+			}
+		}
 	}
 
 	// --- Cuentas de cobro y métodos de pago ---
@@ -331,7 +344,7 @@ func (s *Store) seedCuentasAbiertas(e especNicho) {
 		c := cuenta.Cuenta{
 			EmpresaID: e.empID, SedeID: e.sedeID, MesaID: m.ID, MesaNombre: m.Nombre,
 			Estado: cuenta.EstadoAbierta, Abierta: abierta.Format(time.RFC3339Nano),
-			MesoneroNombre: e.mesonero, Comensales: m.Capacidad, UltimaRonda: 1,
+			MesoneroNombre: e.mesoneroPrincipal(), Comensales: m.Capacidad, UltimaRonda: 1,
 		}
 		for i, it := range items {
 			pid, nombre, precio := precioDe(it.sku)

@@ -28,12 +28,16 @@ export const NAV = [
   // (`modulo` gatea el módulo del menú, igual que `modulo` gatea un sub).
   {
     id: 'restaurante', label: 'Restaurante', grupo: 'OPERACIÓN', glyph: Icon.Utensils, roles: [...TODOS, 'mesonero'], ready: true, modulo: 'restaurante',
+    // El MESONERO alcanza el módulo pero solo la Comandera: el mapa, la cocina, las
+    // recetas y la impresora son de administración o de cocina. Los subs sin `roles`
+    // los ve cualquier rol que alcance el módulo.
     subs: [
       { id: 'comandera', label: 'Comandera', grupo: 'Salón' },
-      { id: 'mesas', label: 'Mapa de mesas', grupo: 'Salón' },
-      { id: 'cocina', label: 'Cocina', grupo: 'Cocina' },
-      { id: 'platos', label: 'Platos y recetas', grupo: 'Cocina' },
-      { id: 'impresora', label: 'Impresora de comandas', grupo: 'Configuración' },
+      { id: 'mesas', label: 'Mapa de mesas', grupo: 'Salón', roles: TODOS },
+      { id: 'mesoneros', label: 'Mesoneros y asignación', grupo: 'Salón', roles: TODOS },
+      { id: 'cocina', label: 'Cocina', grupo: 'Cocina', roles: TODOS },
+      { id: 'platos', label: 'Platos y recetas', grupo: 'Cocina', roles: TODOS },
+      { id: 'impresora', label: 'Impresora de comandas', grupo: 'Configuración', roles: TODOS },
     ],
   },
 

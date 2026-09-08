@@ -31,7 +31,9 @@ func restauranteDemo() especNicho {
 		colorMarca: "#B3362C",
 		slug:       "elfogon", telefonoBanco: "0414-5567",
 		cajero: "Yorman Piña", supervisor: "Rosa Delgado",
-		vendedor: "Daniel Ochoa", contadora: "Lcda. Carmen Silva", mesonero: "Keiber Rojas",
+		vendedor: "Daniel Ochoa", contadora: "Lcda. Carmen Silva",
+		mesoneros:      []string{"Keiber Rojas", "Yulimar Suárez"},
+		zonasMesoneros: []string{"Salón", "Terraza"},
 		proveedores: []provNicho{
 			{nombre: "Distribuidora de Alimentos Del Valle, C.A.", doc: "J-30871234-5", telefono: "0212-6651122"},
 			{nombre: "Carnicería El Novillo, C.A.", doc: "J-31445566-0", telefono: "0212-7734455"},

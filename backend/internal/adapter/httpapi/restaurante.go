@@ -27,6 +27,14 @@ func (s *Server) registerRestaurante(r fiber.Router) {
 	g.Get("/plano", s.handlePlano)
 	g.Put("/plano", edit, s.handleGuardarPlano)
 
+	// Asignación de mesas/zonas a mesoneros y configuración del módulo. Ver es para todo
+	// el salón (el mesonero necesita saber qué mesas son suyas); editar, solo la
+	// administración de la sede.
+	g.Get("/asignaciones", s.handleAsignaciones)
+	g.Put("/asignaciones", edit, s.handleGuardarAsignacion)
+	g.Get("/config", s.handleConfigSalon)
+	g.Put("/config", edit, s.handleGuardarConfigSalon)
+
 	g.Get("/impresora", s.handleImpresora)
 	g.Put("/impresora", edit, s.handleGuardarImpresora)
 
@@ -88,7 +96,11 @@ func (s *Server) handleAbrirCuenta(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
 	p := principalOf(c)
-	out, err := s.svc.AbrirCuenta(empresaIDOf(c), sedeIDOf(c), in.MesaID, p.UserID, p.Nombre, p.UserID, origen(c), in.Comensales)
+	out, err := s.svc.AbrirCuenta(application.AperturaCuenta{
+		EmpresaID: empresaIDOf(c), SedeID: sedeIDOf(c), MesaID: in.MesaID,
+		MesoneroID: p.UserID, MesoneroNombre: p.Nombre,
+		RolActor: rolOf(c), Actor: p.UserID, Origen: origen(c), Comensales: in.Comensales,
+	})
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -102,7 +114,7 @@ func (s *Server) handleAgregarItems(c *fiber.Ctx) error {
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
-	out, err := s.svc.AgregarItems(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c), in.Items)
+	out, err := s.svc.AgregarItems(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, rolOf(c), origen(c), in.Items)
 	if err != nil {
 		return cuentaErr(c, err)
 	}
@@ -258,6 +270,48 @@ func (s *Server) handleGuardarImpresora(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
 	out, err := s.svc.GuardarImpresoraComandas(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c), in)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+// --- Asignación de mesas a mesoneros ---
+
+func (s *Server) handleAsignaciones(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"asignaciones": s.svc.Asignaciones(empresaIDOf(c), sedeIDOf(c))})
+}
+
+func (s *Server) handleGuardarAsignacion(c *fiber.Ctx) error {
+	var in struct {
+		UsuarioID string   `json:"usuarioId"`
+		Nombre    string   `json:"nombre"`
+		Mesas     []string `json:"mesas"`
+		Zonas     []string `json:"zonas"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.GuardarAsignacion(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c),
+		mesa.Asignacion{UsuarioID: in.UsuarioID, Nombre: in.Nombre, Mesas: in.Mesas, Zonas: in.Zonas})
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleConfigSalon(c *fiber.Ctx) error {
+	return c.JSON(s.svc.ConfigSalon(empresaIDOf(c), sedeIDOf(c)))
+}
+
+func (s *Server) handleGuardarConfigSalon(c *fiber.Ctx) error {
+	var in struct {
+		AsignacionEstricta bool `json:"asignacionEstricta"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.GuardarConfigSalon(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c), in.AsignacionEstricta)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}

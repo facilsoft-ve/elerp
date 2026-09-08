@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { vendibles } from '../lib/catalogo.js'
 import { Icon } from '../components/Icon.jsx'
-import { Button, Badge, Select, Segmented, Toggle, Empty, Input, Field, Modal, PageHeader, useToast, useConfirm, TableSkeleton } from '../components/primitives.jsx'
+import { Button, Badge, Card, Select, Segmented, Toggle, Empty, Input, Field, Modal, PageHeader, useToast, useConfirm, TableSkeleton } from '../components/primitives.jsx'
 import { useData } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
 import { precioEnBs, monedaDe } from '../lib/precio.js'
 import { fmtCurrency } from '../lib/format.js'
@@ -39,24 +40,37 @@ const ESTADO_COLOR = {
 }
 const colorEstado = (e) => ESTADO_COLOR[e] || ESTADO_COLOR.libre
 
+// `soloMesonero: true` marca las pestañas que también alcanza el mesonero. El resto son
+// de administración o de cocina: mostrárselas al mesero no aporta y confunde (el sidebar
+// ya se las oculta; acá se hace lo mismo con las pestañas del encabezado).
 const TABS = [
-  { id: 'comandera', label: 'Comandera', icon: <Icon.ClipboardList size={15} /> },
+  { id: 'comandera', label: 'Comandera', icon: <Icon.ClipboardList size={15} />, mesonero: true },
   { id: 'mesas', label: 'Mapa de mesas', icon: <Icon.Utensils size={15} /> },
+  { id: 'mesoneros', label: 'Mesoneros y asignación', icon: <Icon.Users size={15} /> },
   { id: 'cocina', label: 'Cocina', icon: <Icon.Activity size={15} /> },
   { id: 'platos', label: 'Platos y recetas', icon: <Icon.Boxes size={15} /> },
   { id: 'impresora', label: 'Impresora de comandas', icon: <Icon.Printer size={15} /> },
 ]
 
 export function Restaurante({ route }) {
-  const [tab, setTab] = useState((route || '').split(':')[1] || 'mesas')
-  useEffect(() => { setTab((route || '').split(':')[1] || 'mesas') }, [route])
+  const { ui } = useUI()
+  const esMesonero = ui.rol === 'mesonero'
+  const tabs = esMesonero ? TABS.filter((t) => t.mesonero) : TABS
+  const inicial = esMesonero ? 'comandera' : 'mesas'
+  const [tab, setTab] = useState((route || '').split(':')[1] || inicial)
+  useEffect(() => {
+    const pedido = (route || '').split(':')[1] || inicial
+    // Un mesonero que llegue por URL a una pestaña que no le toca va a la Comandera.
+    setTab(tabs.some((t) => t.id === pedido) ? pedido : inicial)
+  }, [route, esMesonero])
   return (
     <div className="p-4 md:p-6 lg:px-8 lg:py-7">
       <PageHeader breadcrumb={['Restaurante', TABS.find((t) => t.id === tab)?.label]} title="Restaurante"
         sub="Diseña el mapa de mesas del salón y configura la impresora donde salen las comandas."
-        tabs={TABS} activeTab={tab} onTab={setTab} />
+        tabs={tabs} activeTab={tab} onTab={setTab} />
       {tab === 'comandera' ? <Comandera /> : null}
       {tab === 'mesas' ? <MapaMesas /> : null}
+      {tab === 'mesoneros' ? <MesonerosAsignacion /> : null}
       {tab === 'cocina' ? <Cocina /> : null}
       {tab === 'platos' ? <PlatosRecetas /> : null}
       {tab === 'impresora' ? <ImpresoraComandas /> : null}
@@ -415,7 +429,43 @@ export function Comandera() {
 
   const cuentaDeMesa = (mesaId) => cuentasAbiertas.find((c) => c.mesaId === mesaId)
 
+  // --- Asignación de mesas ---
+  // Una mesa es «de» un mesonero por id o por su zona. Sin nadie asignado, es de
+  // cualquiera. Solo condiciona al mesonero: la caja y la dueña atienden todas.
+  const { ui } = useUI()
+  const { user } = useAuth()
+  const esMesonero = ui.rol === 'mesonero'
+  const asignaciones = db.ASIGNACIONES_MESAS || []
+  const estricta = !!db.CONFIG_SALON?.asignacionEstricta
+  const miUsuarioId = user?.userId || ''
+  const cubreMesa = (a, m) =>
+    (a.mesas || []).includes(m.id) ||
+    (a.zonas || []).some((z) => (z || '').trim().toLowerCase() === (m.zona || '').trim().toLowerCase())
+  const mesonerosDeMesa = (m) => asignaciones.filter((a) => cubreMesa(a, m))
+  const esMiMesa = (m) => {
+    const duenos = mesonerosDeMesa(m)
+    if (duenos.length === 0) return true // de nadie en particular
+    return duenos.some((a) => a.usuarioId === miUsuarioId)
+  }
+
   const abrirMesa = async (m) => {
+    // Si la mesa es de OTRO mesonero se avisa antes: el servidor lo permite (y lo deja
+    // en la bitácora) salvo que la sede tenga la asignación estricta, donde lo rechaza.
+    // El aviso es para que tomarla sea una decisión, no un descuido.
+    if (esMesonero && !esMiMesa(m)) {
+      const duenos = mesonerosDeMesa(m)
+      if (duenos.length) {
+        const ok = await confirm({
+          title: `La mesa ${m.nombre} es de ${duenos.map((d) => d.nombre).join(', ')}`,
+          body: estricta
+            ? 'La sede tiene la asignación estricta: no vas a poder tomarla. Pedile a la administración que la reasigne.'
+            : 'Podés tomarla igual —queda registrado quién la atendió— o dejársela a su mesonero.',
+          confirmLabel: estricta ? 'Entendido' : 'Tomarla igual',
+          tone: 'warn',
+        })
+        if (!ok || estricta) return
+      }
+    }
     setBusy(true)
     try {
       const ex = cuentaDeMesa(m.id)
@@ -478,9 +528,15 @@ export function Comandera() {
           const cta = cuentaDeMesa(m.id)
           const est = cta ? 'ocupada' : (m.estado || 'libre')
           const col = c(est)
+          // Las mesas de OTRO mesonero se atenúan: siguen siendo tocables (cubrir a un
+          // compañero es normal) pero se ven distintas, así el mesero encuentra las
+          // suyas de un vistazo en un salón lleno.
+          const ajena = esMesonero && !esMiMesa(m)
+          const duenos = ajena ? mesonerosDeMesa(m) : []
           return (
             <button key={m.id} disabled={busy} onClick={() => abrirMesa(m)}
-              className="rounded-xl p-3 text-left border-2 transition-shadow hover:shadow-card disabled:opacity-60"
+              title={ajena ? `Asignada a ${duenos.map((d) => d.nombre).join(', ')}` : undefined}
+              className={`rounded-xl p-3 text-left border-2 transition-shadow hover:shadow-card disabled:opacity-60 ${ajena ? 'opacity-60' : ''}`}
               style={{ background: col.bg, borderColor: col.border, color: col.text }}>
               <div className="flex items-center justify-between">
                 <span className="font-display font-bold text-[18px]">{m.nombre}</span>
@@ -945,6 +1001,232 @@ function Cocina() {
             )
           })}
         </div>
+      )}
+    </div>
+  )
+}
+
+/* --- Mesoneros y asignación de mesas ------------------------------------- */
+
+/* Organiza el turno: qué mesas o zonas atiende cada mesonero. Es una GUÍA, no un
+ * candado — por defecto un mesonero puede tomar la mesa de otro, se le advierte y queda
+ * en la bitácora. El interruptor «asignación estricta» la convierte en candado (lo
+ * rechaza el servidor, no la interfaz).
+ *
+ * Se puede asignar desde los dos lados porque son dos vistas del MISMO vínculo: por
+ * mesonero (qué atiende) y por mesa (quién la atiende). El dato se guarda una sola vez,
+ * en la asignación del mesonero. */
+function MesonerosAsignacion() {
+  const { db, reload } = useData()
+  const toast = useToast()
+  const mesas = db.MESAS || []
+  const [mesoneros, setMesoneros] = useState(null)
+  const [asignaciones, setAsignaciones] = useState(db.ASIGNACIONES_MESAS || [])
+  const [estricta, setEstricta] = useState(!!db.CONFIG_SALON?.asignacionEstricta)
+  const [vista, setVista] = useState('mesonero') // mesonero | mesa
+  const [guardando, setGuardando] = useState('')
+
+  useEffect(() => {
+    api.usuarios()
+      .then((r) => setMesoneros((r.miembros || r.usuarios || r || []).filter((u) => u.rol === 'mesonero')))
+      .catch(() => setMesoneros([]))
+  }, [])
+
+  const zonas = useMemo(() => {
+    const set = new Map()
+    for (const m of mesas) {
+      const z = (m.zona || '').trim()
+      if (z) set.set(z.toLowerCase(), z)
+    }
+    return [...set.values()].sort()
+  }, [mesas])
+
+  const asignacionDe = (usuarioId) =>
+    asignaciones.find((a) => a.usuarioId === usuarioId) || { usuarioId, mesas: [], zonas: [] }
+
+  // Una mesa está cubierta por id o por su zona (asignar la zona cubre las mesas que se
+  // agreguen después, que es como se organiza un turno de verdad).
+  const cubre = (a, m) =>
+    (a.mesas || []).includes(m.id) ||
+    (a.zonas || []).some((z) => z.trim().toLowerCase() === (m.zona || '').trim().toLowerCase())
+
+  const guardar = async (usuarioId, nombre, cambios) => {
+    const actual = asignacionDe(usuarioId)
+    const body = {
+      usuarioId, nombre,
+      mesas: cambios.mesas ?? actual.mesas ?? [],
+      zonas: cambios.zonas ?? actual.zonas ?? [],
+    }
+    setGuardando(usuarioId)
+    try {
+      const out = await api.guardarAsignacionMesas(body)
+      setAsignaciones((prev) => {
+        const resto = prev.filter((a) => a.usuarioId !== usuarioId)
+        const vacia = (out.mesas || []).length === 0 && (out.zonas || []).length === 0
+        return vacia ? resto : [...resto, out]
+      })
+    } catch (e) {
+      toast({ title: 'No se pudo guardar', body: e.message, tone: 'error' })
+    } finally {
+      setGuardando('')
+    }
+  }
+
+  const toggleZona = (u, zona) => {
+    const a = asignacionDe(u.usuarioId || u.id)
+    const tiene = (a.zonas || []).some((z) => z.trim().toLowerCase() === zona.trim().toLowerCase())
+    const zonasNuevas = tiene
+      ? (a.zonas || []).filter((z) => z.trim().toLowerCase() !== zona.trim().toLowerCase())
+      : [...(a.zonas || []), zona]
+    guardar(u.usuarioId || u.id, u.nombre, { zonas: zonasNuevas })
+  }
+
+  const toggleMesa = (u, mesaId) => {
+    const uid = u.usuarioId || u.id
+    const a = asignacionDe(uid)
+    const tiene = (a.mesas || []).includes(mesaId)
+    guardar(uid, u.nombre, {
+      mesas: tiene ? (a.mesas || []).filter((x) => x !== mesaId) : [...(a.mesas || []), mesaId],
+    })
+  }
+
+  const cambiarEstricta = async (v) => {
+    setEstricta(v)
+    try {
+      await api.guardarConfigSalon({ asignacionEstricta: v })
+      toast({ title: v ? 'Asignación estricta activada' : 'Asignación flexible' })
+      reload()
+    } catch (e) {
+      setEstricta(!v)
+      toast({ title: 'No se pudo guardar', body: e.message, tone: 'error' })
+    }
+  }
+
+  if (mesoneros === null) return <div className="py-16 text-center text-slate-500">Cargando…</div>
+
+  return (
+    <div className="space-y-5">
+      <Card className="!p-5">
+        <Toggle checked={estricta} onChange={cambiarEstricta}
+          label="Asignación estricta"
+          sub="Apagada (recomendado): un mesonero puede tomar la mesa de otro; se le avisa y queda registrado en la bitácora. Encendida: el sistema lo rechaza y solo la administración puede reasignar." />
+      </Card>
+
+      {mesoneros.length === 0 ? (
+        <Empty title="Todavía no hay mesoneros"
+          body="Invitá a alguien con el rol Mesonero en Configuración › Usuarios y roles. Sin asignación, cualquier mesonero atiende cualquier mesa." />
+      ) : (
+        <>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[13px] text-slate-500 mr-1">Asignar por:</span>
+            {[{ id: 'mesonero', label: 'Mesonero' }, { id: 'mesa', label: 'Mesa' }].map((v) => (
+              <button key={v.id} onClick={() => setVista(v.id)}
+                className={`h-7 px-3 rounded-full text-[12.5px] font-medium border ring-focus transition-colors ${
+                  vista === v.id
+                    ? 'bg-elerp-500 text-white border-elerp-500'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+                {v.label}
+              </button>
+            ))}
+          </div>
+
+          {vista === 'mesonero' ? (
+            <div className="grid gap-4 md:grid-cols-2">
+              {mesoneros.map((u) => {
+                const uid = u.usuarioId || u.id
+                const a = asignacionDe(uid)
+                const sinAsignar = (a.mesas || []).length === 0 && (a.zonas || []).length === 0
+                return (
+                  <Card key={uid} className="!p-5">
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-[14px] truncate">{u.nombre}</div>
+                        <div className="text-[12px] text-slate-500 truncate">{u.email}</div>
+                      </div>
+                      {sinAsignar ? <Badge size="sm" color="slate">Atiende cualquier mesa</Badge> : null}
+                    </div>
+                    <div className="text-[11.5px] uppercase tracking-wide text-slate-500 mb-1.5">Zonas</div>
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      {zonas.length === 0 ? <span className="text-[12.5px] text-slate-400">Las mesas no tienen zona</span> : null}
+                      {zonas.map((z) => {
+                        const on = (a.zonas || []).some((x) => x.trim().toLowerCase() === z.toLowerCase())
+                        return (
+                          <button key={z} disabled={guardando === uid} onClick={() => toggleZona(u, z)}
+                            className={`h-7 px-3 rounded-full text-[12.5px] font-medium border ring-focus transition-colors disabled:opacity-50 ${
+                              on ? 'bg-elerp-500 text-white border-elerp-500'
+                                 : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+                            {z}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <div className="text-[11.5px] uppercase tracking-wide text-slate-500 mb-1.5">Mesas sueltas</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {mesas.map((m) => {
+                        const porZona = (a.zonas || []).some((x) => x.trim().toLowerCase() === (m.zona || '').trim().toLowerCase())
+                        const on = (a.mesas || []).includes(m.id)
+                        return (
+                          <button key={m.id} disabled={guardando === uid || porZona}
+                            title={porZona ? `Ya cubierta por la zona ${m.zona}` : m.zona || ''}
+                            onClick={() => toggleMesa(u, m.id)}
+                            className={`h-7 min-w-8 px-2 rounded-lg text-[12.5px] font-medium border ring-focus transition-colors disabled:opacity-40 ${
+                              on || porZona ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300 border-teal-500/40'
+                                            : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+                            {m.nombre}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </Card>
+                )
+              })}
+            </div>
+          ) : (
+            <Card className="overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-[11.5px] uppercase tracking-wide text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                      <th className="px-4 py-2.5 font-medium">Mesa</th>
+                      <th className="px-4 py-2.5 font-medium">Zona</th>
+                      <th className="px-4 py-2.5 font-medium">La atiende</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mesas.map((m) => (
+                      <tr key={m.id} className="border-b border-slate-100 dark:border-slate-800/70">
+                        <td className="px-4 py-2.5 font-medium">{m.nombre}</td>
+                        <td className="px-4 py-2.5 text-slate-500">{m.zona || '—'}</td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex flex-wrap gap-1.5">
+                            {mesoneros.map((u) => {
+                              const uid = u.usuarioId || u.id
+                              const a = asignacionDe(uid)
+                              const porZona = (a.zonas || []).some((x) => x.trim().toLowerCase() === (m.zona || '').trim().toLowerCase())
+                              const on = cubre(a, m)
+                              return (
+                                <button key={uid} disabled={guardando === uid || porZona}
+                                  title={porZona ? `Le corresponde por la zona ${m.zona}` : ''}
+                                  onClick={() => toggleMesa(u, m.id)}
+                                  className={`h-7 px-2.5 rounded-full text-[12px] font-medium border ring-focus transition-colors disabled:opacity-60 ${
+                                    on ? 'bg-elerp-500 text-white border-elerp-500'
+                                       : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+                                  {u.nombre.split(' ')[0]}
+                                </button>
+                              )
+                            })}
+                            {mesoneros.every((u) => !cubre(asignacionDe(u.usuarioId || u.id), m))
+                              ? <span className="text-[12px] text-slate-400 self-center">cualquiera</span> : null}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+        </>
       )}
     </div>
   )
