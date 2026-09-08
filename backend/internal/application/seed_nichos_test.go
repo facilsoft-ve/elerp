@@ -453,3 +453,40 @@ func TestDemosNicho_RestauranteVendePlatosNoInsumos(t *testing.T) {
 		}
 	}
 }
+
+// Cada demo por rubro debe traer sus usuarios por ROL con membresía: un empleado que
+// puede autenticarse pero no pertenece a ninguna empresa termina en el asistente de
+// «configura tu primera empresa», que es lo último que debe ver.
+func TestDemosNicho_UsuariosPorRolConMembresia(t *testing.T) {
+	st := inmem.New()
+	esperados := map[string][]string{
+		"emp_demo_rest": {usuario.RolVendedor, usuario.RolCajero, usuario.RolContadora, usuario.RolMesonero},
+		"emp_demo_ferr": {usuario.RolVendedor, usuario.RolCajero, usuario.RolContadora},
+		"emp_demo_farm": {usuario.RolVendedor, usuario.RolCajero, usuario.RolContadora},
+	}
+	for emp, roles := range esperados {
+		presentes := map[string]string{} // rol → email
+		for _, m := range st.Membresias.ByEmpresa(emp) {
+			presentes[m.Rol] = m.Email
+		}
+		for _, rol := range roles {
+			email, ok := presentes[rol]
+			if !ok {
+				t.Errorf("%s: falta un usuario con rol %q", emp, rol)
+				continue
+			}
+			// Y tiene que poder entrar: sin credencial el rol no se puede probar.
+			if _, hay := st.Credenciales.ByEmail(email); !hay {
+				t.Errorf("%s: el usuario %s (%s) no tiene credencial", emp, email, rol)
+			}
+		}
+	}
+	// El mesonero solo tiene sentido donde está el módulo Restaurante.
+	for _, emp := range []string{"emp_demo", "emp_demo_ferr", "emp_demo_farm"} {
+		for _, m := range st.Membresias.ByEmpresa(emp) {
+			if m.Rol == usuario.RolMesonero {
+				t.Errorf("%s tiene un mesonero y no tiene el módulo Restaurante", emp)
+			}
+		}
+	}
+}

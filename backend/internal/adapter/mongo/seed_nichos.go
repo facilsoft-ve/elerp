@@ -83,11 +83,34 @@ func sembrarNichos(st *Store, semilla *inmem.Store) {
 			}
 			log.Printf("Mongo: %s → %d cajas y %d cajeros (PIN de demostración)", n.Giro, len(snap.Cajas), len(snap.Cajeros))
 		}
-		// Usuarios por rol: aditivo por id, para no pisar a nadie que ya exista.
+		// Usuarios por rol y SUS MEMBRESÍAS: aditivo, para no pisar a nadie que ya exista.
+		//
+		// Las membresías van acá y no en el bloque de identidad de arriba por una razón
+		// concreta: ese bloque solo corre cuando la empresa NO existe, así que en una base
+		// ya sembrada (el servidor) los usuarios por rol que se agregaron después quedaban
+		// con credencial pero SIN empresa — podían autenticarse y la app los mandaba al
+		// asistente de «configura tu primera empresa», que es lo último que debe ver un
+		// empleado. Pasó de verdad con el mesonero.
 		for _, u := range snap.Usuarios {
 			if _, ya := st.Usuarios.ByID(u.ID); !ya {
 				st.Usuarios.c.insert(u)
 			}
+		}
+		yaMiembro := map[string]bool{}
+		for _, m := range st.Membresias.ByEmpresa(n.EmpresaID) {
+			yaMiembro[m.UsuarioID] = true
+		}
+		faltantes := 0
+		for _, m := range snap.Membresias {
+			if m.UsuarioID == "" || yaMiembro[m.UsuarioID] {
+				continue
+			}
+			st.Membresias.c.insert(m)
+			yaMiembro[m.UsuarioID] = true
+			faltantes++
+		}
+		if faltantes > 0 {
+			log.Printf("Mongo: %s → %d membresía(s) de usuarios por rol", n.Giro, faltantes)
 		}
 		if len(st.CuentasCobro.List(n.EmpresaID)) == 0 {
 			for _, cc := range snap.CuentasCobro {
