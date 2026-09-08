@@ -2,6 +2,8 @@ package mongo
 
 import (
 	"log"
+
+	mesadom "github.com/mornix/elerp/internal/domain/mesa"
 	"strings"
 
 	"github.com/mornix/elerp/internal/adapter/inmem"
@@ -143,11 +145,36 @@ func sembrarNichos(st *Store, semilla *inmem.Store) {
 				n.Giro, len(snap.Documentos), len(snap.Contadores))
 		}
 		// Cuentas de mesa abiertas (restaurante en servicio).
+		//
+		// Se REMAPEA el id de la mesa por su NOMBRE. Los ids de la semilla los genera un
+		// contador en memoria que cambia en cada arranque, mientras las mesas de Mongo
+		// conservan los suyos del primer sembrado: insertar la cuenta con el id de la
+		// semilla la deja HUÉRFANA —apuntando a una mesa que no existe— y la mesa nunca
+		// se ve ocupada. Pasó de verdad: cuentas en mesa_196 con mesas en mesa_206.
+		// El nombre ("1", "4", "T2") sí es estable, así que es la clave correcta.
 		if len(snap.CuentasMesa) > 0 && len(st.Cuentas.Abiertas(n.EmpresaID, n.SedeID)) == 0 {
-			for _, c := range snap.CuentasMesa {
-				st.Cuentas.c.insert(c)
+			porNombre := map[string]mesadom.Mesa{}
+			for _, m := range st.Mesas.List(n.EmpresaID, n.SedeID) {
+				porNombre[m.Nombre] = m
 			}
-			log.Printf("Mongo: %s → %d cuentas de mesa abiertas", n.Giro, len(snap.CuentasMesa))
+			insertadas := 0
+			for _, c := range snap.CuentasMesa {
+				real, ok := porNombre[c.MesaNombre]
+				if !ok {
+					log.Printf("Mongo: %s → se omite la cuenta de la mesa %q (no existe en esta base)", n.Giro, c.MesaNombre)
+					continue
+				}
+				c.MesaID = real.ID
+				st.Cuentas.c.insert(c)
+				insertadas++
+				// Y la mesa queda OCUPADA: el tablero y el mapa leen su estado, y una
+				// mesa "libre" con una cuenta abierta es una contradicción visible.
+				if real.Estado != mesadom.EstadoOcupada {
+					real.Estado = mesadom.EstadoOcupada
+					st.Mesas.Update(real)
+				}
+			}
+			log.Printf("Mongo: %s → %d cuentas de mesa abiertas", n.Giro, insertadas)
 		}
 
 		// Módulos instalados (el restaurante trae el suyo activo).

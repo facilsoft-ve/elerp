@@ -32,6 +32,10 @@ export const NAV = [
     // recetas y la impresora son de administración o de cocina. Los subs sin `roles`
     // los ve cualquier rol que alcance el módulo.
     subs: [
+      // El tablero es la PRIMERA pantalla del módulo para quien administra: responde
+      // cómo está el salón, qué pasa en cocina y cómo va el día, y salta a cada sección.
+      // El mesonero no lo tiene: él solo alcanza la Comandera.
+      { id: 'inicio', label: 'Resumen del salón', grupo: 'Salón', roles: TODOS },
       { id: 'comandera', label: 'Comandera', grupo: 'Salón' },
       { id: 'mesas', label: 'Mapa de mesas', grupo: 'Salón', roles: TODOS },
       { id: 'mesoneros', label: 'Mesoneros y asignación', grupo: 'Salón', roles: TODOS },

@@ -4,6 +4,7 @@ import { Icon } from '../components/Icon.jsx'
 import { Button, Badge, Card, Select, Segmented, Toggle, Empty, Input, Field, Modal, PageHeader, useToast, useConfirm, TableSkeleton } from '../components/primitives.jsx'
 import { useData } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
+import { RestauranteInicio } from './RestauranteInicio.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
 import { precioEnBs, monedaDe } from '../lib/precio.js'
@@ -74,6 +75,7 @@ const totalCuenta = (c) => (c?.items || []).reduce((a, it) => a + (it.estado ===
 // de administración o de cocina: mostrárselas al mesero no aporta y confunde (el sidebar
 // ya se las oculta; acá se hace lo mismo con las pestañas del encabezado).
 const TABS = [
+  { id: 'inicio', label: 'Resumen del salón', icon: <Icon.Activity size={15} /> },
   { id: 'comandera', label: 'Comandera', icon: <Icon.ClipboardList size={15} />, mesonero: true },
   { id: 'mesas', label: 'Mapa de mesas', icon: <Icon.Utensils size={15} /> },
   { id: 'mesoneros', label: 'Mesoneros y asignación', icon: <Icon.Users size={15} /> },
@@ -86,6 +88,7 @@ const TABS = [
 // al mesonero —que solo alcanza la Comandera— le ofrecía dos cosas que no puede hacer, y
 // en las otras cuatro pestañas describía algo distinto de lo que se estaba viendo.
 const SUBTITULO = {
+  inicio: 'Cómo está el salón ahora, qué pasa en cocina y cómo va el día. Desde acá saltás a cada sección.',
   comandera: 'Tomá el pedido de cada mesa y enviálo a cocina. Cuando pidan la cuenta, prefacturá y la caja cobra.',
   mesas: 'Diseñá el salón sobre una grilla: ubicá las mesas, bloqueá los espacios donde no puede haber ninguna y fijá cuántas personas caben.',
   mesoneros: 'Asigná a cada mesonero las mesas o las zonas que atiende. Sin asignar, cualquiera atiende cualquier mesa.',
@@ -98,7 +101,7 @@ export function Restaurante({ route }) {
   const { ui } = useUI()
   const esMesonero = ui.rol === 'mesonero'
   const tabs = esMesonero ? TABS.filter((t) => t.mesonero) : TABS
-  const inicial = esMesonero ? 'comandera' : 'mesas'
+  const inicial = esMesonero ? 'comandera' : 'inicio'
   const [tab, setTab] = useState((route || '').split(':')[1] || inicial)
   useEffect(() => {
     const pedido = (route || '').split(':')[1] || inicial
@@ -110,6 +113,7 @@ export function Restaurante({ route }) {
       <PageHeader breadcrumb={['Restaurante', TABS.find((t) => t.id === tab)?.label]} title="Restaurante"
         sub={SUBTITULO[tab] || SUBTITULO.comandera}
         tabs={tabs} activeTab={tab} onTab={setTab} />
+      {tab === 'inicio' ? <RestauranteInicio irA={setTab} /> : null}
       {tab === 'comandera' ? <Comandera /> : null}
       {tab === 'mesas' ? <MapaMesas /> : null}
       {tab === 'mesoneros' ? <MesonerosAsignacion /> : null}
