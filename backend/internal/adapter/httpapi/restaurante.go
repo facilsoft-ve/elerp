@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -48,6 +49,10 @@ func (s *Server) registerRestaurante(r fiber.Router) {
 	g.Delete("/cuentas/:id/items/:itemId", s.handleCancelarItem)
 	g.Post("/cuentas/:id/items/:itemId/estado", s.handleMarcarItem)
 	g.Post("/cuentas/:id/cerrar", s.handleCerrarCuenta)
+	// Prefactura: el mesonero pide la cuenta y la convierte en cotización(es)
+	// confirmadas rotuladas con la mesa. El cajero las cobra desde Ventas.
+	g.Post("/cuentas/:id/prefacturar", s.handlePrefacturarCuenta)
+	g.Post("/cuentas/:id/prefacturar/cancelar", s.handleCancelarPrefactura)
 	// Cobro → factura desde la cuenta. Emitir factura es de roles con caja/venta
 	// (no la contadora, que es consulta fuera de Contabilidad/Tesorería).
 	emitir := s.requireRoles(usuario.RolDueno, usuario.RolDesarrollador, usuario.RolCajero, usuario.RolVendedor)
@@ -312,6 +317,43 @@ func (s *Server) handleGuardarConfigSalon(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
 	out, err := s.svc.GuardarConfigSalon(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c), in.AsignacionEstricta)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+// --- Prefactura de la mesa ---
+
+func (s *Server) handlePrefacturarCuenta(c *fiber.Ctx) error {
+	var in struct {
+		Modo       string            `json:"modo"`
+		Comensales int               `json:"comensales"`
+		Items      map[string]int    `json:"items"`
+		Nombres    map[string]string `json:"nombres"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	// Los nombres llegan con clave string (JSON no admite claves numéricas).
+	nombres := map[int]string{}
+	for k, v := range in.Nombres {
+		if n, err := strconv.Atoi(k); err == nil {
+			nombres[n] = v
+		}
+	}
+	cta, prefacturas, err := s.svc.PrefacturarCuenta(empresaIDOf(c), c.Params("id"),
+		principalOf(c).UserID, origen(c), application.DivisionCuenta{
+			Modo: in.Modo, Comensales: in.Comensales, Items: in.Items, Nombres: nombres,
+		})
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"cuenta": cta, "prefacturas": prefacturas})
+}
+
+func (s *Server) handleCancelarPrefactura(c *fiber.Ctx) error {
+	out, err := s.svc.CancelarPrefacturasCuenta(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}

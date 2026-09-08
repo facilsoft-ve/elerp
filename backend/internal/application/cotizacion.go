@@ -38,6 +38,10 @@ type EntradaCotizacion struct {
 	ListaPrecio      string
 	DireccionEntrega string
 	SedeDespacho     string
+	// CuentaMesaID/MesaNombre marcan la cotización como PREFACTURA de una mesa del
+	// módulo Restaurante. Vacíos en una cotización normal de Ventas.
+	CuentaMesaID string
+	MesaNombre   string
 }
 
 // Cotizaciones lista las cotizaciones de la empresa.
@@ -129,6 +133,7 @@ func (s *Service) CrearCotizacion(empresaID, sedeID, actor, origen string, in En
 		Validez: in.Validez, CondicionesPago: in.CondicionesPago, Terminos: in.Terminos, Notas: in.Notas,
 		CuponCodigo: in.CuponCodigo,
 		ListaPrecio: in.ListaPrecio, DireccionEntrega: in.DireccionEntrega, SedeDespacho: in.SedeDespacho,
+		CuentaMesaID: in.CuentaMesaID, MesaNombre: in.MesaNombre,
 		Actor: actor, Fecha: ahora(), Actualizada: ahora(),
 	}
 	// Cliente (opcional en una cotización: puede ser un presupuesto sin cerrar).
@@ -285,6 +290,10 @@ func (s *Service) FacturarCotizacion(empresaID, id, actor, origen string, in Ent
 		return cotizacion.Cotizacion{}, fiscal.Documento{}, ErrCotizacionNoExiste
 	}
 	s.audit.Append(evento(empresaID, actor, origen, "ventas.cotizacion.facturar", out.NumeroCompleto, doc.NumeroCompleto))
+	// Si era la PREFACTURA de una mesa y ya se cobraron todas sus partes, se cierra la
+	// cuenta y se libera la mesa: eso completa el circuito mesonero → caja sin que
+	// nadie tenga que cerrar la mesa a mano.
+	s.cerrarCuentaSiPrefacturasFacturadas(empresaID, out.CuentaMesaID, doc.ID, actor, origen)
 	return out, doc, nil
 }
 

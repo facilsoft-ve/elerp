@@ -150,6 +150,12 @@ func (s *Service) AgregarItems(empresaID, cuentaID, actor, rolActor, origen stri
 	if err != nil {
 		return cuenta.Cuenta{}, err
 	}
+	// Con la cuenta ya pedida, agregar renglones dejaría la prefactura desactualizada y
+	// el cliente pagaría menos de lo que consumió. Hay que anular la prefactura primero
+	// (que es un clic: «volver a servicio»).
+	if len(c.Prefacturas) > 0 {
+		return cuenta.Cuenta{}, ErrCuentaYaPrefacturada
+	}
 	if s.mesas != nil {
 		if m, ok := s.mesas.ByID(empresaID, c.MesaID); ok {
 			ajena, duenos, err := s.verificarMesaDelMesonero(empresaID, c.SedeID, actor, rolActor, m)

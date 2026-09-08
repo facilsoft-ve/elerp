@@ -78,6 +78,14 @@ type Cuenta struct {
 	UltimaRonda    int    `json:"ultimaRonda" bson:"ultimaronda"`
 	Abierta        string `json:"abierta" bson:"abierta"` // RFC3339
 	Cerrada        string `json:"cerrada" bson:"cerrada"`
+	// Prefacturas son las cotizaciones CONFIRMADAS (prefacturas) generadas al pedir la
+	// cuenta. Una sola cuando se paga junto; varias cuando se dividió por productos
+	// (cada comensal con su propia prefactura y, después, su propia factura). La
+	// división en partes IGUALES no genera varias: eso es un reparto del COBRO, no del
+	// documento, y se resuelve con varios pagos sobre una única factura.
+	Prefacturas []string `json:"prefacturas" bson:"prefacturas"`
+	// PrefacturadaEn es cuándo se pidió la cuenta (RFC3339). Vacío mientras no se pidió.
+	PrefacturadaEn string `json:"prefacturadaEn" bson:"prefacturadaen"`
 	// DocumentoID es la factura emitida al cerrar (fase fiscal); vacío mientras
 	// tanto.
 	DocumentoID string `json:"documentoId" bson:"documentoid"`

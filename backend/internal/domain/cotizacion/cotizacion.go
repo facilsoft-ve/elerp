@@ -81,6 +81,13 @@ type Cotizacion struct {
 	// Vacío ⇒ se descuenta de la sede de la cotización (comportamiento previo).
 	SedeDespacho string `json:"sedeDespacho" bson:"sededespacho"`
 
+	// CuentaMesaID enlaza la prefactura con la cuenta de mesa que la originó (módulo
+	// Restaurante). Sirve para cerrar la cuenta y liberar la mesa cuando todas sus
+	// prefacturas quedaron facturadas. Vacío en una cotización normal de Ventas.
+	CuentaMesaID string `json:"cuentaMesaId" bson:"cuentamesaid"`
+	// MesaNombre rotula la prefactura con la mesa ("Mesa 5"), que es como la busca el
+	// cajero: no conoce números de cotización, conoce mesas.
+	MesaNombre string `json:"mesaNombre" bson:"mesanombre"`
 	// DocumentoID enlaza a la factura emitida al facturar. Vacío hasta entonces.
 	DocumentoID string `json:"documentoId" bson:"documentoid"`
 
