@@ -173,7 +173,12 @@ export function Dashboard({ setRoute }) {
   }, [db?.TASAS])
 
   // Módulos que este rol alcanza, en el orden del menú.
-  const modulos = NAV.filter((n) => n.roles.includes(rol) && n.id !== 'dashboard' && n.id !== 'diseno')
+  // El lanzador cruza ROL y MÓDULO ACTIVO, igual que el Sidebar: si el módulo no está
+  // instalado en la empresa (p. ej. Restaurante en una farmacia) su tarjeta no va —
+  // ofrecerla llevaría a una pantalla que el guard de ruta rebota al inicio.
+  const modulosActivos = db?.MODULOS || []
+  const modulos = NAV.filter((n) => n.roles.includes(rol) && n.id !== 'dashboard' && n.id !== 'diseno'
+    && (!n.modulo || modulosActivos.includes(n.modulo)))
 
   const esCajero = rol === 'cajero'
   const esContadora = rol === 'contadora'
