@@ -103,7 +103,8 @@ const versionSeedDemo = 28
 // forma idempotente: si ya hay empresas, no hace nada.
 func Seed(db *gomongo.Database) {
 	st := New(db)
-	snap := inmem.New().Snapshot()
+	semilla := inmem.New()
+	snap := semilla.Snapshot()
 
 	// Los guards cuentan SOLO el tenant demo, no la colección entera: si otra
 	// empresa ya tiene productos, el conteo global no es cero y la demo se
@@ -385,6 +386,11 @@ func Seed(db *gomongo.Database) {
 		log.Printf("Mongo: sembrada la tasa inicial (%d registro(s))", len(snap.Tasas))
 	}
 
+	// Demos por RUBRO (restaurante, ferretería, farmacia). Va aparte y es ADITIVO por
+	// empresa: los guards de arriba miran solo el tenant demo (emp_demo), así que en una
+	// base ya sembrada nunca entrarían. No toca emp_demo ni exige subir versionSeedDemo
+	// (que regeneraría la bodega demo).
+	sembrarNichos(st, semilla)
 }
 
 // filtroContadoresDemo casa los contadores de numeración del tenant demo por el

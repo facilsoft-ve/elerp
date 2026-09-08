@@ -127,6 +127,8 @@ func New() *Store {
 		Cuentas:      NewCuentaRepo(),
 	}
 	s.seedDemo()
+	// Demos por RUBRO (restaurante, ferretería, farmacia): ver seed_nichos.go.
+	s.seedNichos()
 	return s
 }
 
