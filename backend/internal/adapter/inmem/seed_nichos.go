@@ -288,6 +288,7 @@ type SnapshotEmpresa struct {
 	Proveedores  []proveedor.Proveedor
 	Documentos   []fiscal.Documento
 	CuentasMesa  []cuenta.Cuenta
+	Asignaciones []mesa.Asignacion
 	// Contadores es el estado del numerador fiscal de ESTA empresa tras sembrar
 	// ("empresa|sede|serie" → último folio). Sin ellos, la primera factura real del
 	// prospecto reiniciaría en 1 y colisionaría con un folio sembrado.
@@ -343,6 +344,7 @@ func (s *Store) SnapshotNicho(n NichoDemo) SnapshotEmpresa {
 		Proveedores:  s.Proveedores.List(n.EmpresaID),
 		Documentos:   s.Documentos.List(n.EmpresaID),
 		CuentasMesa:  s.Cuentas.Abiertas(n.EmpresaID, n.SedeID),
+		Asignaciones: s.Asignaciones.List(n.EmpresaID, n.SedeID),
 		Contadores:   contadores,
 	}
 }

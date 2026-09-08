@@ -156,6 +156,25 @@ func sembrarNichos(st *Store, semilla *inmem.Store) {
 			}
 		}
 
+		// Asignación de mesas por mesonero (solo el restaurante): aditiva por usuario.
+		if len(snap.Asignaciones) > 0 {
+			yaAsignado := map[string]bool{}
+			for _, a := range st.Asignaciones.List(n.EmpresaID, n.SedeID) {
+				yaAsignado[a.UsuarioID] = true
+			}
+			nuevas := 0
+			for _, a := range snap.Asignaciones {
+				if yaAsignado[a.UsuarioID] {
+					continue
+				}
+				st.Asignaciones.Upsert(a)
+				nuevas++
+			}
+			if nuevas > 0 {
+				log.Printf("Mongo: %s → %d asignación(es) de mesas a mesoneros", n.Giro, nuevas)
+			}
+		}
+
 		// Salón: grilla + mesas (solo el restaurante).
 		if snap.TienePlano {
 			if _, ya := st.Planos.Get(n.EmpresaID, n.SedeID); !ya {
