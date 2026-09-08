@@ -58,6 +58,16 @@ const T = {
 // Total de una cuenta de mesa: suma de sus renglones NO cancelados. Se recuperó del
 // historial (se había perdido en un refactor y dejaba la pantalla en blanco con
 // «totalCuenta is not defined»: la interfaz entera del módulo caía por un helper).
+// Estado de cada RENGLÓN de la cuenta (recuperados del historial: se perdieron en un
+// refactor y dejaban la comandera en blanco al agregar un producto).
+const ITEM_COLOR = {
+  pendiente: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+  en_cocina: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  listo: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+  servido: 'bg-elerp-100 text-elerp-700 dark:bg-elerp-900/40 dark:text-elerp-200',
+  cancelado: 'bg-slate-100 text-slate-400 line-through dark:bg-slate-800',
+}
+const ITEM_LABEL = { pendiente: 'Por enviar', en_cocina: 'En cocina', listo: 'Listo', servido: 'Servido', cancelado: 'Anulado' }
 const totalCuenta = (c) => (c?.items || []).reduce((a, it) => a + (it.estado === 'cancelado' ? 0 : (it.precioUnitario || 0) * (it.cantidad || 0)), 0)
 
 // `soloMesonero: true` marca las pestañas que también alcanza el mesonero. El resto son
