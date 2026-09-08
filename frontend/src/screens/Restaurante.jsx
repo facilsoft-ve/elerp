@@ -82,6 +82,18 @@ const TABS = [
   { id: 'impresora', label: 'Comanderas', icon: <Icon.Printer size={15} /> },
 ]
 
+// Un subtítulo POR PESTAÑA. Antes era uno fijo que hablaba del mapa y de la impresora:
+// al mesonero —que solo alcanza la Comandera— le ofrecía dos cosas que no puede hacer, y
+// en las otras cuatro pestañas describía algo distinto de lo que se estaba viendo.
+const SUBTITULO = {
+  comandera: 'Tomá el pedido de cada mesa y enviálo a cocina. Cuando pidan la cuenta, prefacturá y la caja cobra.',
+  mesas: 'Diseñá el salón sobre una grilla: ubicá las mesas, bloqueá los espacios donde no puede haber ninguna y fijá cuántas personas caben.',
+  mesoneros: 'Asigná a cada mesonero las mesas o las zonas que atiende. Sin asignar, cualquiera atiende cualquier mesa.',
+  cocina: 'Las comandas entrantes en vivo, con su nota y su tiempo de espera. Marcá cada plato listo cuando salga.',
+  platos: 'Los platos con su receta (escandallo): al venderlos se descuentan sus insumos del inventario.',
+  impresora: 'Las comanderas por área —cocina, barra, postres— y qué rubro de productos sale por cada una.',
+}
+
 export function Restaurante({ route }) {
   const { ui } = useUI()
   const esMesonero = ui.rol === 'mesonero'
@@ -96,7 +108,7 @@ export function Restaurante({ route }) {
   return (
     <div className="p-4 md:p-6 lg:px-8 lg:py-7">
       <PageHeader breadcrumb={['Restaurante', TABS.find((t) => t.id === tab)?.label]} title="Restaurante"
-        sub="Diseña el mapa de mesas del salón y configura la impresora donde salen las comandas."
+        sub={SUBTITULO[tab] || SUBTITULO.comandera}
         tabs={tabs} activeTab={tab} onTab={setTab} />
       {tab === 'comandera' ? <Comandera /> : null}
       {tab === 'mesas' ? <MapaMesas /> : null}
