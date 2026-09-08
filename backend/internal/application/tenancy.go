@@ -893,7 +893,9 @@ func (t *TenancyService) FijarEmpresaActiva(empresaID string, activa bool, actor
 // --- Miembros de la empresa (Configuración › Usuarios y roles) ---
 
 // ErrSedeRequerida se devuelve cuando un rol de una sola sede se guarda sin sede.
-var ErrSedeRequerida = errors.New("los roles de mostrador (cajero y vendedor) trabajan en una sola sede: hay que asignársela")
+// ErrSedeRequerida nombra los TRES roles afectados: el mensaje se quedó viejo cuando se
+// agregó el mesonero, y a quien invitaba un mesonero le hablaba de cajeros y vendedores.
+var ErrSedeRequerida = errors.New("el cajero, el vendedor y el mesonero trabajan en una sola sede: hay que asignársela")
 
 // RolesDeUnaSolaSede son los roles que operan en UNA sede y no pueden elegir otra.
 // El cajero es el caso duro: su turno, su caja y sus documentos son de esa sede,

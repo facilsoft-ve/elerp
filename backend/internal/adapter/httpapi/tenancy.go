@@ -185,9 +185,15 @@ func (s *Server) handleReactivarSede(c *fiber.Ctx) error {
 // inviteLink arma el enlace absoluto de aceptación de una invitación a partir del
 // token. Apunta a la SPA (`…/?invite=<token>`), que muestra AcceptInvite. Usa la
 // URL pública del frontend; la interfaz igual puede recomponerlo con su origin.
+// inviteLink arma el enlace que el administrador comparte con la persona invitada.
+//
+// Apunta a /app/ y NO a la raíz: la raíz la sirve el contenedor del SITIO (la landing de
+// marketing) y la pantalla de aceptación vive en la app. Con el enlace a la raíz el
+// invitado caía en la página de ventas y nunca veía el formulario para poner su
+// contraseña — es decir, no había forma de darle acceso a nadie.
 func (s *Server) inviteLink(token string) string {
 	base := strings.TrimRight(s.cfg.FrontendURL, "/")
-	return base + "/?invite=" + url.QueryEscape(token)
+	return base + "/app/?invite=" + url.QueryEscape(token)
 }
 
 // handleInvitarMiembro crea (o reactiva) una invitación en estado pendiente y

@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/mornix/elerp/internal/adapter/inmem"
@@ -218,5 +219,72 @@ func TestAsignacion_VaciaEquivaleAQuitarla(t *testing.T) {
 	}
 	if tiene() {
 		t.Error("una asignación vacía debe quitarse")
+	}
+}
+
+// El MESONERO es un rol de una sola sede (como el cajero y el vendedor): invitarlo sin
+// sede lo dejaría sin contexto de salón. Se prueba acá porque el mensaje de error se
+// quedó viejo una vez —hablaba solo de cajeros y vendedores— y a quien invitaba un
+// mesonero le decía algo que no venía al caso.
+func TestInvitarMesonero_ExigeSede(t *testing.T) {
+	_, st := nuevoServicio(t)
+	tn := application.NewTenancy(st.Organizaciones, st.Empresas, st.Sedes, st.Usuarios, st.Membresias, st.Credenciales, st.Audit)
+
+	_, err := tn.InvitarMiembro(empSalon, actorA, origenTst, application.InviteInput{
+		Email: "meso@prueba.test", Nombre: "Meso", Rol: usuario.RolMesonero,
+	})
+	if !errors.Is(err, application.ErrSedeRequerida) {
+		t.Fatalf("invitar un mesonero sin sede debe pedir la sede, se obtuvo: %v", err)
+	}
+	if !strings.Contains(err.Error(), "mesonero") {
+		t.Errorf("el mensaje debe NOMBRAR al mesonero (si no, quien lo invita lee sobre otros roles): %q", err.Error())
+	}
+
+	// Con sede, la invitación queda pendiente y con token para compartir.
+	m, err := tn.InvitarMiembro(empSalon, actorA, origenTst, application.InviteInput{
+		Email: "meso@prueba.test", Nombre: "Meso", Rol: usuario.RolMesonero, SedeID: sedeSalon,
+	})
+	if err != nil {
+		t.Fatalf("invitar con sede: %v", err)
+	}
+	if m.Estado != usuario.EstadoInvitada || m.Token == "" {
+		t.Errorf("la invitación debe quedar pendiente y con token: estado=%q token=%q", m.Estado, m.Token)
+	}
+	if m.SedeID != sedeSalon {
+		t.Errorf("la sede debe quedar fijada por el servidor, quedó %q", m.SedeID)
+	}
+}
+
+// La CONTRASEÑA la pone la persona invitada al aceptar, no quien invita: así el
+// administrador nunca la conoce. Y se exige un mínimo, para que no quede un "1234".
+func TestAceptarInvitacion_LaPersonaPoneSuContrasena(t *testing.T) {
+	_, st := nuevoServicio(t)
+	tn := application.NewTenancy(st.Organizaciones, st.Empresas, st.Sedes, st.Usuarios, st.Membresias, st.Credenciales, st.Audit)
+	m, err := tn.InvitarMiembro(empSalon, actorA, origenTst, application.InviteInput{
+		Email: "meso2@prueba.test", Nombre: "Meso Dos", Rol: usuario.RolMesonero, SedeID: sedeSalon,
+	})
+	if err != nil {
+		t.Fatalf("invitar: %v", err)
+	}
+
+	// Una contraseña corta se rechaza (el PIN de la demo, "1234", no pasaría por acá).
+	if _, err := tn.AceptarInvitacion(m.Token, "Meso Dos", "1234", origenTst); !errors.Is(err, application.ErrPasswordDebil) {
+		t.Errorf("una contraseña corta debe rechazarse, se obtuvo: %v", err)
+	}
+
+	p, err := tn.AceptarInvitacion(m.Token, "Meso Dos", "clave-del-mesero", origenTst)
+	if err != nil {
+		t.Fatalf("aceptar: %v", err)
+	}
+	if p.Email != "meso2@prueba.test" {
+		t.Errorf("la sesión debe quedar a nombre del invitado, es %q", p.Email)
+	}
+	// Y desde ese momento puede entrar con su contraseña.
+	if _, err := tn.LoginNativo("meso2@prueba.test", "clave-del-mesero"); err != nil {
+		t.Errorf("tras aceptar debe poder entrar con su contraseña: %v", err)
+	}
+	// El token es de un solo uso: reusarlo no debe crear otra cuenta.
+	if _, err := tn.AceptarInvitacion(m.Token, "Otro", "otra-clave-larga", origenTst); err == nil {
+		t.Error("el token de invitación no debe poder reusarse")
 	}
 }
