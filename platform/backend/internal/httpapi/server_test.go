@@ -34,7 +34,7 @@ func nuevoServer(coreURL string) (*fiber.App, *store.MemOperadores) {
 		FrontendURL: "http://localhost:5174",
 		WebDir:      "/no-existe", // sin SPA estático en test
 	}
-	return httpapi.NewServer(cfg, ops, sess, cli, bill), ops
+	return httpapi.NewServer(cfg, ops, sess, cli, bill, store.NewMemLeads(), nil), ops
 }
 
 func seedOperador(ops *store.MemOperadores, email, password string, mfaConfig bool) string {

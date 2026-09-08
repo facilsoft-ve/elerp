@@ -49,6 +49,10 @@ export const api = {
   // Export/backup: descarga binaria (octet-stream). Se maneja aparte para el blob.
   exportURL: (empresaId) => `/papi/tenants/${encodeURIComponent(empresaId)}/export`,
 
+  // --- Solicitudes de demo (leads del formulario de la web) ---
+  leads: (estado = '') => request(`/papi/leads${estado ? `?estado=${encodeURIComponent(estado)}` : ''}`),
+  actualizarLead: (id, body) => request(`/papi/leads/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
   // --- Facturación / suscripciones ---
   planes: () => request('/papi/planes'),
   crearPlan: (body) => request('/papi/planes', { method: 'POST', body: JSON.stringify(body) }),

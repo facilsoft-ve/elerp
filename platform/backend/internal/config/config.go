@@ -52,6 +52,18 @@ type Config struct {
 	// FrontendURL habilita CORS con credenciales para el dev server de Vite.
 	FrontendURL string
 
+	// Solicitudes de demo (leads) del formulario de la web pública.
+	// LeadsPublicoHabilitado expone POST /papi/public/leads SIN sesión (es la única
+	// ruta pública de escritura del BFF). Los avisos por email son opcionales: sin
+	// SMTP configurado el lead se guarda igual y solo se ve en la consola.
+	LeadsPublicoHabilitado bool
+	LeadsSMTPHost          string
+	LeadsSMTPPuerto        string
+	LeadsSMTPUsuario       string
+	LeadsSMTPClave         string
+	LeadsSMTPDesde         string
+	LeadsAvisarA           []string
+
 	// Hubmy (billing opt-in). Con HubmyAPIKey se habilita el checkout de Hubmy para las
 	// suscripciones; sin ella, el billing es 100% local (cobro manual).
 	HubmyAPIBase string
@@ -62,26 +74,34 @@ type Config struct {
 func Load() Config {
 	ttl := envInt("PLATFORM_SESSION_TTL_MIN", 720) // 12 h por defecto
 	return Config{
-		Port:              env("PLATFORM_PORT", "8090"),
-		CoreAPIBase:       strings.TrimRight(env("CORE_API_BASE", "http://localhost:8080"), "/"),
-		PlatformAPIKey:    env("PLATFORM_API_KEY", ""),
-		MongoURI:          env("PLATFORM_MONGO_URI", ""),
-		MongoDB:           env("PLATFORM_MONGO_DB", "elerp_platform"),
-		CookieName:        env("PLATFORM_COOKIE", "elerp_platform_session"),
-		CookieSecure:      envBool("PLATFORM_COOKIE_SECURE", false),
-		CookieSameSite:    env("PLATFORM_COOKIE_SAMESITE", ""),
-		CookieDomain:      env("PLATFORM_COOKIE_DOMAIN", ""),
-		SessionTTL:        time.Duration(ttl) * time.Minute,
-		BootstrapEmail:    strings.ToLower(strings.TrimSpace(env("PLATFORM_BOOTSTRAP_EMAIL", ""))),
-		BootstrapPassword: env("PLATFORM_BOOTSTRAP_PASSWORD", ""),
-		BootstrapNombre:   env("PLATFORM_BOOTSTRAP_NOMBRE", "Operador Mornix"),
-		WebDir:            env("PLATFORM_WEB_DIR", "./web"),
-		BasePath:          strings.TrimRight(env("PLATFORM_BASE_PATH", ""), "/"),
-		DevLogin:          envBool("PLATFORM_DEV_LOGIN", false),
-		MFADeshabilitada:  envBool("PLATFORM_MFA_DISABLED", false),
-		FrontendURL:       env("PLATFORM_FRONTEND_URL", "http://localhost:5174"),
-		HubmyAPIBase:      strings.TrimRight(env("HUBMY_API_BASE", "https://apidev.hubmy.app"), "/"),
-		HubmyAPIKey:       env("HUBMY_API_KEY", ""),
+		Port:                   env("PLATFORM_PORT", "8090"),
+		CoreAPIBase:            strings.TrimRight(env("CORE_API_BASE", "http://localhost:8080"), "/"),
+		PlatformAPIKey:         env("PLATFORM_API_KEY", ""),
+		MongoURI:               env("PLATFORM_MONGO_URI", ""),
+		MongoDB:                env("PLATFORM_MONGO_DB", "elerp_platform"),
+		CookieName:             env("PLATFORM_COOKIE", "elerp_platform_session"),
+		CookieSecure:           envBool("PLATFORM_COOKIE_SECURE", false),
+		CookieSameSite:         env("PLATFORM_COOKIE_SAMESITE", ""),
+		CookieDomain:           env("PLATFORM_COOKIE_DOMAIN", ""),
+		SessionTTL:             time.Duration(ttl) * time.Minute,
+		BootstrapEmail:         strings.ToLower(strings.TrimSpace(env("PLATFORM_BOOTSTRAP_EMAIL", ""))),
+		BootstrapPassword:      env("PLATFORM_BOOTSTRAP_PASSWORD", ""),
+		BootstrapNombre:        env("PLATFORM_BOOTSTRAP_NOMBRE", "Operador Mornix"),
+		WebDir:                 env("PLATFORM_WEB_DIR", "./web"),
+		BasePath:               strings.TrimRight(env("PLATFORM_BASE_PATH", ""), "/"),
+		DevLogin:               envBool("PLATFORM_DEV_LOGIN", false),
+		MFADeshabilitada:       envBool("PLATFORM_MFA_DISABLED", false),
+		FrontendURL:            env("PLATFORM_FRONTEND_URL", "http://localhost:5174"),
+		LeadsPublicoHabilitado: envBool("LEADS_PUBLIC_ENABLED", true),
+		LeadsSMTPHost:          env("LEADS_SMTP_HOST", ""),
+		LeadsSMTPPuerto:        env("LEADS_SMTP_PORT", "587"),
+		LeadsSMTPUsuario:       env("LEADS_SMTP_USER", ""),
+		LeadsSMTPClave:         env("LEADS_SMTP_PASS", ""),
+		LeadsSMTPDesde:         env("LEADS_SMTP_FROM", ""),
+		LeadsAvisarA:           lista(env("LEADS_NOTIFY_TO", "")),
+
+		HubmyAPIBase: strings.TrimRight(env("HUBMY_API_BASE", "https://apidev.hubmy.app"), "/"),
+		HubmyAPIKey:  env("HUBMY_API_KEY", ""),
 	}
 }
 
@@ -93,6 +113,17 @@ func (c Config) Persistent() bool { return c.MongoURI != "" }
 
 // HasBootstrap indica si hay credenciales de bootstrap del primer operador.
 func (c Config) HasBootstrap() bool { return c.BootstrapEmail != "" && c.BootstrapPassword != "" }
+
+// lista parte una variable separada por comas ("a@x.com, b@x.com") en valores limpios.
+func lista(v string) []string {
+	out := []string{}
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
 
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {

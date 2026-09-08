@@ -16,6 +16,8 @@ import (
 	"github.com/mornix/elerp-platform/internal/billing"
 	"github.com/mornix/elerp-platform/internal/config"
 	"github.com/mornix/elerp-platform/internal/core"
+	"github.com/mornix/elerp-platform/internal/lead"
+	"github.com/mornix/elerp-platform/internal/notify"
 	"github.com/mornix/elerp-platform/internal/operador"
 )
 
@@ -26,11 +28,18 @@ type Server struct {
 	sess operador.SessionStore
 	core *core.Client
 	bill *billing.Service
+	// leads son las solicitudes de demo de la web; avisos manda el email al equipo
+	// (puede ser el notificador nulo: el lead se guarda igual).
+	leads  lead.Repository
+	avisos notify.Notificador
 }
 
 // NewServer construye la app Fiber del BFF.
-func NewServer(cfg config.Config, ops operador.Repository, sess operador.SessionStore, cli *core.Client, bill *billing.Service) *fiber.App {
-	s := &Server{cfg: cfg, ops: ops, sess: sess, core: cli, bill: bill}
+func NewServer(cfg config.Config, ops operador.Repository, sess operador.SessionStore, cli *core.Client, bill *billing.Service, leads lead.Repository, avisos notify.Notificador) *fiber.App {
+	if avisos == nil {
+		avisos = notify.Nulo{}
+	}
+	s := &Server{cfg: cfg, ops: ops, sess: sess, core: cli, bill: bill, leads: leads, avisos: avisos}
 
 	app := fiber.New(fiber.Config{
 		AppName:               "huberp-platform",
@@ -70,10 +79,24 @@ func NewServer(cfg config.Config, ops operador.Repository, sess operador.Session
 	auth.Post("/logout", s.handleLogout)
 	auth.Get("/me", s.handleMe)
 
+	// Solicitudes de demo del formulario público de la web. Límite MUY estricto: es
+	// escritura sin autenticación. El honeypot y la validación están en el handler.
+	if cfg.LeadsPublicoHabilitado && leads != nil {
+		leadLimiter := limiter.New(limiter.Config{
+			Max: 5, Expiration: 10 * time.Minute,
+			KeyGenerator: func(c *fiber.Ctx) string { return ipCliente(c) },
+		})
+		papi.Post("/public/leads", leadLimiter, s.handleCrearLeadPublico)
+	}
+
 	// Proxy gateado por sesión de operador hacia el core /internal/*.
 	g := papi.Group("", s.requireOperador)
 	s.registerProxy(g)
 	s.registerBilling(g)
+	if leads != nil {
+		g.Get("/leads", s.handleListarLeads)
+		g.Patch("/leads/:id", s.handleActualizarLead)
+	}
 
 	// SPA estático de la consola (si hay build). En dev se usa el server de Vite.
 	s.serveSPA(app)

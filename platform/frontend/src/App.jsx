@@ -5,6 +5,7 @@ import { Login } from './screens/Login.jsx'
 import { Clientes } from './screens/Clientes.jsx'
 import { Cliente } from './screens/Cliente.jsx'
 import { Facturacion } from './screens/Facturacion.jsx'
+import { Solicitudes } from './screens/Solicitudes.jsx'
 import logoUrl from './assets/elerp-logo.svg'
 
 // Marca de la consola: logotipo OFICIAL "elerp" (versión blanca, fondo oscuro) + etiqueta
@@ -23,12 +24,14 @@ function rutaActual() {
   const m = h.match(/^#\/org\/(.+)$/)
   if (m) return { name: 'org', orgId: decodeURIComponent(m[1]) }
   if (h === '#/facturacion') return { name: 'facturacion' }
+  if (h === '#/solicitudes') return { name: 'solicitudes' }
   return { name: 'clientes' }
 }
 
 const NAV = [
   { hash: '', name: 'clientes', label: 'Clientes' },
   { hash: '/facturacion', name: 'facturacion', label: 'Facturación' },
+  { hash: '/solicitudes', name: 'solicitudes', label: 'Solicitudes de demo' },
 ]
 
 function Shell({ sesion, onLogout }) {
@@ -66,7 +69,9 @@ function Shell({ sesion, onLogout }) {
             ? <Cliente orgId={ruta.orgId} volver={() => navegar('')} />
             : ruta.name === 'facturacion'
               ? <Facturacion />
-              : <Clientes abrir={(orgId) => navegar(`/org/${encodeURIComponent(orgId)}`)} />}
+              : ruta.name === 'solicitudes'
+                ? <Solicitudes />
+                : <Clientes abrir={(orgId) => navegar(`/org/${encodeURIComponent(orgId)}`)} />}
         </div>
       </main>
     </div>

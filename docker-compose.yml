@@ -121,6 +121,18 @@ services:
       # Omite el 2º factor (TOTP). TEMPORAL/INSEGURO: solo si el reloj del servidor no es
       # confiable (TOTP no valida). Volver a false en producción.
       PLATFORM_MFA_DISABLED: "${PLATFORM_MFA_DISABLED:-false}"
+      # Solicitudes de demo del formulario público de la web (POST /papi/public/leads).
+      # El endpoint está activo por defecto y SIEMPRE guarda en Mongo; el aviso por email
+      # es opcional. Sin SMTP configurado, el lead se ve solo en la consola (no se pierde).
+      # Nota: Hubmy no sirve para este aviso (su API de emails solo entrega a users de la
+      # app que ya hicieron SDK auth, no a un buzón arbitrario). Usar SMTP puerto 587.
+      LEADS_PUBLIC_ENABLED: "${LEADS_PUBLIC_ENABLED:-true}"
+      LEADS_SMTP_HOST: "${LEADS_SMTP_HOST:-}"
+      LEADS_SMTP_PORT: "${LEADS_SMTP_PORT:-587}"
+      LEADS_SMTP_USER: "${LEADS_SMTP_USER:-}"
+      LEADS_SMTP_PASS: "${LEADS_SMTP_PASS:-}"
+      LEADS_SMTP_FROM: "${LEADS_SMTP_FROM:-}"
+      LEADS_NOTIFY_TO: "${LEADS_NOTIFY_TO:-contacto@mornix.tech}"
       # Billing opt-in: con HUBMY_API_KEY el checkout de suscripciones usa Hubmy
       # (packages → Stripe). Vacía ⇒ billing local (cobro manual).
       HUBMY_API_BASE: "${HUBMY_API_BASE:-https://apidev.hubmy.app}"

@@ -16,6 +16,8 @@ import (
 	"github.com/mornix/elerp-platform/internal/facturacion"
 	"github.com/mornix/elerp-platform/internal/httpapi"
 	"github.com/mornix/elerp-platform/internal/hubmy"
+	"github.com/mornix/elerp-platform/internal/lead"
+	"github.com/mornix/elerp-platform/internal/notify"
 	"github.com/mornix/elerp-platform/internal/operador"
 	"github.com/mornix/elerp-platform/internal/store"
 )
@@ -27,6 +29,7 @@ func main() {
 	var sess operador.SessionStore
 	var planes facturacion.PlanRepo
 	var subs facturacion.SuscripcionRepo
+	var leads lead.Repository
 	if cfg.Persistent() {
 		db, err := store.Conectar(cfg.MongoURI, cfg.MongoDB)
 		if err != nil {
@@ -36,12 +39,14 @@ func main() {
 		sess = store.NewMongoSesiones(db)
 		planes = store.NewMongoPlanes(db)
 		subs = store.NewMongoSuscripciones(db)
+		leads = store.NewMongoLeads(db)
 		log.Printf("Consola: persistencia Mongo (db %s)", cfg.MongoDB)
 	} else {
 		ops = store.NewMemOperadores()
 		sess = store.NewMemSesiones()
 		planes = store.NewMemPlanes()
 		subs = store.NewMemSuscripciones()
+		leads = store.NewMemLeads()
 		log.Println("Consola: persistencia EN MEMORIA (sin PLATFORM_MONGO_URI)")
 	}
 
@@ -70,7 +75,11 @@ func main() {
 		bootstrapBillingDemo(planes, subs)
 	}
 
-	app := httpapi.NewServer(cfg, ops, sess, cli, bill)
+	// Avisos de solicitudes de demo: SMTP opcional. Sin configurar, el lead se guarda y
+	// solo se ve en la consola (nunca se pierde por falta de correo).
+	avisos := notificadorLeads(cfg)
+
+	app := httpapi.NewServer(cfg, ops, sess, cli, bill, leads, avisos)
 
 	log.Printf("Consola de plataforma escuchando en :%s (core: %s)", cfg.Port, cfg.CoreAPIBase)
 	if err := app.Listen(":" + cfg.Port); err != nil {
@@ -117,7 +126,9 @@ func bootstrapBillingDemo(planes facturacion.PlanRepo, subs facturacion.Suscripc
 	if len(planes.List()) > 0 {
 		return
 	}
-	lim := func(f, u, s int) facturacion.Limites { return facturacion.Limites{FacturasMes: f, Usuarios: u, Sucursales: s} }
+	lim := func(f, u, s int) facturacion.Limites {
+		return facturacion.Limites{FacturasMes: f, Usuarios: u, Sucursales: s}
+	}
 	emprendedor := planes.Create(facturacion.Plan{Nombre: "Emprendedor", Descripcion: "Para empezar: una sede, lo esencial.", PrecioCents: 1500, Moneda: "USD", Intervalo: facturacion.IntervaloMensual, Limites: lim(200, 3, 1), Activo: true})
 	pro := planes.Create(facturacion.Plan{Nombre: "Pro", Descripcion: "Multi-sede, contabilidad y tesorería completas.", PrecioCents: 3900, Moneda: "USD", Intervalo: facturacion.IntervaloMensual, Limites: lim(2000, 10, 5), Activo: true})
 	planes.Create(facturacion.Plan{Nombre: "Empresa", Descripcion: "Sin límites, soporte prioritario.", PrecioCents: 9900, Moneda: "USD", Intervalo: facturacion.IntervaloMensual, Limites: lim(0, 0, 0), Activo: true})
@@ -128,4 +139,17 @@ func bootstrapBillingDemo(planes facturacion.PlanRepo, subs facturacion.Suscripc
 		Inicio: "2026-08-01T00:00:00Z", ProximoCobro: "2026-09-01T00:00:00Z",
 	})
 	log.Println("DEV_LOGIN: billing demo sembrado (3 planes + suscripción Pro de org_demo).")
+}
+
+// notificadorLeads arma el notificador de solicitudes de demo. Devuelve el nulo si no hay
+// SMTP configurado, así el resto del código no tiene que chequear nada.
+func notificadorLeads(cfg config.Config) notify.Notificador {
+	s := notify.NuevoSMTP(cfg.LeadsSMTPHost, cfg.LeadsSMTPPuerto, cfg.LeadsSMTPUsuario,
+		cfg.LeadsSMTPClave, cfg.LeadsSMTPDesde, cfg.LeadsAvisarA)
+	if s == nil {
+		log.Println("Solicitudes de demo: SIN aviso por email (falta LEADS_SMTP_HOST/LEADS_SMTP_FROM/LEADS_NOTIFY_TO). Se guardan y se ven en la consola.")
+		return notify.Nulo{}
+	}
+	log.Printf("Solicitudes de demo: aviso por email a %v vía %s.", s.Destinatarios(), cfg.LeadsSMTPHost)
+	return s
 }
