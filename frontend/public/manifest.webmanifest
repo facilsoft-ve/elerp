@@ -4,17 +4,62 @@
   "description": "Facturación, inventario, contabilidad y tesorería con cumplimiento fiscal venezolano.",
   "lang": "es",
   "dir": "ltr",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "/app/",
+  "scope": "/app/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#FAFBFC",
   "theme_color": "#1D3477",
-  "categories": ["business", "finance", "productivity"],
+  "categories": [
+    "business",
+    "finance",
+    "productivity"
+  ],
   "icons": [
-    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "/app/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/app/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/app/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/app/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "id": "/app/",
+  "shortcuts": [
+    {
+      "name": "Comandera",
+      "short_name": "Comandera",
+      "url": "/app/#restaurante:comandera",
+      "description": "Tomar el pedido de una mesa"
+    },
+    {
+      "name": "Cocina",
+      "short_name": "Cocina",
+      "url": "/app/#restaurante:cocina",
+      "description": "Comandas entrantes"
+    },
+    {
+      "name": "Punto de venta",
+      "short_name": "POS",
+      "url": "/app/#pos",
+      "description": "Cobrar en el mostrador"
+    }
   ]
 }
