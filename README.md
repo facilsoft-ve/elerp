@@ -181,7 +181,15 @@ cd frontend && npm install && npm run dev
 ## Verificación
 
 - Backend: `cd backend && go build ./... && go vet ./...` (o `docker build ./backend`).
-- Frontend: `cd frontend && npm run build`.
+- Frontend: `cd frontend && npm run verify` — corre **lint + pruebas + build**, en ese
+  orden, y es lo que hay que pasar antes de desplegar.
+  - El paso de **lint** no es opinión de estilo: es `no-undef`. `vite build` solo resuelve
+    imports, no referencias, así que compila sin chistar un identificador que no existe —
+    y el resultado es una **pantalla en blanco** en runtime (React no renderiza nada ante
+    un `ReferenceError`). Pasó tres veces con el módulo Restaurante cuando un refactor
+    borró un helper que otro lugar seguía usando.
+  - El mismo lint corre **dentro del Dockerfile** antes del build, así que una imagen con
+    esa clase de error no se construye. No depende de acordarse de correrlo.
 - Smoke test de la API (con el stack arriba): dev-login → `/api/me` →
   `/api/bootstrap` → `/api/inventario/*` con cabeceras `X-Empresa-ID` +
   `X-Sede-ID`.

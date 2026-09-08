@@ -9,6 +9,9 @@ WORKDIR /fe
 COPY frontend/package*.json ./
 RUN npm ci || npm install
 COPY frontend/ ./
+# Lint antes del build: `vite build` compila un identificador inexistente sin chistar y el
+# resultado es una pantalla en blanco en runtime. Ver frontend/eslint.config.js del repo.
+RUN npm run lint
 RUN npm run build
 
 # 2) BFF (Go) → binario estático.
