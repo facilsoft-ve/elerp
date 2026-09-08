@@ -88,11 +88,11 @@ const TABS = [
 // al mesonero —que solo alcanza la Comandera— le ofrecía dos cosas que no puede hacer, y
 // en las otras cuatro pestañas describía algo distinto de lo que se estaba viendo.
 const SUBTITULO = {
-  inicio: 'Cómo está el salón ahora, qué pasa en cocina y cómo va el día. Desde acá saltás a cada sección.',
-  comandera: 'Tomá el pedido de cada mesa y enviálo a cocina. Cuando pidan la cuenta, prefacturá y la caja cobra.',
-  mesas: 'Diseñá el salón sobre una grilla: ubicá las mesas, bloqueá los espacios donde no puede haber ninguna y fijá cuántas personas caben.',
-  mesoneros: 'Asigná a cada mesonero las mesas o las zonas que atiende. Sin asignar, cualquiera atiende cualquier mesa.',
-  cocina: 'Las comandas entrantes en vivo, con su nota y su tiempo de espera. Marcá cada plato listo cuando salga.',
+  inicio: 'Cómo está el salón ahora, qué pasa en cocina y cómo va el día. Desde acá saltas a cada sección.',
+  comandera: 'Toma el pedido de cada mesa y envíalo a cocina. Cuando pidan la cuenta, prefactura y la caja cobra.',
+  mesas: 'Diseña el salón sobre una grilla: ubica las mesas, bloquea los espacios donde no puede haber ninguna y fija cuántas personas caben.',
+  mesoneros: 'Asigna a cada mesonero las mesas o las zonas que atiende. Sin asignar, cualquiera atiende cualquier mesa.',
+  cocina: 'Las comandas entrantes en vivo, con su nota y su tiempo de espera. Marca cada plato listo cuando salga.',
   platos: 'Los platos con su receta (escandallo): al venderlos se descuentan sus insumos del inventario.',
   impresora: 'Las comanderas por área —cocina, barra, postres— y qué rubro de productos sale por cada una.',
 }
@@ -417,14 +417,14 @@ function ImpresoraComandas() {
   return (
     <div className="space-y-4 max-w-3xl">
       <div className="text-[12.5px] text-slate-500 dark:text-slate-400">
-        Cada <strong>comandera</strong> es un puesto donde salen las comandas: cocina, barra, postres. Declará de qué
+        Cada <strong>comandera</strong> es un puesto donde salen las comandas: cocina, barra, postres. Declara de qué
         <strong> rubros</strong> imprime cada una y el pedido se reparte solo. La <strong>predeterminada</strong> recibe
         lo que no encaje en ningún rubro, para que nada se quede sin imprimir.
       </div>
 
       {lista.length === 0 ? (
         <Empty title="Todavía no hay comanderas"
-          body="Sin comanderas la comanda igual se genera y se ve en pantalla. Agregá una por cada puesto de preparación."
+          body="Sin comanderas la comanda igual se genera y se ve en pantalla. Agrega una por cada puesto de preparación."
           cta={puedeEditar ? <Button size="lg" icon={<Icon.Plus size={16} />} onClick={() => setEditando({})}>Agregar comandera</Button> : null} />
       ) : (
         <div className="space-y-2">
@@ -624,7 +624,7 @@ export function Comandera() {
           title: `La mesa ${m.nombre} es de ${duenos.map((d) => d.nombre).join(', ')}`,
           body: estricta
             ? 'La sede tiene la asignación estricta: no vas a poder tomarla. Pedile a la administración que la reasigne.'
-            : 'Podés tomarla igual —queda registrado quién la atendió— o dejársela a su mesonero.',
+            : 'Puedes tomarla igual —queda registrado quién la atendió— o dejársela a su mesonero.',
           confirmLabel: estricta ? 'Entendido' : 'Tomarla igual',
           tone: 'warn',
         })
@@ -795,7 +795,7 @@ function CuentaDetalle({ cuenta, busy, onVolver, onAgregar, onCancelar, onEnviar
                           aria-label={`Quitar ${it.nombre}`}
                           className={`${T.icono} text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 shrink-0`}><Icon.Trash size={18} /></button>
                       ) : (
-                        <span title="Ya está en cocina: pedí a la caja que lo anule"
+                        <span title="Ya está en cocina: pide a la caja que lo anule"
                           className={`${T.icono} text-slate-300 dark:text-slate-600 shrink-0 cursor-not-allowed`}>
                           <Icon.Lock size={16} />
                         </span>
@@ -828,7 +828,7 @@ function CuentaDetalle({ cuenta, busy, onVolver, onAgregar, onCancelar, onEnviar
               Volver a servicio (anular prefactura)
             </Button>
             <div className="text-[11px] text-slate-400 px-1 pt-1">
-              Volvé a servicio si el cliente pide algo más: con la cuenta pedida no se pueden agregar renglones,
+              Vuelve a servicio si el cliente pide algo más: con la cuenta pedida no se pueden agregar renglones,
               porque la prefactura quedaría desactualizada.
             </div>
           </>
@@ -1393,7 +1393,7 @@ function MesonerosAsignacion() {
 
       {mesoneros.length === 0 ? (
         <Empty title="Todavía no hay mesoneros"
-          body="Invitá a alguien con el rol Mesonero en Configuración › Usuarios y roles. Sin asignación, cualquier mesonero atiende cualquier mesa." />
+          body="Invita a alguien con el rol Mesonero en Configuración › Usuarios y roles. Sin asignación, cualquier mesonero atiende cualquier mesa." />
       ) : (
         <>
           <div className="flex items-center gap-1.5">
@@ -1633,7 +1633,7 @@ function DivisionModal({ cuenta, busy, onClose, onConfirmar }) {
             {vacias.length > 0 ? (
               <div className="text-[12.5px] text-amber-700 dark:text-amber-300">
                 {vacias.length === 1 ? `La ${nombresParte(vacias[0]).toLowerCase()} quedó vacía` : `Hay ${vacias.length} partes vacías`}:
-                asigná al menos un renglón a cada una o reducí el número de partes.
+                asigna al menos un renglón a cada una o reduce el número de partes.
               </div>
             ) : null}
           </div>

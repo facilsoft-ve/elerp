@@ -21,7 +21,7 @@ var (
 	ErrSinPendientes       = errors.New("no hay renglones nuevos para enviar a cocina")
 	// ErrItemYaEnviado: el renglón ya está en cocina. Un mesonero no lo anula solo —
 	// anularlo cuesta comida, así que lo autoriza la caja o la dueña.
-	ErrItemYaEnviado   = errors.New("el renglón ya fue enviado a cocina: pedí a la caja que lo anule")
+	ErrItemYaEnviado   = errors.New("el renglón ya fue enviado a cocina: pide a la caja que lo anule")
 	ErrItemSinCantidad = errors.New("cada renglón necesita una cantidad mayor que cero")
 )
 

@@ -201,7 +201,7 @@ export function AIAssistant() {
               <div className="flex items-end gap-2">
                 <input ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-                  placeholder="Escribí tu pregunta…"
+                  placeholder="Escribe tu pregunta…"
                   aria-label="Mensaje para el asistente"
                   disabled={pensando}
                   className="flex-1 h-11 px-3.5 rounded-xl text-sm disabled:opacity-60
@@ -217,7 +217,7 @@ export function AIAssistant() {
                 </button>
               </div>
               <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-2 text-center">
-                Las cifras salen de tu ledger. Verificá siempre los datos fiscales antes de declarar.
+                Las cifras salen de tu ledger. Verifica siempre los datos fiscales antes de declarar.
               </p>
             </div>
           </div>

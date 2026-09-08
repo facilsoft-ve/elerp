@@ -329,7 +329,7 @@ export function SistemaDiseno() {
                 ))}
               </div>
               <div className="text-[12px] text-slate-500 mt-3">
-                Hacé clic para mover el punto hub — solo el módulo activo lo lleva.
+                Haz clic para mover el punto hub — solo el módulo activo lo lleva.
               </div>
             </Card>
             <div className="flex flex-wrap items-end gap-6">

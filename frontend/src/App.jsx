@@ -188,7 +188,7 @@ function Shell() {
   }, [activeEmpresa?.id, rolReal])
 
   // Guard de ruta: por ROL y por MÓDULO activo. Lo segundo importa al cambiar de empresa
-  // (o de rubro en la demo): si estabas en Restaurante › Cocina y pasás a una empresa sin
+  // (o de rubro en la demo): si estabas en Restaurante › Cocina y pasas a una empresa sin
   // ese módulo, el Sidebar lo oculta pero la pantalla seguía renderizándose vacía. Acá se
   // vuelve al inicio, que es lo que corresponde.
   // `undefined` = los módulos todavía no cargaron; `[]` = cargaron y no hay ninguno. La

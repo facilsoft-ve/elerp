@@ -823,7 +823,7 @@ export function ModoCaja({ onSalir }) {
                   title="Apartar este carrito y atender al siguiente">Espera</Button>
                 <Button className="flex-1 justify-center" size="lg" variant="dinero"
                   disabled={cart.length === 0 || faltaCliente} onClick={() => setCobrando(true)} icon={<Icon.Banknote size={18} />}
-                  title={faltaCliente ? 'Identificá al cliente para cobrar' : undefined}>
+                  title={faltaCliente ? 'Identifica al cliente para cobrar' : undefined}>
                   Cobrar {fmtCurrency(totales.total, 'VES')}
                 </Button>
               </div>

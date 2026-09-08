@@ -1,6 +1,6 @@
 // Cliente HTTP del backend de ElERP.
 // En dev, API_BASE queda vacío y el proxy de Vite reenvía /api y /auth al Go.
-// En prod (front en Vercel), definí VITE_API_BASE con la URL del backend.
+// En prod (front en Vercel), define VITE_API_BASE con la URL del backend.
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 
 // Contexto activo (multi-tenant de 3 niveles: Organización → Empresa → Sede).
@@ -143,7 +143,7 @@ export const api = {
   emitirCierreZ: () => request('/api/fiscal/cierres-z', { method: 'POST' }),
 
   // Retenciones de IVA (comprobantes). La lista consolida recibidas (sobre facturas
-  // de venta, crédito a favor) y emitidas (sobre facturas de compra, si sos agente
+  // de venta, crédito a favor) y emitidas (sobre facturas de compra, si eres agente
   // de retención). Registrar es append-only: el backend rechaza con 400 duplicadas,
   // % inválido, sin IVA o documento anulado.
   retenciones: () => request('/api/fiscal/retenciones'),

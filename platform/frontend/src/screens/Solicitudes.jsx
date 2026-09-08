@@ -270,7 +270,7 @@ function DetalleSolicitud({ lead, estados, plantilla, onClose, onGuardado }) {
               ? 'Sandbox abierto para este prospecto'
               : plantilla
                 ? `Se clonará «${plantilla.nombre}» como sandbox de 14 días`
-                : 'Sin rubro elegido (o sin demo de ese rubro): cargá el ID a mano'}>
+                : 'Sin rubro elegido (o sin demo de ese rubro): carga el ID a mano'}>
             <Input value={empresaDemoId} onChange={(e) => setEmpresaDemoId(e.target.value)} placeholder="emp_…" />
           </Field>
         </div>

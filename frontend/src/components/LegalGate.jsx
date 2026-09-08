@@ -91,7 +91,7 @@ function AceptacionLegal({ pendientes, onListo }) {
       for (const d of mostrar) await api.legalAceptar(d.documento)
       await onListo()
     } catch (e) {
-      setError(e?.message || 'No se pudo registrar la aceptación. Reintentá.')
+      setError(e?.message || 'No se pudo registrar la aceptación. Reintenta.')
     } finally { setBusy(false) }
   }
 

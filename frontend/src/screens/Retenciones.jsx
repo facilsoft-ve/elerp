@@ -11,8 +11,8 @@ import { ComprobanteRetencionModal } from '../components/ComprobanteRetencion.js
 //   · Recibida — un cliente AGENTE DE RETENCIÓN te retiene un % (75/100) del IVA de
 //     TU factura de venta y te entrega el comprobante. Es un crédito a tu favor
 //     (baja la CxC de esa factura).
-//   · Emitida — si SOS agente de retención, vos retenés el IVA a tu proveedor sobre
-//     su factura de compra y le emitís el comprobante (baja la CxP).
+//   · Emitida — si ERES agente de retención, tú retienes el IVA a tu proveedor sobre
+//     su factura de compra y le emites el comprobante (baja la CxP).
 // El backend es la autoridad: la lista y el alta son append-only; registrar rechaza
 // con 400 (duplicada, % inválido, sin IVA, documento anulado). La UI solo evita el
 // error obvio y muestra el mensaje del servidor.
@@ -100,7 +100,7 @@ export function Retenciones() {
         <Icon.Shield size={15} className="mt-0.5 shrink-0 text-elerp-500" />
         <span>
           <strong>Recibida:</strong> un cliente agente de retención te retiene un % del IVA de tu factura de venta y te da el comprobante (crédito a tu favor).{' '}
-          <strong>Emitida:</strong> si sos agente de retención, vos retenés el IVA a tu proveedor sobre su factura de compra y le emitís el comprobante. El % típico es 75% o 100%.
+          <strong>Emitida:</strong> si eres agente de retención, tú retienes el IVA a tu proveedor sobre su factura de compra y le emites el comprobante. El % típico es 75% o 100%.
         </span>
       </div>
 
@@ -352,10 +352,10 @@ function AltaRetencionModal({ modo, documentos, onClose, onSaved, toast, ccy }) 
           <span>{esISLR
             ? (esRecibida
               ? 'Comprobante de ISLR que te entregó el cliente: baja tu cuenta por cobrar por lo retenido (anticipo de ISLR a tu favor). Una por factura e impuesto.'
-              : 'Comprobante de ISLR que le emitís al proveedor: baja tu cuenta por pagar por lo retenido (ISLR por enterar al SENIAT). Una por factura e impuesto.')
+              : 'Comprobante de ISLR que le emites al proveedor: baja tu cuenta por pagar por lo retenido (ISLR por enterar al SENIAT). Una por factura e impuesto.')
             : (esRecibida
               ? 'Comprobante de IVA que te entregó el cliente: baja tu cuenta por cobrar por el IVA retenido. Una por factura e impuesto.'
-              : 'Comprobante de IVA que le emitís al proveedor: baja tu cuenta por pagar por el IVA retenido. Una por factura e impuesto.')}</span>
+              : 'Comprobante de IVA que le emites al proveedor: baja tu cuenta por pagar por el IVA retenido. Una por factura e impuesto.')}</span>
         </div>
 
         {cargando ? (

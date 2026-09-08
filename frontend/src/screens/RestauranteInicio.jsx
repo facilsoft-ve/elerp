@@ -42,7 +42,7 @@ export function RestauranteInicio({ irA }) {
     <div className="space-y-5">
       {sinMesas ? (
         <Empty title="El salón todavía no está armado"
-          body="Empezá por el mapa de mesas: dibujá el salón sobre la grilla y ubicá las mesas. Después cargá los platos con su receta."
+          body="Empieza por el mapa de mesas: dibuja el salón sobre la grilla y ubica las mesas. Después carga los platos con su receta."
           cta={<Button onClick={() => irA('mesas')}>Diseñar el mapa de mesas</Button>} />
       ) : (
         <>
