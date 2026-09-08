@@ -291,9 +291,9 @@ func (s *Server) handleBootstrap(c *fiber.Ctx) error {
 		// Módulo Restaurante: mesas del salón de la sede activa y la config de la
 		// impresora de comandas. Solo si el módulo está activo (si no, vacío); así
 		// el mapa y el selector de mesas solo aparecen cuando corresponde.
-		"mesas":             mesasSiRestaurante(s, empID, sedeIDOf(c)),
-		"planoSalon":        planoSiRestaurante(s, empID, sedeIDOf(c)),
-		"impresoraComandas": impresoraSiRestaurante(s, empID, sedeIDOf(c)),
+		"mesas":              mesasSiRestaurante(s, empID, sedeIDOf(c)),
+		"planoSalon":         planoSiRestaurante(s, empID, sedeIDOf(c)),
+		"impresorasComandas": impresoraSiRestaurante(s, empID, sedeIDOf(c)),
 		// Cuentas abiertas de la sede (tablero de la comandera): estado y total en
 		// vivo de cada mesa. Solo si el módulo está activo.
 		"cuentasAbiertas": cuentasSiRestaurante(s, empID, sedeIDOf(c)),
@@ -348,13 +348,13 @@ func configSalonSiRestaurante(s *Server, empID, sedeID string) any {
 	return s.svc.ConfigSalon(empID, sedeID)
 }
 
-// impresoraSiRestaurante devuelve la config de impresora de comandas de la sede
-// solo si el módulo Restaurante está activo; si no, nil.
+// impresoraSiRestaurante devuelve las COMANDERAS de la sede solo si el módulo
+// Restaurante está activo; si no, nil.
 func impresoraSiRestaurante(s *Server, empID, sedeID string) any {
 	if !s.svc.ModuloActivo(empID, aplicacion.ModRestaurante) {
 		return nil
 	}
-	return s.svc.ImpresoraComandas(empID, sedeID)
+	return s.svc.Impresoras(empID, sedeID)
 }
 
 // promocionesSiMarketing devuelve las promociones activas solo si el módulo

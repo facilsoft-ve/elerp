@@ -34,6 +34,15 @@ func restauranteDemo() especNicho {
 		vendedor: "Daniel Ochoa", contadora: "Lcda. Carmen Silva",
 		mesoneros:      []string{"Keiber Rojas", "Yulimar Suárez"},
 		zonasMesoneros: []string{"Salón", "Terraza"},
+		// Tres puestos de preparación, como en un local de verdad. Los rubros coinciden
+		// con los del catálogo de este rubro, así que el ruteo funciona de entrada.
+		comanderas: []comanderaNicho{
+			// Cocina es la PREDETERMINADA: lo que no encaje en barra ni postres sale por
+			// acá, que es donde alguien lo va a ver.
+			{nombre: "Cocina", rubros: []string{"Cocina", "Insumos"}, predeterminada: true},
+			{nombre: "Barra", rubros: []string{"Bebidas"}, red: true, host: "192.168.1.51", puerto: 9100},
+			{nombre: "Postres", rubros: []string{"Postres"}, red: true, host: "192.168.1.52", puerto: 9100},
+		},
 		proveedores: []provNicho{
 			{nombre: "Distribuidora de Alimentos Del Valle, C.A.", doc: "J-30871234-5", telefono: "0212-6651122"},
 			{nombre: "Carnicería El Novillo, C.A.", doc: "J-31445566-0", telefono: "0212-7734455"},

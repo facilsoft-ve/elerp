@@ -26,6 +26,7 @@ export const Button = ({ variant = 'primary', size = 'md', icon, iconRight, chil
     sm: 'h-9 px-3.5 text-[13px]',
     md: 'h-10 px-4 text-sm',   // 40px
     lg: 'h-11 px-5 text-sm',   // 44px — mínimo táctil en POS y Modo caja
+    xl: 'h-14 px-6 text-[15px]', // 56px — objetivo CÓMODO con tablet en mano (comandera)
   }
   const variants = {
     primary: 'bg-elerp-500 hover:bg-elerp-600 active:bg-elerp-700 text-white',

@@ -444,8 +444,9 @@ export const api = {
   guardarAsignacionMesas: (body) => request('/api/restaurante/asignaciones', { method: 'PUT', body: JSON.stringify(body) }),
   configSalon: () => request('/api/restaurante/config'),
   guardarConfigSalon: (body) => request('/api/restaurante/config', { method: 'PUT', body: JSON.stringify(body) }),
-  impresoraComandas: () => request('/api/restaurante/impresora'),
-  guardarImpresoraComandas: (body) => request('/api/restaurante/impresora', { method: 'PUT', body: JSON.stringify(body) }),
+  impresorasComandas: () => request('/api/restaurante/impresoras'),
+  guardarImpresora: (body) => request('/api/restaurante/impresoras', { method: 'PUT', body: JSON.stringify(body) }),
+  eliminarImpresora: (id) => request(`/api/restaurante/impresoras/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   // Cuentas de mesa (comandera)
   cuentasAbiertas: () => request('/api/restaurante/cuentas'),
   prefacturarCuenta: (id, body) => request(`/api/restaurante/cuentas/${encodeURIComponent(id)}/prefacturar`, { method: 'POST', body: JSON.stringify(body) }),

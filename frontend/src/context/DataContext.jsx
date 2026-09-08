@@ -134,7 +134,8 @@ export function DataProvider({ children }) {
         // comandas. Vacío/null cuando el módulo no está activo.
         MESAS: boot.mesas || [],
         PLANO_SALON: boot.planoSalon || null,
-        IMPRESORA_COMANDAS: boot.impresoraComandas || null,
+        // Comanderas de la sede (cocina, barra, postres) — varias por sede.
+        IMPRESORAS_COMANDAS: boot.impresorasComandas || [],
         // Asignación de mesas por mesonero y config del módulo: la comandera destaca las
         // mesas propias y avisa antes de tomar una ajena.
         ASIGNACIONES_MESAS: boot.asignacionesMesas || [],

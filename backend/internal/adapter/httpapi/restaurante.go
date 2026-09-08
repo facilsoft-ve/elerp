@@ -36,8 +36,10 @@ func (s *Server) registerRestaurante(r fiber.Router) {
 	g.Get("/config", s.handleConfigSalon)
 	g.Put("/config", edit, s.handleGuardarConfigSalon)
 
-	g.Get("/impresora", s.handleImpresora)
-	g.Put("/impresora", edit, s.handleGuardarImpresora)
+	// Comanderas: varias por sede (cocina, barra, postres), cada una con sus rubros.
+	g.Get("/impresoras", s.handleImpresoras)
+	g.Put("/impresoras", edit, s.handleGuardarImpresora)
+	g.Delete("/impresoras/:id", edit, s.handleEliminarImpresora)
 
 	// Cuentas de mesa (comandera): abrir, agregar renglones, enviar a cocina,
 	// cancelar/marcar renglón, cerrar. Las opera cualquier rol del salón (ver).
@@ -127,11 +129,13 @@ func (s *Server) handleAgregarItems(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleEnviarCocina(c *fiber.Ctx) error {
-	cta, comanda, err := s.svc.EnviarACocina(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c))
+	cta, tickets, err := s.svc.EnviarACocina(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c))
 	if err != nil {
 		return cuentaErr(c, err)
 	}
-	return c.JSON(fiber.Map{"cuenta": cta, "comanda": fiber.Map{"ronda": cta.UltimaRonda, "items": comanda}})
+	// `tickets` es la comanda ya REPARTIDA por comandera (cocina, barra, postres): la
+	// interfaz imprime/muestra un ticket por cada una.
+	return c.JSON(fiber.Map{"cuenta": cta, "comanda": fiber.Map{"ronda": cta.UltimaRonda, "tickets": tickets}})
 }
 
 func (s *Server) handleCancelarItem(c *fiber.Ctx) error {
@@ -265,8 +269,9 @@ func (s *Server) handleGuardarMapa(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
-func (s *Server) handleImpresora(c *fiber.Ctx) error {
-	return c.JSON(s.svc.ImpresoraComandas(empresaIDOf(c), sedeIDOf(c)))
+// handleImpresoras lista las COMANDERAS de la sede (cocina, barra, postres…).
+func (s *Server) handleImpresoras(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"impresoras": s.svc.Impresoras(empresaIDOf(c), sedeIDOf(c))})
 }
 
 func (s *Server) handleGuardarImpresora(c *fiber.Ctx) error {
@@ -274,11 +279,19 @@ func (s *Server) handleGuardarImpresora(c *fiber.Ctx) error {
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
-	out, err := s.svc.GuardarImpresoraComandas(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c), in)
+	out, err := s.svc.GuardarImpresora(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c), in)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(out)
+}
+
+func (s *Server) handleEliminarImpresora(c *fiber.Ctx) error {
+	if err := s.svc.EliminarImpresora(empresaIDOf(c), sedeIDOf(c), c.Params("id"),
+		principalOf(c).UserID, origen(c)); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.SendStatus(fiber.StatusNoContent)
 }
 
 // --- Asignación de mesas a mesoneros ---

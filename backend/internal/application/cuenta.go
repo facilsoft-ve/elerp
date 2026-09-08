@@ -196,7 +196,12 @@ func (s *Service) AgregarItems(empresaID, cuentaID, actor, rolActor, origen stri
 // EnviarACocina agrupa los renglones pendientes en una nueva RONDA y los marca
 // "en_cocina". Devuelve la cuenta y los renglones de esa ronda (la comanda a
 // imprimir). Falla si no hay pendientes.
-func (s *Service) EnviarACocina(empresaID, cuentaID, actor, origen string) (cuenta.Cuenta, []cuenta.Item, error) {
+// EnviarACocina agrupa los renglones PENDIENTES en una ronda nueva (la comanda) y
+// devuelve el ticket REPARTIDO por comandera: los platos por la de cocina, las bebidas
+// por la barra, los postres por la suya. Cada puesto de preparación recibe solo lo que
+// le toca; mandar la comanda completa a los tres obliga a cada uno a leer lo que no es
+// suyo, que es como se pierden los pedidos.
+func (s *Service) EnviarACocina(empresaID, cuentaID, actor, origen string) (cuenta.Cuenta, []ComandaImpresa, error) {
 	c, err := s.cuentaAbierta(empresaID, cuentaID)
 	if err != nil {
 		return cuenta.Cuenta{}, nil, err
@@ -220,8 +225,19 @@ func (s *Service) EnviarACocina(empresaID, cuentaID, actor, origen string) (cuen
 	if !ok {
 		return cuenta.Cuenta{}, nil, ErrCuentaMesaNoExiste
 	}
-	s.audit.Append(evento(empresaID, actor, origen, "restaurante.cuenta.enviar_cocina", out.ID, fmt.Sprintf("ronda %d · %d renglón(es)", ronda, len(comanda))))
-	return out, comanda, nil
+	tickets := s.repartirComanda(empresaID, out.SedeID, comanda)
+	destinos := make([]string, 0, len(tickets))
+	for _, t := range tickets {
+		if t.Impresora.Nombre != "" {
+			destinos = append(destinos, t.Impresora.Nombre)
+		}
+	}
+	detalle := fmt.Sprintf("ronda %d · %d renglón(es)", ronda, len(comanda))
+	if len(destinos) > 0 {
+		detalle += " · " + strings.Join(destinos, ", ")
+	}
+	s.audit.Append(evento(empresaID, actor, origen, "restaurante.cuenta.enviar_cocina", out.ID, detalle))
+	return out, tickets, nil
 }
 
 // CancelarItem quita un renglón: si aún estaba pendiente se elimina; si ya fue a

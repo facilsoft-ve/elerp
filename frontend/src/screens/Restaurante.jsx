@@ -49,7 +49,7 @@ const TABS = [
   { id: 'mesoneros', label: 'Mesoneros y asignación', icon: <Icon.Users size={15} /> },
   { id: 'cocina', label: 'Cocina', icon: <Icon.Activity size={15} /> },
   { id: 'platos', label: 'Platos y recetas', icon: <Icon.Boxes size={15} /> },
-  { id: 'impresora', label: 'Impresora de comandas', icon: <Icon.Printer size={15} /> },
+  { id: 'impresora', label: 'Comanderas', icon: <Icon.Printer size={15} /> },
 ]
 
 export function Restaurante({ route }) {
@@ -327,91 +327,207 @@ function NuevaMesaModal({ onClose, onCreada, toast, columna = 0, fila = 0 }) {
 }
 
 // ======================= IMPRESORA DE COMANDAS =======================
+/* --- Comanderas (puestos de impresión de comandas) --------------------- */
+
+/* Un local tiene VARIAS: cocina, barra y postres son puestos de preparación distintos y
+ * cada uno necesita su ticket con SUS renglones. Cada comandera declara de qué rubros
+ * imprime, y una queda PREDETERMINADA para lo que no encaje en ninguno — así un producto
+ * de un rubro nuevo no se pierde en el camino. */
 function ImpresoraComandas() {
   const { db, reload } = useData()
   const { ui } = useUI()
   const toast = useToast()
+  const confirm = useConfirm()
   const puedeEditar = PUEDE_EDITAR.includes(ui.rol)
 
-  const [f, setF] = useState(null)
-  const [busy, setBusy] = useState(false)
+  const [lista, setLista] = useState(db.IMPRESORAS_COMANDAS || null)
+  const [editando, setEditando] = useState(null)
 
   useEffect(() => {
-    const base = db.IMPRESORA_COMANDAS
-    if (base) { setF({ ...base }); return }
-    api.impresoraComandas().then((x) => setF(x || {})).catch(() => setF({ nombre: 'Cocina', conexion: 'local', anchoMm: 80, activa: false }))
-  }, [db.IMPRESORA_COMANDAS])
+    if (db.IMPRESORAS_COMANDAS) { setLista(db.IMPRESORAS_COMANDAS); return }
+    api.impresorasComandas().then((r) => setLista(r.impresoras || [])).catch(() => setLista([]))
+  }, [db.IMPRESORAS_COMANDAS])
 
-  if (!f) return <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4"><TableSkeleton rows={4} cols={2} /></div>
+  // Los rubros del catálogo son lo que se reparte entre comanderas.
+  const rubros = ((db.RUBROS || []).map((r) => r.nombre)).filter(Boolean)
 
-  const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
-  const guardar = async () => {
-    setBusy(true)
+  const eliminar = async (imp) => {
+    if (!(await confirm({
+      title: `¿Eliminar la comandera «${imp.nombre}»?`,
+      body: imp.predeterminada
+        ? 'Es la predeterminada: si queda otra, hereda el papel de recibir lo que no encaje en ningún rubro.'
+        : 'Sus rubros pasarán a imprimirse por la comandera predeterminada.',
+      confirmLabel: 'Eliminar', tone: 'danger',
+    }))) return
     try {
-      const out = await api.guardarImpresoraComandas({
-        nombre: f.nombre, conexion: f.conexion, host: f.host || '', puerto: Number(f.puerto) || 0,
-        anchoMm: Number(f.anchoMm) || 80, activa: !!f.activa,
-      })
-      setF({ ...out }); reload(); toast({ title: 'Impresora guardada' })
-    } catch (e) { toast({ title: 'No se pudo guardar', body: e?.message || 'Error', kind: 'error' }) }
-    finally { setBusy(false) }
+      await api.eliminarImpresora(imp.id)
+      toast({ title: 'Comandera eliminada' })
+      reload()
+    } catch (e) { toast({ title: 'No se pudo eliminar', body: e?.message || 'Error', kind: 'error' }) }
   }
 
-  const esRed = (f.conexion || 'local') === 'red'
+  if (lista === null) return <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4"><TableSkeleton rows={3} cols={3} /></div>
+
   return (
-    <div className="max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4 md:p-5 space-y-4">
+    <div className="space-y-4 max-w-3xl">
       <div className="text-[12.5px] text-slate-500 dark:text-slate-400">
-        Configura dónde se imprimen las <strong>comandas</strong> que van a la cocina. Puede ser una impresora
-        <strong> local</strong> (conectada al equipo de la caja, vía el agente local) o de <strong>red</strong>
-        (una impresora térmica con IP fija en la red del local).
+        Cada <strong>comandera</strong> es un puesto donde salen las comandas: cocina, barra, postres. Declará de qué
+        <strong> rubros</strong> imprime cada una y el pedido se reparte solo. La <strong>predeterminada</strong> recibe
+        lo que no encaje en ningún rubro, para que nada se quede sin imprimir.
       </div>
 
-      <Field label="Nombre de la impresora">
-        <Input value={f.nombre || ''} disabled={!puedeEditar} onChange={(e) => set('nombre', e.target.value)} placeholder="Cocina, Barra…" />
-      </Field>
-
-      <div>
-        <div className="text-[13px] font-semibold mb-1.5 text-slate-700 dark:text-slate-300">Conexión</div>
-        <Segmented value={f.conexion || 'local'} onChange={(v) => puedeEditar && set('conexion', v)}
-          options={[{ value: 'local', label: 'Local (equipo)' }, { value: 'red', label: 'Red (IP)' }]} />
-      </div>
-
-      {esRed ? (
-        <div className="grid grid-cols-[1fr,120px] gap-2">
-          <Field label="IP o host"><Input value={f.host || ''} disabled={!puedeEditar} onChange={(e) => set('host', e.target.value)} placeholder="192.168.1.50" /></Field>
-          <Field label="Puerto"><Input type="number" value={f.puerto || 9100} disabled={!puedeEditar} onChange={(e) => set('puerto', e.target.value)} placeholder="9100" /></Field>
-        </div>
+      {lista.length === 0 ? (
+        <Empty title="Todavía no hay comanderas"
+          body="Sin comanderas la comanda igual se genera y se ve en pantalla. Agregá una por cada puesto de preparación."
+          cta={puedeEditar ? <Button size="lg" icon={<Icon.Plus size={16} />} onClick={() => setEditando({})}>Agregar comandera</Button> : null} />
       ) : (
-        <div className="text-[12px] text-slate-500 rounded-lg px-3 py-2" style={{ background: 'var(--hb-azul-suave)', color: 'var(--hb-azul)' }}>
-          La comanda se enviará a la impresora predeterminada del equipo a través del agente local (igual que la máquina fiscal).
+        <div className="space-y-2">
+          {lista.map((imp) => (
+            <div key={imp.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4 flex items-start gap-3">
+              <span className="h-10 w-10 rounded-icon inline-flex items-center justify-center shrink-0"
+                style={{ background: 'var(--hb-azul-suave)', color: 'var(--hb-azul)' }}>
+                <Icon.Printer size={18} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-semibold text-[14px]">{imp.nombre}</span>
+                  {imp.predeterminada ? <Badge size="sm" color="huberp">Predeterminada</Badge> : null}
+                  {imp.activa ? <Badge size="sm" color="teal">Activa</Badge> : <Badge size="sm" color="amber">Apagada</Badge>}
+                </div>
+                <div className="text-[12.5px] text-slate-500 mt-0.5">
+                  {imp.conexion === 'red' ? `Red · ${imp.host}:${imp.puerto}` : 'Local (agente del equipo)'} · {imp.anchoMm || 80} mm
+                </div>
+                <div className="text-[12.5px] text-slate-500 mt-1 flex flex-wrap items-center gap-1">
+                  {(imp.rubros || []).length ? (
+                    <>Imprime: {(imp.rubros || []).map((r) => <Badge key={r} size="sm" color="slate">{r}</Badge>)}</>
+                  ) : (
+                    <span className="text-slate-400">Sin rubros propios{imp.predeterminada ? ' (recibe lo no clasificado)' : ' — no recibiría nada'}</span>
+                  )}
+                </div>
+              </div>
+              {puedeEditar ? (
+                <div className="flex gap-1 shrink-0">
+                  <Button size="sm" variant="ghost" onClick={() => setEditando(imp)}>Editar</Button>
+                  <Button size="sm" variant="ghost" onClick={() => eliminar(imp)}>Eliminar</Button>
+                </div>
+              ) : null}
+            </div>
+          ))}
+          {puedeEditar ? (
+            <Button variant="secondary" size="lg" icon={<Icon.Plus size={16} />} onClick={() => setEditando({})}>Agregar comandera</Button>
+          ) : null}
         </div>
       )}
 
-      <div>
-        <div className="text-[13px] font-semibold mb-1.5 text-slate-700 dark:text-slate-300">Ancho del papel</div>
-        <Segmented value={String(f.anchoMm || 80)} onChange={(v) => puedeEditar && set('anchoMm', Number(v))}
-          options={[{ value: '80', label: '80 mm' }, { value: '58', label: '58 mm' }]} />
-      </div>
-
-      <Toggle checked={!!f.activa} onChange={(v) => puedeEditar && set('activa', v)}
-        label="Impresión de comandas activa" sub="Si la apagas, las comandas se ven en pantalla pero no se imprimen." />
-
-      {puedeEditar ? <div><Button loading={busy} onClick={guardar} icon={<Icon.Check size={15} />}>Guardar impresora</Button></div> : null}
+      {editando ? (
+        <ComanderaModal imp={editando} rubros={rubros} hayOtras={lista.length > 0}
+          onClose={() => setEditando(null)}
+          onGuardado={() => { setEditando(null); reload() }} />
+      ) : null}
     </div>
   )
 }
 
-// ======================= COMANDERA =======================
-// Colores del estado de cocina de un renglón.
-const ITEM_COLOR = {
-  pendiente: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
-  en_cocina: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-  listo: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
-  servido: 'bg-elerp-100 text-elerp-700 dark:bg-elerp-900/40 dark:text-elerp-200',
-  cancelado: 'bg-slate-100 text-slate-400 line-through dark:bg-slate-800',
+function ComanderaModal({ imp, rubros, hayOtras, onClose, onGuardado }) {
+  const toast = useToast()
+  const [f, setF] = useState({
+    id: imp.id || '', nombre: imp.nombre || '', conexion: imp.conexion || 'local',
+    host: imp.host || '', puerto: imp.puerto || 9100, anchoMm: imp.anchoMm || 80,
+    rubros: imp.rubros || [], predeterminada: !!imp.predeterminada || !hayOtras,
+    activa: imp.activa !== undefined ? imp.activa : true,
+  })
+  const [busy, setBusy] = useState(false)
+  const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
+  const esRed = f.conexion === 'red'
+
+  const toggleRubro = (r) => setF((s) => ({
+    ...s,
+    rubros: s.rubros.some((x) => x.toLowerCase() === r.toLowerCase())
+      ? s.rubros.filter((x) => x.toLowerCase() !== r.toLowerCase())
+      : [...s.rubros, r],
+  }))
+
+  const guardar = async () => {
+    setBusy(true)
+    try {
+      await api.guardarImpresora({
+        id: f.id, nombre: f.nombre, conexion: f.conexion, host: f.host,
+        puerto: Number(f.puerto) || 0, anchoMm: Number(f.anchoMm) || 80,
+        rubros: f.rubros, predeterminada: !!f.predeterminada, activa: !!f.activa,
+      })
+      toast({ title: f.id ? 'Comandera actualizada' : 'Comandera agregada' })
+      onGuardado()
+    } catch (e) {
+      toast({ title: 'No se pudo guardar', body: e?.message || 'Error', kind: 'error' })
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} icon={<Icon.Printer size={18} />}
+      title={f.id ? `Comandera «${imp.nombre}»` : 'Nueva comandera'}
+      footer={<>
+        <Button size="lg" variant="ghost" onClick={onClose}>Cancelar</Button>
+        <Button size="lg" loading={busy} disabled={!f.nombre.trim()} onClick={guardar}>Guardar</Button>
+      </>}>
+      <div className="space-y-4">
+        <Field label="Nombre del puesto">
+          <Input value={f.nombre} onChange={(e) => set('nombre', e.target.value)} placeholder="Cocina, Barra, Postres…" />
+        </Field>
+
+        <div>
+          <div className="text-[13px] font-semibold mb-1.5 text-slate-700 dark:text-slate-300">Conexión</div>
+          <Segmented value={f.conexion} onChange={(v) => set('conexion', v)}
+            options={[{ value: 'local', label: 'Local (equipo)' }, { value: 'red', label: 'Red (IP)' }]} />
+        </div>
+
+        {esRed ? (
+          <div className="grid grid-cols-[1fr,120px] gap-2">
+            <Field label="IP o host"><Input value={f.host} onChange={(e) => set('host', e.target.value)} placeholder="192.168.1.50" /></Field>
+            <Field label="Puerto"><Input type="number" value={f.puerto} onChange={(e) => set('puerto', e.target.value)} placeholder="9100" /></Field>
+          </div>
+        ) : (
+          <div className="text-[12px] rounded-lg px-3 py-2" style={{ background: 'var(--hb-azul-suave)', color: 'var(--hb-azul)' }}>
+            La comanda sale por la impresora predeterminada de ese equipo, a través del agente local (igual que la máquina fiscal).
+          </div>
+        )}
+
+        <div>
+          <div className="text-[13px] font-semibold mb-1.5 text-slate-700 dark:text-slate-300">Ancho del papel</div>
+          <Segmented value={String(f.anchoMm)} onChange={(v) => set('anchoMm', Number(v))}
+            options={[{ value: '80', label: '80 mm' }, { value: '58', label: '58 mm' }]} />
+        </div>
+
+        <Field label="¿Qué rubros imprime?" hint="Los productos de estos rubros salen por esta comandera.">
+          {rubros.length === 0 ? (
+            <div className="text-[12.5px] text-slate-400">El catálogo no tiene rubros todavía.</div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {rubros.map((r) => {
+                const on = f.rubros.some((x) => x.toLowerCase() === r.toLowerCase())
+                return (
+                  <button key={r} type="button" onClick={() => toggleRubro(r)}
+                    className={`${T.chip} border ring-focus transition-colors ${
+                      on ? 'bg-elerp-500 text-white border-elerp-500'
+                         : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+                    {r}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </Field>
+
+        <Toggle checked={f.predeterminada} onChange={(v) => set('predeterminada', v)}
+          label="Predeterminada"
+          sub="Recibe los productos cuyo rubro no está en ninguna comandera. Debe haber exactamente una: sin ella, un rubro nuevo no se imprimiría en ninguna parte." />
+
+        <Toggle checked={f.activa} onChange={(v) => set('activa', v)}
+          label="Activa" sub="Apagada, sus comandas se ven en pantalla pero no se envían a imprimir." />
+      </div>
+    </Modal>
+  )
 }
-const ITEM_LABEL = { pendiente: 'Por enviar', en_cocina: 'En cocina', listo: 'Listo', servido: 'Servido', cancelado: 'Anulado' }
-const totalCuenta = (c) => (c?.items || []).reduce((a, it) => a + (it.estado === 'cancelado' ? 0 : (it.precioUnitario || 0) * (it.cantidad || 0)), 0)
 
 export function Comandera() {
   const { db, reload, tasaDe } = useData()
@@ -544,7 +660,7 @@ export function Comandera() {
         onClose={() => setDivisionOpen(false)} onConfirmar={pedirCuenta} /> : null}
       {menuOpen ? <MenuProductos productos={vendibles(db.PRODUCTOS)} monedaEmpresa={monedaEmpresa}
         onAgregar={agregarProducto} onClose={() => setMenuOpen(false)} /> : null}
-      {comanda ? <ComandaModal cuenta={cuenta} comanda={comanda} impresora={db.IMPRESORA_COMANDAS} onClose={() => setComanda(null)} /> : null}
+      {comanda ? <ComandaModal cuenta={cuenta} comanda={comanda} onClose={() => setComanda(null)} /> : null}
       {cobroOpen ? <CobroModal cuenta={cuenta} cuentasCobro={db.CUENTAS_COBRO || []} onClose={() => setCobroOpen(false)}
         onCobrado={(doc) => { setCobroOpen(false); setCuenta(null); setFactura(doc); reload() }} /> : null}
       {facturaModal}
@@ -569,14 +685,14 @@ export function Comandera() {
           return (
             <button key={m.id} disabled={busy} onClick={() => abrirMesa(m)}
               title={ajena ? `Asignada a ${duenos.map((d) => d.nombre).join(', ')}` : undefined}
-              className={`rounded-xl p-3 text-left border-2 transition-shadow hover:shadow-card disabled:opacity-60 ${ajena ? 'opacity-60' : ''}`}
+              className={`rounded-xl ${T.tarjeta} text-left border-2 transition-shadow hover:shadow-card active:scale-[0.98] disabled:opacity-60 ${ajena ? 'opacity-60' : ''}`}
               style={{ background: col.bg, borderColor: col.border, color: col.text }}>
               <div className="flex items-center justify-between">
-                <span className="font-display font-bold text-[18px]">{m.nombre}</span>
-                <span className="inline-flex items-center gap-0.5 text-[11px] opacity-80"><Icon.Users size={12} /> {m.capacidad || 0}</span>
+                <span className="font-display font-bold text-[22px] leading-none">{m.nombre}</span>
+                <span className="inline-flex items-center gap-1 text-[13px] opacity-80"><Icon.Users size={15} /> {m.capacidad || 0}</span>
               </div>
-              <div className="text-[11px] mt-1 opacity-80">{m.zona || '—'}</div>
-              <div className="mt-2 text-[12.5px] font-semibold">{cta ? fmtCurrency(totalCuenta(cta), 'VES') : col.label}</div>
+              <div className="text-[12.5px] mt-1.5 opacity-80">{m.zona || '—'}</div>
+              <div className="mt-2 text-[15px] font-bold">{cta ? fmtCurrency(totalCuenta(cta), 'VES') : col.label}</div>
             </button>
           )
         })}
@@ -596,7 +712,7 @@ function CuentaDetalle({ cuenta, busy, onVolver, onAgregar, onCancelar, onEnviar
     <div className="grid lg:grid-cols-[1fr,320px] gap-4">
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card">
         <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-200 dark:border-slate-800">
-          <Button size="sm" variant="ghost" icon={<Icon.ChevLeft size={16} />} onClick={onVolver}>Mesas</Button>
+          <Button size="lg" variant="ghost" icon={<Icon.ChevLeft size={18} />} onClick={onVolver}>Mesas</Button>
           <div className="min-w-0">
             <div className="font-display font-bold text-[16px]">Mesa {cuenta.mesaNombre}</div>
             <div className="text-[11.5px] text-slate-500">{cuenta.mesoneroNombre || '—'} · {cuenta.comensales || 0} comensal(es)</div>
@@ -623,7 +739,8 @@ function CuentaDetalle({ cuenta, busy, onVolver, onAgregar, onCancelar, onEnviar
                     <span className={`text-[10.5px] px-2 py-0.5 rounded-full font-semibold ${ITEM_COLOR[it.estado] || ITEM_COLOR.pendiente}`}>{ITEM_LABEL[it.estado] || it.estado}</span>
                     <span className="text-[12.5px] font-medium tabular-nums w-20 text-right">{fmtCurrency((it.precioUnitario || 0) * (it.cantidad || 0), 'VES')}</span>
                     {it.estado !== 'cancelado' ? (
-                      <button onClick={() => onCancelar(it)} title="Quitar" className="p-1 rounded-md text-slate-400 hover:text-red-500"><Icon.Trash size={14} /></button>
+                      <button onClick={() => onCancelar(it)} title="Quitar" aria-label={`Quitar ${it.nombre}`}
+                        className={`${T.icono} text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 shrink-0`}><Icon.Trash size={18} /></button>
                     ) : null}
                   </div>
                 ))}
@@ -649,7 +766,7 @@ function CuentaDetalle({ cuenta, busy, onVolver, onAgregar, onCancelar, onEnviar
                   : 'La prefactura está lista. La caja la cobra y emite la factura.'}
               </div>
             </div>
-            <Button className="w-full" variant="ghost" loading={busy} onClick={onVolverAServicio}>
+            <Button className="w-full" size="lg" variant="ghost" loading={busy} onClick={onVolverAServicio}>
               Volver a servicio (anular prefactura)
             </Button>
             <div className="text-[11px] text-slate-400 px-1 pt-1">
@@ -659,19 +776,19 @@ function CuentaDetalle({ cuenta, busy, onVolver, onAgregar, onCancelar, onEnviar
           </>
         ) : (
           <>
-            <Button className="w-full" icon={<Icon.Plus size={16} />} variant="secondary" onClick={onAgregar}>Agregar productos</Button>
-            <Button className="w-full" loading={busy} disabled={!pendientes.length} icon={<Icon.Send size={16} />} onClick={onEnviar}>
+            <Button className="w-full" size="xl" icon={<Icon.Plus size={18} />} variant="secondary" onClick={onAgregar}>Agregar productos</Button>
+            <Button className="w-full" size="xl" loading={busy} disabled={!pendientes.length} icon={<Icon.Send size={18} />} onClick={onEnviar}>
               Enviar a cocina{pendientes.length ? ` (${pendientes.length})` : ''}
             </Button>
-            <Button className="w-full" disabled={!items.length} icon={<Icon.Receipt size={16} />} onClick={onPedirCuenta}>
+            <Button className="w-full" size="xl" disabled={!items.length} icon={<Icon.Receipt size={18} />} onClick={onPedirCuenta}>
               Pedir la cuenta
             </Button>
             {puedeCobrar ? (
-              <Button className="w-full" variant="secondary" disabled={!items.length} icon={<Icon.Wallet size={16} />} onClick={onCobrar}>
+              <Button className="w-full" size="lg" variant="secondary" disabled={!items.length} icon={<Icon.Wallet size={18} />} onClick={onCobrar}>
                 Cobrar acá (caja)
               </Button>
             ) : null}
-            <Button className="w-full" variant="ghost" onClick={onCerrar}>Cerrar sin cobrar</Button>
+            <Button className="w-full" size="lg" variant="ghost" onClick={onCerrar}>Cerrar sin cobrar</Button>
             <div className="text-[11px] text-slate-400 px-1 pt-1">
               «Pedir la cuenta» genera la prefactura rotulada con la mesa; la caja la cobra desde Ventas y emite la
               factura. Ahí se puede dividir el cobro entre comensales o partir la cuenta por productos.
@@ -694,12 +811,12 @@ function MenuProductos({ productos, monedaEmpresa, onAgregar, onClose }) {
       sub="Toca un producto para sumarlo a la cuenta." footer={<Button onClick={onClose}>Listo</Button>}>
       <div className="space-y-2">
         <Input autoFocus icon={<Icon.Search size={15} />} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar producto…" />
-        <div className="max-h-[46vh] overflow-auto -mx-1 px-1 grid sm:grid-cols-2 gap-1.5">
+        <div className="max-h-[52vh] overflow-auto -mx-1 px-1 grid grid-cols-2 lg:grid-cols-3 gap-2">
           {lista.map((p) => (
             <button key={p.sku} onClick={() => onAgregar(p)}
-              className="text-left rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 hover:border-elerp-400 hover:bg-elerp-50/40 dark:hover:bg-elerp-900/20 transition-colors">
-              <div className="text-[13px] font-medium truncate">{p.nombre}</div>
-              <div className="text-[11.5px] text-slate-500">{fmtCurrency(p.precio, monedaDe(p, monedaEmpresa))}{p.exentoIva ? ' · exento' : ''}</div>
+              className="text-left rounded-xl border border-slate-200 dark:border-slate-800 px-3.5 py-3 min-h-[4.5rem] hover:border-elerp-400 hover:bg-elerp-50/40 dark:hover:bg-elerp-900/20 active:scale-[0.98] transition-all">
+              <div className="text-[15px] font-semibold leading-snug line-clamp-2">{p.nombre}</div>
+              <div className="text-[13px] text-slate-500 mt-1">{fmtCurrency(p.precio, monedaDe(p, monedaEmpresa))}{p.exentoIva ? ' · exento' : ''}</div>
             </button>
           ))}
           {lista.length === 0 ? <div className="text-[12.5px] text-slate-400 col-span-2 py-4 text-center">Sin resultados.</div> : null}
@@ -709,26 +826,58 @@ function MenuProductos({ productos, monedaEmpresa, onAgregar, onClose }) {
   )
 }
 
-function ComandaModal({ cuenta, comanda, impresora, onClose }) {
-  const items = comanda.items || []
-  const activa = impresora?.activa
+/* La comanda sale REPARTIDA por comandera: los platos por cocina, las bebidas por la
+ * barra, los postres por la suya. Se muestra un ticket por puesto —tal como se imprime—
+ * para que el mesonero vea qué salió por dónde y note al instante si algo no fue. */
+function ComandaModal({ cuenta, comanda, onClose }) {
+  const tickets = comanda.tickets || []
+  const apagadas = tickets.filter((t) => t.impresora?.id && !t.impresora?.activa).length
+  const sinConfigurar = tickets.some((t) => !t.impresora?.id)
   return (
-    <Modal open onClose={onClose} size="sm" icon={<Icon.Printer size={18} />} title={`Comanda · ronda ${comanda.ronda}`}
-      sub={activa ? `Se envió a imprimir en «${impresora.nombre}».` : 'Impresión de comandas apagada: se muestra en pantalla.'}
-      footer={<Button onClick={onClose}>Cerrar</Button>}>
-      <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white text-slate-900 p-3 font-mono text-[12.5px]">
-        <div className="text-center font-bold">COMANDA · Mesa {cuenta.mesaNombre}</div>
-        <div className="text-center text-[11px] text-slate-500 mb-2">Ronda {comanda.ronda} · {cuenta.mesoneroNombre || ''}</div>
-        <div className="border-t border-dashed border-slate-300 pt-2 space-y-1">
-          {items.map((it) => (
-            <div key={it.id}>
-              <div className="flex justify-between"><span>{it.cantidad}× {it.nombre}</span></div>
-              {it.nota ? <div className="text-[11px] text-slate-500 pl-4">↳ {it.nota}</div> : null}
+    <Modal open onClose={onClose} icon={<Icon.Printer size={18} />}
+      title={`Comanda · ronda ${comanda.ronda}`}
+      sub={sinConfigurar
+        ? 'Sin comanderas configuradas: la comanda se muestra en pantalla.'
+        : tickets.length > 1
+          ? `Salió por ${tickets.length} comanderas.`
+          : `Salió por «${tickets[0]?.impresora?.nombre || '—'}».`}
+      footer={<Button size="lg" onClick={onClose}>Cerrar</Button>}>
+      <div className="space-y-3">
+        {tickets.map((t, idx) => (
+          <div key={t.impresora?.id || idx}>
+            {t.impresora?.nombre ? (
+              <div className="flex items-center gap-1.5 mb-1.5 text-[12.5px] flex-wrap">
+                <Icon.Printer size={14} className="text-slate-400" />
+                <span className="font-semibold">{t.impresora.nombre}</span>
+                {t.impresora.conexion === 'red'
+                  ? <span className="text-slate-400">· {t.impresora.host}:{t.impresora.puerto}</span>
+                  : <span className="text-slate-400">· equipo local</span>}
+                {!t.impresora.activa ? <Badge size="sm" color="amber">apagada</Badge> : null}
+              </div>
+            ) : null}
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white text-slate-900 p-3 font-mono text-[13px]">
+              <div className="text-center font-bold">COMANDA · Mesa {cuenta.mesaNombre}</div>
+              <div className="text-center text-[11.5px] text-slate-500 mb-2">
+                Ronda {comanda.ronda} · {cuenta.mesoneroNombre || ''}{t.impresora?.nombre ? ` · ${t.impresora.nombre}` : ''}
+              </div>
+              <div className="border-t border-dashed border-slate-300 pt-2 space-y-1">
+                {(t.items || []).map((it) => (
+                  <div key={it.id}>
+                    <div className="flex justify-between"><span>{it.cantidad}× {it.nombre}</span></div>
+                    {it.nota ? <div className="text-[11.5px] text-slate-500 pl-4">↳ {it.nota}</div> : null}
+                  </div>
+                ))}
+              </div>
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </div>
-      {!activa ? <div className="text-[11.5px] text-slate-400 mt-2">Activa la impresora en «Impresora de comandas» para el envío automático.</div> : null}
+      {apagadas > 0 ? (
+        <div className="text-[12px] text-amber-700 dark:text-amber-300 mt-2">
+          {apagadas === 1 ? 'Una comandera está apagada' : `${apagadas} comanderas están apagadas`}: su ticket no se envió a imprimir.
+          Se activan en «Comanderas».
+        </div>
+      ) : null}
     </Modal>
   )
 }
@@ -1350,7 +1499,7 @@ function DivisionModal({ cuenta, busy, onClose, onConfirmar }) {
     <Modal open onClose={onClose} title={`Pedir la cuenta · Mesa ${cuenta.mesaNombre}`} width="max-w-2xl"
       footer={<>
         <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-        <Button loading={busy} disabled={modo === 'por_items' && vacias.length > 0} onClick={confirmar}>
+        <Button size="lg" loading={busy} disabled={modo === 'por_items' && vacias.length > 0} onClick={confirmar}>
           {modo === 'unica' ? 'Generar prefactura' : `Generar ${partes} prefacturas`}
         </Button>
       </>}>
@@ -1400,7 +1549,8 @@ function DivisionModal({ cuenta, busy, onClose, onConfirmar }) {
                   <div className="flex gap-1">
                     {Array.from({ length: partes }, (_, i) => i + 1).map((n) => (
                       <button key={n} onClick={() => setAsignacion((prev) => ({ ...prev, [it.id]: n }))}
-                        className={`h-7 w-7 rounded-lg text-[12.5px] font-semibold border ring-focus transition-colors ${
+                        aria-label={`Asignar ${it.nombre} a la parte ${n}`}
+                        className={`${T.chip} border ring-focus transition-colors ${
                           asignacion[it.id] === n
                             ? 'bg-elerp-500 text-white border-elerp-500'
                             : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>

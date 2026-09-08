@@ -9,6 +9,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/aplicacion"
 	"github.com/mornix/elerp/internal/domain/caja"
 	"github.com/mornix/elerp/internal/domain/cliente"
+	"github.com/mornix/elerp/internal/domain/cocina"
 	"github.com/mornix/elerp/internal/domain/credencial"
 	"github.com/mornix/elerp/internal/domain/cuenta"
 	"github.com/mornix/elerp/internal/domain/empresa"
@@ -99,17 +100,32 @@ type especNicho struct {
 	// el mismo orden.
 	mesoneros      []string
 	zonasMesoneros []string
-	proveedores    []provNicho
-	facturas       []emisionNicho
-	rubros         []string
-	productos      []prodNicho
-	platos         []platoNicho
-	clientes       []cliNicho
-	modulos        []string
+	// comanderas son los puestos de impresión del local (cocina, barra, postres) y de
+	// qué rubros imprime cada uno.
+	comanderas  []comanderaNicho
+	proveedores []provNicho
+	facturas    []emisionNicho
+	rubros      []string
+	productos   []prodNicho
+	platos      []platoNicho
+	clientes    []cliNicho
+	modulos     []string
 	// Salón (solo restaurante): grilla + mesas.
 	filas, columnas int
 	bloqueadas      []mesa.Celda
 	mesas           []mesaNicho
+}
+
+// comanderaNicho es un puesto de impresión de comandas.
+type comanderaNicho struct {
+	nombre string
+	rubros []string
+	// predeterminada recibe lo que no encaja en ningún rubro configurado.
+	predeterminada bool
+	// red = impresora térmica con IP en la LAN; si no, local (por el agente).
+	red    bool
+	host   string
+	puerto int
 }
 
 type mesaNicho struct {
@@ -289,6 +305,7 @@ type SnapshotEmpresa struct {
 	Documentos   []fiscal.Documento
 	CuentasMesa  []cuenta.Cuenta
 	Asignaciones []mesa.Asignacion
+	Comanderas   []cocina.Impresora
 	// Contadores es el estado del numerador fiscal de ESTA empresa tras sembrar
 	// ("empresa|sede|serie" → último folio). Sin ellos, la primera factura real del
 	// prospecto reiniciaría en 1 y colisionaría con un folio sembrado.
@@ -345,6 +362,7 @@ func (s *Store) SnapshotNicho(n NichoDemo) SnapshotEmpresa {
 		Documentos:   s.Documentos.List(n.EmpresaID),
 		CuentasMesa:  s.Cuentas.Abiertas(n.EmpresaID, n.SedeID),
 		Asignaciones: s.Asignaciones.List(n.EmpresaID, n.SedeID),
+		Comanderas:   s.Impresoras.List(n.EmpresaID, n.SedeID),
 		Contadores:   contadores,
 	}
 }

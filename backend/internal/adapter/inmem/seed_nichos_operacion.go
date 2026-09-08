@@ -9,6 +9,7 @@ import (
 
 	"github.com/mornix/elerp/internal/application"
 	"github.com/mornix/elerp/internal/domain/caja"
+	"github.com/mornix/elerp/internal/domain/cocina"
 	"github.com/mornix/elerp/internal/domain/credencial"
 	"github.com/mornix/elerp/internal/domain/cuenta"
 	"github.com/mornix/elerp/internal/domain/empresa"
@@ -160,6 +161,28 @@ func (s *Store) seedOperacionNicho(e especNicho) {
 		s.Proveedores.Create(proveedor.Proveedor{
 			EmpresaID: e.empID, Nombre: p.nombre, Documento: p.doc,
 			Telefono: p.telefono, Activo: true, Creado: fecha,
+		})
+	}
+
+	// --- Comanderas (puestos de impresión de comandas) ---
+	// Cada una imprime SUS rubros: los platos por cocina, las bebidas por la barra, los
+	// postres por la suya. Precargadas para que la demo del rubro funcione sin configurar
+	// nada — es lo primero que se prueba y lo último que alguien quiere configurar.
+	for _, cm := range e.comanderas {
+		conexion, puerto := cocina.ConexionLocal, 0
+		if cm.red {
+			conexion, puerto = cocina.ConexionRed, cm.puerto
+			if puerto <= 0 {
+				puerto = 9100
+			}
+		}
+		s.Impresoras.Create(cocina.Impresora{
+			EmpresaID: e.empID, SedeID: e.sedeID, Nombre: cm.nombre,
+			Conexion: conexion, Host: cm.host, Puerto: puerto, AnchoMM: 80,
+			Rubros: cm.rubros, Predeterminada: cm.predeterminada,
+			// Activas: la demo enseña el flujo completo. El envío FÍSICO depende del
+			// agente local, que en la demo no existe: la comanda se ve en pantalla.
+			Activa: true, Actualizada: fecha,
 		})
 	}
 

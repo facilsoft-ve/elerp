@@ -37,7 +37,7 @@ export const NAV = [
       { id: 'mesoneros', label: 'Mesoneros y asignación', grupo: 'Salón', roles: TODOS },
       { id: 'cocina', label: 'Cocina', grupo: 'Cocina', roles: TODOS },
       { id: 'platos', label: 'Platos y recetas', grupo: 'Cocina', roles: TODOS },
-      { id: 'impresora', label: 'Impresora de comandas', grupo: 'Configuración', roles: TODOS },
+      { id: 'impresora', label: 'Comanderas', grupo: 'Configuración', roles: TODOS },
     ],
   },
 

@@ -2,6 +2,7 @@ package mongo
 
 import (
 	"log"
+	"strings"
 
 	"github.com/mornix/elerp/internal/adapter/inmem"
 )
@@ -172,6 +173,25 @@ func sembrarNichos(st *Store, semilla *inmem.Store) {
 			}
 			if nuevas > 0 {
 				log.Printf("Mongo: %s → %d asignación(es) de mesas a mesoneros", n.Giro, nuevas)
+			}
+		}
+
+		// Comanderas (puestos de impresión de comandas): aditivas por nombre.
+		if len(snap.Comanderas) > 0 {
+			yaComandera := map[string]bool{}
+			for _, imp := range st.Impresoras.List(n.EmpresaID, n.SedeID) {
+				yaComandera[strings.ToLower(imp.Nombre)] = true
+			}
+			nuevas := 0
+			for _, imp := range snap.Comanderas {
+				if yaComandera[strings.ToLower(imp.Nombre)] {
+					continue
+				}
+				st.Impresoras.Create(imp)
+				nuevas++
+			}
+			if nuevas > 0 {
+				log.Printf("Mongo: %s → %d comandera(s)", n.Giro, nuevas)
 			}
 		}
 

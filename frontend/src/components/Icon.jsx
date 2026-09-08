@@ -47,7 +47,6 @@ export const Icon = {
   Shuffle: _i(<><path d="M16 3h5v5" /><path d="M4 20 21 3" /><path d="M21 16v5h-5" /><path d="M15 15l6 6" /><path d="M4 4l5 5" /></>),
   Upload: _i(<><path d="M12 20V8" /><path d="m7 13 5-5 5 5" /><path d="M4 4h16" /></>),
   Download: _i(<><path d="M12 4v12" /><path d="m7 11 5 5 5-5" /><path d="M4 20h16" /></>),
-  Upload: _i(<><path d="M12 20V8" /><path d="m7 13 5-5 5 5" /><path d="M4 4h16" /></>),
   CircleAlert: _i(<><circle cx="12" cy="12" r="9" /><path d="M12 7v6" /><circle cx="12" cy="16" r=".5" fill="currentColor" /></>),
   CircleCheck: _i(<><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></>),
   CircleX: _i(<><circle cx="12" cy="12" r="9" /><path d="m9 9 6 6" /><path d="m15 9-6 6" /></>),
