@@ -67,31 +67,6 @@ func (s *Server) handleDevLogin(c *fiber.Ctx) error {
 	return c.Redirect("/app/", fiber.StatusFound)
 }
 
-// handleRegistrarLeadDemo captura los datos de un prospecto ANTES de entrar a la
-// demo. Es una ruta PÚBLICA (pre-login, sin tenant): registra el lead de verdad
-// en el almacén append-only. Un fallo aquí no debe impedir que el front continúe
-// al demo; devuelve el error para que la interfaz lo sepa, pero es no bloqueante.
-func (s *Server) handleRegistrarLeadDemo(c *fiber.Ctx) error {
-	var in struct {
-		Nombre   string `json:"nombre"`
-		Empresa  string `json:"empresa"`
-		Email    string `json:"email"`
-		Telefono string `json:"telefono"`
-		Mensaje  string `json:"mensaje"`
-	}
-	if err := c.BodyParser(&in); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
-	}
-	lead, err := s.svc.RegistrarLeadDemo(application.DemoLeadInput{
-		Nombre: in.Nombre, Empresa: in.Empresa, Email: in.Email,
-		Telefono: in.Telefono, Mensaje: in.Mensaje,
-	}, origen(c))
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
-	}
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"ok": true, "id": lead.ID})
-}
-
 // handleCallback valida el token de Hubmy, crea la sesión y redirige al front.
 func (s *Server) handleCallback(c *fiber.Ctx) error {
 	// Anti-CSRF: el `state` devuelto por Hubmy (callback_method=GET) debe coincidir

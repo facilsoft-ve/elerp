@@ -76,7 +76,6 @@ type Store struct {
 	Unidades         *UnidadMedidaRepo
 	Almacenes        *AlmacenRepo
 	Modulos          *ModuloRepo
-	DemoLeads        *DemoLeadRepo
 	Legal            *LegalRepo
 	Plantillas       *PlantillaRepo
 	Mesas            *MesaRepo
@@ -118,7 +117,6 @@ func New() *Store {
 		Unidades:     NewUnidadMedidaRepo(),
 		Almacenes:    NewAlmacenRepo(),
 		Modulos:      NewModuloRepo(),
-		DemoLeads:    NewDemoLeadRepo(),
 		Legal:        NewLegalRepo(),
 		Plantillas:   NewPlantillaRepo(),
 		Mesas:        NewMesaRepo(),

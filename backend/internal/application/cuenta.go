@@ -14,7 +14,7 @@ import (
 
 var (
 	ErrCuentasNoDisponible = errors.New("las cuentas de mesa no están disponibles")
-	ErrCuentaMesaNoExiste      = errors.New("la cuenta no existe")
+	ErrCuentaMesaNoExiste  = errors.New("la cuenta no existe")
 	ErrCuentaCerrada       = errors.New("la cuenta ya está cerrada")
 	ErrItemCuentaNoExiste  = errors.New("ese renglón no existe en la cuenta")
 	ErrSinPendientes       = errors.New("no hay renglones nuevos para enviar a cocina")

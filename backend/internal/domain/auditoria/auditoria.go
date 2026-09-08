@@ -7,7 +7,7 @@ package auditoria
 type Evento struct {
 	ID        string `json:"id" bson:"id"`
 	EmpresaID string `json:"empresaId" bson:"empresaid"`
-	Actor     string `json:"actor" bson:"actor"`   // userID que ejecutó
+	Actor     string `json:"actor" bson:"actor"` // userID que ejecutó
 	Rol       string `json:"rol" bson:"rol"`
 	Accion    string `json:"accion" bson:"accion"` // p.ej. inventario.ajuste, transferencia.estado
 	Entidad   string `json:"entidad" bson:"entidad"`

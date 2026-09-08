@@ -15,7 +15,7 @@ var (
 )
 
 // ConListasPrecio cablea el maestro de listas de precio. Se configura aparte de
-// New (como ConLeadsDemo) para no romper las firmas de los constructores ya
+// New (como ConAlmacenes) para no romper las firmas de los constructores ya
 // cableados en cmd/api; sin él, el servicio funciona igual y las listas quedan
 // vacías.
 func (s *Service) ConListasPrecio(r listaprecio.Repository) *Service {

@@ -8,19 +8,18 @@ import (
 	"github.com/mornix/elerp/internal/domain/auditoria"
 	"github.com/mornix/elerp/internal/domain/caja"
 	"github.com/mornix/elerp/internal/domain/cliente"
+	"github.com/mornix/elerp/internal/domain/cocina"
 	"github.com/mornix/elerp/internal/domain/compra"
 	"github.com/mornix/elerp/internal/domain/contabilidad"
 	"github.com/mornix/elerp/internal/domain/cotizacion"
+	"github.com/mornix/elerp/internal/domain/cuenta"
 	"github.com/mornix/elerp/internal/domain/cupon"
-	"github.com/mornix/elerp/internal/domain/demolead"
 	"github.com/mornix/elerp/internal/domain/empresa"
 	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/inventario"
-	"github.com/mornix/elerp/internal/domain/cocina"
-	"github.com/mornix/elerp/internal/domain/cuenta"
 	"github.com/mornix/elerp/internal/domain/legal"
-	"github.com/mornix/elerp/internal/domain/mesa"
 	"github.com/mornix/elerp/internal/domain/listaprecio"
+	"github.com/mornix/elerp/internal/domain/mesa"
 	"github.com/mornix/elerp/internal/domain/plantilla"
 	"github.com/mornix/elerp/internal/domain/promocion"
 	"github.com/mornix/elerp/internal/domain/proveedor"
@@ -97,8 +96,6 @@ type Service struct {
 	// CRUD, soft-disable). La conexión real la hace el agente fiscal local.
 	dispositivos fiscal.DispositivoFiscalRepo
 	// demoLeads guarda las solicitudes de prueba de la demo (previas al login, sin
-	// tenant). Se cablea con ConLeadsDemo; ver demo.go.
-	demoLeads demolead.Repository
 	// listasPrecio es el maestro de tarifas de precio (venta/compra). Editable, no
 	// ledger. Se cablea con ConListasPrecio; ver listaprecio.go.
 	listasPrecio listaprecio.Repository

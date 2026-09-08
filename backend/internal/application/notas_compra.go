@@ -25,7 +25,7 @@ var (
 )
 
 // ConNotasCompra cablea el maestro de notas de crédito/débito de compra. Se
-// configura aparte de New (como ConListasPrecio / ConLeadsDemo) para no romper las
+// configura aparte de New (como ConListasPrecio / ConAlmacenes) para no romper las
 // firmas de los constructores ya cableados en cmd/api; sin él, el servicio funciona
 // igual y las notas de compra quedan deshabilitadas.
 func (s *Service) ConNotasCompra(r compra.NotaCompraRepo) *Service {

@@ -36,7 +36,6 @@ func main() {
 		mongo.Seed(db) // idempotente
 		st := mongo.New(db)
 		svc = application.New(st.Productos, st.Movimientos, st.Transferencias, st.Rubros, st.Audit, st.Documentos, st.Numerador, st.CuentasCobro, st.MetodosPago, st.Clientes, st.Cotizaciones, st.Cajas, st.Cajeros, st.SesionesCaja, st.Tasas, st.Empresas, st.VentasEnEspera, st.Cobros, st.CuentasContables, st.Asientos, st.Periodos, st.Proveedores, st.OrdenesCompra, st.CierresZ, st.FacturasCompra, st.PagosProveedor, st.Retenciones, st.Dispositivos)
-		svc.ConLeadsDemo(st.DemoLeads)
 		svc.ConListasPrecio(st.ListasPrecio)
 		svc.ConCupones(st.Cupones)
 		svc.ConPromociones(st.Promociones)
@@ -56,7 +55,6 @@ func main() {
 	} else {
 		st := inmem.New()
 		svc = application.New(st.Productos, st.Movimientos, st.Transferencias, st.Rubros, st.Audit, st.Documentos, st.Numerador, st.CuentasCobro, st.MetodosPago, st.Clientes, st.Cotizaciones, st.Cajas, st.Cajeros, st.SesionesCaja, st.Tasas, st.Empresas, st.VentasEnEspera, st.Cobros, st.CuentasContables, st.Asientos, st.Periodos, st.Proveedores, st.OrdenesCompra, st.CierresZ, st.FacturasCompra, st.PagosProveedor, st.Retenciones, st.Dispositivos)
-		svc.ConLeadsDemo(st.DemoLeads)
 		svc.ConListasPrecio(st.ListasPrecio)
 		svc.ConCupones(st.Cupones)
 		svc.ConPromociones(st.Promociones)

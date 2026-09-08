@@ -33,7 +33,7 @@ type Aceptacion struct {
 	Documento string `json:"documento" bson:"documento"`
 	Version   string `json:"version" bson:"version"`
 	Hash      string `json:"hash" bson:"hash"`
-	Fecha     string `json:"fecha" bson:"fecha"` // UTC RFC3339
+	Fecha     string `json:"fecha" bson:"fecha"`   // UTC RFC3339
 	Origen    string `json:"origen" bson:"origen"` // IP
 	UserAgent string `json:"userAgent" bson:"useragent"`
 	Metodo    string `json:"metodo" bson:"metodo"`

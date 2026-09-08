@@ -131,8 +131,8 @@ type Documento struct {
 	// imprenta digital: un correlativo PROPIO, distinto del número de factura,
 	// autorizado por rango. En máquina fiscal lo asigna la impresora (queda vacío).
 	NumeroControl string `json:"numeroControl" bson:"numerocontrol"`
-	Modalidad      string `json:"modalidad" bson:"modalidad"`
-	Contingencia   bool   `json:"contingencia" bson:"contingencia"`
+	Modalidad     string `json:"modalidad" bson:"modalidad"`
+	Contingencia  bool   `json:"contingencia" bson:"contingencia"`
 
 	ClienteID        string `json:"clienteId" bson:"clienteid"`
 	ClienteNombre    string `json:"clienteNombre" bson:"clientenombre"`

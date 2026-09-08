@@ -4,7 +4,6 @@ import (
 	gomongo "go.mongodb.org/mongo-driver/mongo"
 
 	"github.com/mornix/elerp/internal/domain/auditoria"
-	"github.com/mornix/elerp/internal/domain/demolead"
 	"github.com/mornix/elerp/internal/domain/inventario"
 	"github.com/mornix/elerp/internal/domain/legal"
 )
@@ -52,7 +51,6 @@ type Store struct {
 	Unidades         *UnidadMedidaRepo
 	Almacenes        *AlmacenRepo
 	Modulos          *ModuloRepo
-	DemoLeads        *DemoLeadRepo
 	Legal            *LegalRepo
 	Plantillas       *PlantillaRepo
 	Mesas            *MesaRepo
@@ -69,7 +67,6 @@ func New(db *gomongo.Database) *Store {
 		Transferencias: &TransferenciaRepo{coll[inventario.Transferencia]{db.Collection("transferencias")}},
 		Rubros:         &RubroRepo{coll[inventario.Rubro]{db.Collection("rubros")}},
 		Audit:          &AuditRepo{coll[auditoria.Evento]{db.Collection("auditoria")}},
-		DemoLeads:      &DemoLeadRepo{coll[demolead.DemoLead]{db.Collection("demoleads")}},
 		Legal:          &LegalRepo{coll[legal.Aceptacion]{db.Collection("legal_aceptaciones")}},
 	}
 	st.attachTenancy(db)      // definido en tenancy.go

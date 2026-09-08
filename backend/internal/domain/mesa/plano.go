@@ -22,10 +22,10 @@ type Celda struct {
 
 // Límites de la grilla del salón.
 const (
-	FilasMin    = 1
-	FilasMax    = 20
-	ColumnasMin = 1
-	ColumnasMax = 20
+	FilasMin        = 1
+	FilasMax        = 20
+	ColumnasMin     = 1
+	ColumnasMax     = 20
 	FilasDefault    = 6
 	ColumnasDefault = 8
 )

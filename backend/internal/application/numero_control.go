@@ -24,11 +24,11 @@ var (
 type NumeroControlView struct {
 	Prefijo   string `json:"prefijo"`
 	Desde     int    `json:"desde"`
-	Hasta     int    `json:"hasta"`      // 0 = sin tope declarado
-	Actual    int    `json:"actual"`     // último correlativo entregado
-	Proximo   int    `json:"proximo"`    // siguiente a emitir
-	Restantes int    `json:"restantes"`  // Hasta - Actual (si hay tope); -1 = sin tope
-	Ejemplo   string `json:"ejemplo"`    // cómo se verá el próximo (prefijo-8dígitos)
+	Hasta     int    `json:"hasta"`     // 0 = sin tope declarado
+	Actual    int    `json:"actual"`    // último correlativo entregado
+	Proximo   int    `json:"proximo"`   // siguiente a emitir
+	Restantes int    `json:"restantes"` // Hasta - Actual (si hay tope); -1 = sin tope
+	Ejemplo   string `json:"ejemplo"`   // cómo se verá el próximo (prefijo-8dígitos)
 }
 
 func soloDigitos(s string) bool {

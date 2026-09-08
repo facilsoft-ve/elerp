@@ -25,7 +25,7 @@ func RolValido(r string) bool {
 
 // Estados de una membresía.
 const (
-	EstadoActiva  = "active"
+	EstadoActiva   = "active"
 	EstadoInvitada = "invited"
 )
 

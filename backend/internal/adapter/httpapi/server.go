@@ -83,7 +83,6 @@ func NewServer(cfg config.Config, svc *application.Service, tenancy *application
 	app.Get("/api/auth/invite/:token", s.handleInvitePreview)
 	app.Post("/api/auth/accept-invite", authLimiter, s.handleAcceptInvite)
 	// Captación del prospecto antes de la demo (pública, sin tenant).
-	app.Post("/api/demo/lead", s.handleRegistrarLeadDemo)
 	// Documentos legales vigentes (PÚBLICO: titulares y terceros deben poder consultarlos).
 	app.Get("/api/legal/vigente", s.handleLegalVigente)
 

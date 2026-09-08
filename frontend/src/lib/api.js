@@ -59,7 +59,6 @@ export const api = {
   // Captación del prospecto antes de entrar a la demo (público, pre-login). El
   // lead se guarda de verdad en el backend; devuelve { ok, id }. No dispara
   // ningún correo (la notificación al equipo es un punto de integración aparte).
-  registrarLeadDemo: (body) => request('/api/demo/lead', { method: 'POST', body: JSON.stringify(body) }),
 
   // Auth alterno (email/contraseña) + aceptación de invitación por token.
   nativeLogin: (body) => request('/api/auth/native-login', { method: 'POST', body: JSON.stringify(body) }),

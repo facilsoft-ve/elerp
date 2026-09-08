@@ -51,9 +51,9 @@ func TestAsistenteMecanica_Ventas(t *testing.T) {
 func TestAsistenteMecanica_Ayuda(t *testing.T) {
 	svc, _ := nuevoServicio(t)
 	casos := map[string]string{
-		"¿Qué es el IGTF?":                  "IGTF",
+		"¿Qué es el IGTF?":                    "IGTF",
 		"¿Cómo transfiero stock entre sedes?": "Transferencias",
-		"¿Qué es forma libre?":              "Forma libre",
+		"¿Qué es forma libre?":                "Forma libre",
 	}
 	for pregunta, esperado := range casos {
 		resp, ok := svc.ResponderMecanica(empDemo, usuario.RolVendedor, pregunta)

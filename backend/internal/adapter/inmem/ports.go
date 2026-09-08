@@ -8,7 +8,6 @@ import (
 	"github.com/mornix/elerp/internal/domain/contabilidad"
 	"github.com/mornix/elerp/internal/domain/cotizacion"
 	"github.com/mornix/elerp/internal/domain/credencial"
-	"github.com/mornix/elerp/internal/domain/demolead"
 	"github.com/mornix/elerp/internal/domain/empresa"
 	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/inventario"
@@ -39,7 +38,6 @@ var (
 	_ credencial.Repository        = (*CredencialRepo)(nil)
 	_ cliente.Repository           = (*ClienteRepo)(nil)
 	_ listaprecio.Repository       = (*ListaPrecioRepo)(nil)
-	_ demolead.Repository          = (*DemoLeadRepo)(nil)
 	_ fiscal.Repository            = (*DocumentoRepo)(nil)
 	_ fiscal.Numerador             = (*NumeradorRepo)(nil)
 	_ fiscal.CuentaCobroRepo       = (*CuentaCobroRepo)(nil)

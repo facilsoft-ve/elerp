@@ -393,9 +393,9 @@ func PorDefecto(tipo, papel string) Plantilla {
 // Alimenta el panel del editor; la RESOLUCIÓN del valor real al imprimir es del
 // front (o del render del comprobante), no del dominio.
 type CampoDisponible struct {
-	Clave   string `json:"clave"`   // "emisor.nombre"
+	Clave    string `json:"clave"`    // "emisor.nombre"
 	Etiqueta string `json:"etiqueta"` // "Nombre del emisor"
-	Grupo   string `json:"grupo"`   // "Emisor" | "Cliente" | "Documento"
+	Grupo    string `json:"grupo"`    // "Emisor" | "Cliente" | "Documento"
 }
 
 // CamposDisponibles es el catálogo de campos dinámicos que el editor ofrece.

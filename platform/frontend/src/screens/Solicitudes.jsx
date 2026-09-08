@@ -46,12 +46,31 @@ export function Solicitudes() {
   const [filtro, setFiltro] = useState('')
   const [abierta, setAbierta] = useState(null)
 
+  const [demosPorGiro, setDemosPorGiro] = useState({})
+
   const cargar = () => {
     api.leads()
       .then((r) => { setLeads(r.leads || []); setEstados(r.estados || []) })
       .catch((e) => setError(e.message || 'No se pudieron cargar las solicitudes'))
   }
   useEffect(cargar, [])
+
+  // Empresa demo de cada rubro: es la PLANTILLA que se clona para el prospecto. Se
+  // resuelve por `giro`, no por IDs fijos, así el día que cambien los datos sembrados
+  // esto sigue funcionando.
+  useEffect(() => {
+    api.tenants()
+      .then((r) => {
+        const porGiro = {}
+        for (const org of r.tenants || []) {
+          for (const emp of org.empresas || []) {
+            if (emp.giro && !emp.sandbox && !porGiro[emp.giro]) porGiro[emp.giro] = emp
+          }
+        }
+        setDemosPorGiro(porGiro)
+      })
+      .catch(() => setDemosPorGiro({}))
+  }, [])
 
   const filas = useMemo(() => {
     let rows = leads || []
@@ -142,6 +161,7 @@ export function Solicitudes() {
         <DetalleSolicitud
           lead={abierta}
           estados={estados}
+          plantilla={demosPorGiro[abierta.giro]}
           onClose={() => setAbierta(null)}
           onGuardado={(l) => {
             setLeads((prev) => prev.map((x) => (x.id === l.id ? l : x)))
@@ -163,12 +183,37 @@ function Chip({ activo, onClick, children }) {
   )
 }
 
-function DetalleSolicitud({ lead, estados, onClose, onGuardado }) {
+function DetalleSolicitud({ lead, estados, plantilla, onClose, onGuardado }) {
   const toast = useToast()
   const [estado, setEstado] = useState(lead.estado)
   const [notas, setNotas] = useState(lead.notas || '')
   const [empresaDemoId, setEmpresaDemoId] = useState(lead.empresaDemoId || '')
   const [guardando, setGuardando] = useState(false)
+  const [creando, setCreando] = useState(false)
+
+  // Abre una demo para ESTE prospecto: clona la empresa demo de su rubro como SANDBOX
+  // (maestros y configuración copiados, ledgers vacíos, con fecha de caducidad). Así el
+  // prospecto trabaja sobre datos de su rubro sin ensuciar la demo pública ni ver lo que
+  // hizo otro.
+  const crearDemo = async () => {
+    if (!plantilla) return
+    setCreando(true)
+    try {
+      const r = await api.crearSandbox(plantilla.id, 14)
+      const nueva = r?.sandbox?.id || ''
+      const actualizado = await api.actualizarLead(lead.id, {
+        estado: 'demo_creada',
+        empresaDemoId: nueva,
+        notas: notas,
+      })
+      toast(`Demo creada: ${r?.sandbox?.nombre || nueva}`)
+      onGuardado(actualizado)
+    } catch (e) {
+      toast(e.message || 'No se pudo crear la demo', 'error')
+    } finally {
+      setCreando(false)
+    }
+  }
 
   const guardar = async () => {
     setGuardando(true)
@@ -187,6 +232,11 @@ function DetalleSolicitud({ lead, estados, onClose, onGuardado }) {
     <Modal open onClose={onClose} title={lead.empresa || lead.nombre} width="max-w-2xl"
       footer={<>
         <Button variant="ghost" onClick={onClose}>Cerrar</Button>
+        {plantilla && !empresaDemoId ? (
+          <Button variant="navy" onClick={crearDemo} loading={creando}>
+            Crear demo de {GIRO_LABEL[lead.giro] || 'su rubro'}
+          </Button>
+        ) : null}
         <Button onClick={guardar} loading={guardando}>Guardar</Button>
       </>}>
       <div className="space-y-4">
@@ -212,7 +262,12 @@ function DetalleSolicitud({ lead, estados, onClose, onGuardado }) {
               {estados.map((e) => <option key={e} value={e}>{ESTADO_LABEL[e] || e}</option>)}
             </Select>
           </Field>
-          <Field label="Empresa de demo" hint="ID de la empresa o sandbox que se le abrió">
+          <Field label="Empresa de demo"
+            hint={empresaDemoId
+              ? 'Sandbox abierto para este prospecto'
+              : plantilla
+                ? `Se clonará «${plantilla.nombre}» como sandbox de 14 días`
+                : 'Sin rubro elegido (o sin demo de ese rubro): cargá el ID a mano'}>
             <Input value={empresaDemoId} onChange={(e) => setEmpresaDemoId(e.target.value)} placeholder="emp_…" />
           </Field>
         </div>
