@@ -79,7 +79,7 @@ const TABS = [
   { id: 'mesoneros', label: 'Mesoneros y asignación', icon: <Icon.Users size={15} /> },
   { id: 'cocina', label: 'Cocina', icon: <Icon.Activity size={15} /> },
   { id: 'platos', label: 'Platos y recetas', icon: <Icon.Boxes size={15} /> },
-  { id: 'impresora', label: 'Comanderas', icon: <Icon.Printer size={15} /> },
+  { id: 'impresora', label: 'Impresoras comanderas', icon: <Icon.Printer size={15} /> },
 ]
 
 // Un subtítulo POR PESTAÑA. Antes era uno fijo que hablaba del mapa y de la impresora:

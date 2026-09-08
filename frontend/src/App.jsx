@@ -74,19 +74,34 @@ function DemoBanner() {
     .filter((r) => r.empresa)
 
   return (
-    <div className="shrink-0 flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-1.5 text-[12.5px] border-b
+    <div className="shrink-0 flex items-center gap-x-2 gap-y-1 sm:flex-wrap px-3 sm:px-4 py-1.5 text-[12.5px] border-b
       border-teal-200 dark:border-teal-900/60 bg-teal-50 dark:bg-teal-950/40 text-teal-900 dark:text-teal-100">
       <Icon.Sparkles size={14} className="shrink-0 text-teal-600 dark:text-teal-300" />
       <span className="min-w-0">
-        <span className="font-semibold">Estás en una demostración</span>
-        <span className="text-teal-700 dark:text-teal-300"> · sesión limitada con datos de muestra.</span>
+        {/* En celular la barra ocupaba 139 px de 844 (un 16% de la pantalla) porque
+            apilaba el mensaje, cuatro fichas de rubro y el enlace. Acá el texto se
+            acorta y abajo el selector pasa a ser un <select>: una línea, un toque. */}
+        <span className="font-semibold">Demostración</span>
+        <span className="hidden sm:inline text-teal-700 dark:text-teal-300"> · sesión limitada con datos de muestra.</span>
+        <span className="sm:hidden text-teal-700 dark:text-teal-300"> · datos de muestra</span>
       </span>
 
       {/* Selector de RUBRO: cada uno es una empresa demo con su propio catálogo. Cambiar
           de rubro es cambiar de empresa activa (mismo mecanismo que el selector del
           topbar), así el prospecto ve el ERP con datos parecidos a los de su negocio. */}
       {rubros.length > 1 ? (
-        <span className="flex items-center gap-1 flex-wrap">
+        <>
+          {/* Celular: un <select> nativo. Ocupa una línea y el selector del sistema es
+              más cómodo de acertar con el pulgar que cuatro fichas de 20 px. */}
+          <select
+            aria-label="Ver otro rubro"
+            className="sm:hidden ml-auto h-7 max-w-[42%] rounded-lg border border-teal-300 bg-white/80 px-2 text-[12px] font-semibold
+              text-teal-900 ring-focus dark:border-teal-800 dark:bg-teal-950/60 dark:text-teal-100"
+            value={activeEmpresa?.id || ''}
+            onChange={(e) => setActiveEmpresa(e.target.value)}>
+            {rubros.map((r) => <option key={r.giro} value={r.empresa.id}>{r.label}</option>)}
+          </select>
+          <span className="hidden sm:flex items-center gap-1 flex-wrap">
           <span className="text-teal-700 dark:text-teal-300">Ver otro rubro:</span>
           {rubros.map((r) => {
             const activo = activeEmpresa?.id === r.empresa.id
@@ -103,12 +118,15 @@ function DemoBanner() {
               </button>
             )
           })}
-        </span>
+          </span>
+        </>
       ) : null}
 
+      {/* En celular solo la flecha (el texto ya no cabe sin robar otra línea). */}
       <a href="https://elerp.tech/#demo" target="_blank" rel="noreferrer"
-        className="ml-auto shrink-0 inline-flex items-center gap-1 font-semibold underline underline-offset-2 hover:text-teal-700 dark:hover:text-white ring-focus rounded">
-        Solicitar acceso <Icon.ArrowRight size={13} />
+        aria-label="Solicitar acceso"
+        className="sm:ml-auto shrink-0 inline-flex items-center gap-1 font-semibold underline underline-offset-2 hover:text-teal-700 dark:hover:text-white ring-focus rounded">
+        <span className="hidden sm:inline">Solicitar acceso</span> <Icon.ArrowRight size={13} />
       </a>
     </div>
   )
