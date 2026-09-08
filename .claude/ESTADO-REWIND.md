@@ -88,7 +88,7 @@ Lo último que pidió el usuario, textualmente resumido:
 
 ## 4 · ESTADO ACTUAL
 
-Desplegado en `https://huberp.mornix.tech` (Docker Compose: mongo + backend + frontend/nginx). Se verifica que el despliegue tomó comparando el hash del asset publicado con el de `frontend/dist/index.html`.
+Desplegado en `https://elerp.tech` (Docker Compose: mongo + backend + frontend/nginx). Se verifica que el despliegue tomó comparando el hash del asset publicado con el de `frontend/dist/index.html`.
 
 ### Backend
 
