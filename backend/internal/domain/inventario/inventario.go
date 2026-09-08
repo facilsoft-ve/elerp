@@ -120,6 +120,12 @@ type Producto struct {
 	// cantidad por plato (p. ej. 0.12 kg de pasta, 0.05 kg de queso). Cada insumo es
 	// un producto normal del catálogo. Solo tiene sentido cuando EsPlato.
 	Receta []ComboComponente `json:"receta" bson:"receta"`
+	// EsInsumo marca una MATERIA PRIMA: se compra y se stockea (participa del Kardex y
+	// del costo promedio) pero NO se vende directamente — se consume por la receta de
+	// un plato. Un restaurante vende platos, bebidas y productos de reventa; no vende
+	// el kilo de pasta cruda. Por eso los insumos quedan fuera de las pantallas de
+	// venta (POS, comandera, ventas y cotizaciones) y no necesitan precio de venta.
+	EsInsumo bool `json:"esInsumo" bson:"esinsumo"`
 }
 
 // Movimiento es una entrada inmutable del ledger de inventario.

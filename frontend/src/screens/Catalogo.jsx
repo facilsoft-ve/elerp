@@ -122,6 +122,9 @@ export function Catalogo({ onKardex }) {
     let list = (productos || []).filter((p) => {
       const term = q.trim().toLowerCase()
       const okQ = !term || p.nombre.toLowerCase().includes(term) || (p.sku || '').toLowerCase().includes(term)
+      // El producto guarda el NOMBRE del rubro (convenio del seed, de la carga masiva y
+      // de los almacenes con RubrosAdmitidos), así que el filtro compara nombres. Antes
+      // el <option> llevaba el id y NINGÚN producto casaba: el filtro no filtraba nada.
       const okR = !rubro || p.rubro === rubro
       return okQ && okR
     })
@@ -185,7 +188,7 @@ export function Catalogo({ onKardex }) {
           value={q} onChange={(e) => setQ(e.target.value)} />
         <Select className="!w-44" value={rubro} onChange={(e) => setRubro(e.target.value)}>
           <option value="">Todos los rubros</option>
-          {rubros.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+          {rubros.map((r) => <option key={r.id} value={r.nombre}>{r.nombre}</option>)}
         </Select>
         <div className="ml-auto flex items-center gap-2">
           {editable ? <Button variant="secondary" icon={<Icon.Upload size={15} />} onClick={() => setImportar(true)}>Carga masiva</Button> : null}
@@ -228,11 +231,19 @@ export function Catalogo({ onKardex }) {
                       <div className="font-medium text-[13px] flex items-center gap-1.5">
                         {p.nombre}
                         {p.esCombo ? <Badge size="sm" color="huberp">Combo</Badge> : null}
+                        {p.esPlato ? <Badge size="sm" color="huberp">Plato</Badge> : null}
+                        {/* Un insumo se administra acá pero NO se ofrece en las pantallas
+                            de venta: conviene que se distinga de un vistazo. */}
+                        {p.esInsumo ? <Badge size="sm" color="amber">Insumo</Badge> : null}
                         {p.tipoVenta === 'peso' ? <Badge size="sm" color="sky">Por peso</Badge> : null}
                       </div>
                       {p.esCombo
                         ? <div className="text-[11px] text-slate-400">paquete · {(p.componentes || []).length} componente(s)</div>
-                        : (p.presentaciones?.length ? <div className="text-[11px] text-slate-400">{p.presentaciones.length} presentación(es)</div> : null)}
+                        : p.esPlato
+                          ? <div className="text-[11px] text-slate-400">receta · {(p.receta || []).length} insumo(s)</div>
+                          : p.esInsumo
+                            ? <div className="text-[11px] text-slate-400">materia prima · no se vende directamente</div>
+                            : (p.presentaciones?.length ? <div className="text-[11px] text-slate-400">{p.presentaciones.length} presentación(es)</div> : null)}
                     </td>
                     <td className={`${pad} pr-3`}><Badge size="sm" color="slate">{rubros.find((r) => r.id === p.rubro)?.nombre || p.rubro || '—'}</Badge></td>
                     <td className={`${pad} pr-3 text-[12.5px] text-slate-500`}>{p.unidadBase}</td>
@@ -439,9 +450,9 @@ function NuevoProducto({ rubros, onClose, onSaved, toast, monedaEmpresa = 'VES',
   // El precio se captura en la moneda principal de la empresa (R10) y el
   // homólogo se calcula al lado: nunca se guardan los dos.
   const [f, setF] = useState({
-    sku: '', nombre: '', rubro: rubros[0]?.id || '', unidadBase: 'unidad', precio: '',
+    sku: '', nombre: '', rubro: rubros[0]?.nombre || '', unidadBase: 'unidad', precio: '',
     moneda: monedaEmpresa, codigoBarras: '', exentoIva: false,
-    esCombo: false, componentes: [],
+    esCombo: false, componentes: [], esInsumo: false,
   })
   const esPeso = esUnidadDePeso(unidades, f.unidadBase)
   const esCombo = f.esCombo
@@ -453,7 +464,7 @@ function NuevoProducto({ rubros, onClose, onSaved, toast, monedaEmpresa = 'VES',
     nombre: !f.nombre.trim() ? 'Ingresa el nombre.' : '',
     // Combo: el precio puede quedar en 0 (el servidor lo fija a la suma); en cambio
     // exige al menos un componente.
-    precio: esCombo ? '' : (f.precio === '' || isNaN(Number(f.precio)) ? 'Precio inválido.' : Number(f.precio) < 0 ? 'No puede ser negativo.' : ''),
+    precio: (esCombo || f.esInsumo) ? '' : (f.precio === '' || isNaN(Number(f.precio)) ? 'Precio inválido.' : Number(f.precio) < 0 ? 'No puede ser negativo.' : ''),
     componentes: esCombo && f.componentes.length === 0 ? 'Agrega al menos un componente.' : '',
   }
   const valid = !errs.sku && !errs.nombre && !errs.precio && !errs.componentes
@@ -469,15 +480,17 @@ function NuevoProducto({ rubros, onClose, onSaved, toast, monedaEmpresa = 'VES',
       // (VES) y, si es 0, el servidor lo fija a la suma de componentes.
       const payload = esCombo
         ? {
-            sku: f.sku.trim(), nombre: f.nombre.trim(), rubro: f.rubro, unidadBase: 'unidad',
+            sku: f.sku.trim(), nombre: f.nombre.trim(), rubro: f.rubro, unidadBase: 'unidad', esInsumo: false,
             precio: Number(f.precio) || 0, moneda: 'VES', codigoBarras: f.codigoBarras.trim(),
             exentoIva: f.exentoIva, tipoVenta: 'unidad', esCombo: true,
             componentes: f.componentes.map((c) => ({ sku: c.sku, cantidad: Number(c.cantidad) || 0 })),
           }
         : {
             sku: f.sku.trim(), nombre: f.nombre.trim(), rubro: f.rubro,
-            unidadBase: f.unidadBase || 'unidad', precio: Number(f.precio), moneda: f.moneda,
+            unidadBase: f.unidadBase || 'unidad', precio: Number(f.precio) || 0, moneda: f.moneda,
             codigoBarras: f.codigoBarras.trim(), exentoIva: f.exentoIva, tipoVenta: esPeso ? 'peso' : 'unidad',
+            // Un insumo no se vende: el servidor le fuerza el precio a cero.
+            esInsumo: f.esInsumo,
           }
       await api.createProducto(payload)
       toast({ title: 'Producto creado', body: `${f.nombre.trim()} se agregó al catálogo.` })
@@ -509,13 +522,20 @@ function NuevoProducto({ rubros, onClose, onSaved, toast, monedaEmpresa = 'VES',
         {/* Combo/paquete: agrupa otros productos con un precio propio. Al venderse se
             explota en las líneas de sus componentes (precio prorrateado, IVA por
             ítem). Un combo es por unidad y no tiene existencia propia. */}
-        <Toggle checked={f.esCombo} onChange={(v) => setF((s) => ({ ...s, esCombo: v, unidadBase: 'unidad' }))}
+        <Toggle checked={f.esCombo} onChange={(v) => setF((s) => ({ ...s, esCombo: v, unidadBase: 'unidad', esInsumo: v ? false : s.esInsumo }))}
           label="Es un combo / paquete" sub="Agrupa varios productos con un precio propio; al venderse se descompone en sus componentes." />
+        {/* Insumo (materia prima): se compra y se stockea, pero no se vende — se consume
+            por la receta de un plato. Excluyente con combo: un combo es una forma de
+            vender. */}
+        {!esCombo ? (
+          <Toggle checked={f.esInsumo} onChange={(v) => setF((s) => ({ ...s, esInsumo: v, precio: v ? '0' : s.precio }))}
+            label="Es un insumo (materia prima)" sub="Se compra y se controla en inventario, pero NO se ofrece en el punto de venta: se consume por la receta de un plato." />
+        ) : null}
         <div className={`grid ${esCombo ? 'grid-cols-1' : 'grid-cols-2'} gap-3`}>
           <Field label="Rubro">
             <Select value={f.rubro} onChange={set('rubro')}>
               {rubros.length === 0 ? <option value="">—</option> : null}
-              {rubros.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+              {rubros.map((r) => <option key={r.id} value={r.nombre}>{r.nombre}</option>)}
             </Select>
           </Field>
           {/* Unidad de medida: UN solo control (del maestro). De la unidad se deriva

@@ -1,6 +1,7 @@
 package application_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -380,6 +381,75 @@ func TestEsEmpresaDemo_SoloLasSembradas(t *testing.T) {
 	for _, id := range []string{"emp_f2593e59223b", "emp_80daacd60a1c", "emp_6eb59d1b696f", "", "empresa_demo"} {
 		if application.EsEmpresaDemo(id) {
 			t.Errorf("%q NO es de demostración y se marcó como tal: la consola podría clonar la empresa de un cliente", id)
+		}
+	}
+}
+
+// Un INSUMO se stockea pero no se vende. Dos reglas: no puede ser a la vez plato o combo
+// (que son formas de vender) y no lleva precio de venta — dejarle precio sugeriría en el
+// catálogo que se puede vender.
+func TestInsumo_NoEsVendible(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+
+	insumo, err := svc.CrearProducto(empDemo, actorA, origenTst, inventario.Producto{
+		SKU: "MP-HARINA", Nombre: "Harina a granel", Rubro: "Insumos",
+		UnidadBase: "kg", TipoVenta: inventario.TipoVentaPeso,
+		Precio: 5000, EsInsumo: true, Activo: true,
+	})
+	if err != nil {
+		t.Fatalf("crear insumo: %v", err)
+	}
+	if insumo.Precio != 0 {
+		t.Errorf("un insumo no lleva precio de venta, quedó en %v", insumo.Precio)
+	}
+	if !insumo.EsInsumo {
+		t.Error("la marca de insumo debe persistir")
+	}
+
+	// Insumo + combo es contradictorio.
+	if _, err := svc.CrearProducto(empDemo, actorA, origenTst, inventario.Producto{
+		SKU: "MP-MALO", Nombre: "Insumo combo", Rubro: "Insumos", UnidadBase: "unidad",
+		EsInsumo: true, EsCombo: true,
+		Componentes: []inventario.ComboComponente{{SKU: "MP-HARINA", Cantidad: 1}},
+		Activo:      true,
+	}); !errors.Is(err, application.ErrInsumoNoVendible) {
+		t.Errorf("un insumo no puede ser un combo, se obtuvo: %v", err)
+	}
+}
+
+// En el restaurante, lo que se VENDE son platos, bebidas y reventa; los insumos quedan
+// marcados y sin precio. Si un insumo tuviera precio, aparecería como vendible.
+func TestDemosNicho_RestauranteVendePlatosNoInsumos(t *testing.T) {
+	_, st := nuevoServicio(t)
+	var insumos, vendibles int
+	for _, p := range st.Productos.List("emp_demo_rest") {
+		if p.EsInsumo {
+			insumos++
+			if p.Precio != 0 {
+				t.Errorf("el insumo %s tiene precio de venta %v: se ofrecería como vendible", p.SKU, p.Precio)
+			}
+			if p.EsPlato {
+				t.Errorf("%s está marcado como insumo Y como plato", p.SKU)
+			}
+			continue
+		}
+		vendibles++
+		if p.Precio <= 0 {
+			t.Errorf("el producto vendible %s no tiene precio", p.SKU)
+		}
+	}
+	if insumos == 0 {
+		t.Error("el restaurante debe tener insumos (materia prima de las recetas)")
+	}
+	if vendibles == 0 {
+		t.Error("el restaurante debe tener productos vendibles (platos, bebidas, postres)")
+	}
+	// Ninguna factura sembrada puede vender un insumo.
+	for _, d := range st.Documentos.List("emp_demo_rest") {
+		for _, l := range d.Lineas {
+			if p, ok := st.Productos.BySKU("emp_demo_rest", l.SKU); ok && p.EsInsumo {
+				t.Errorf("el documento %s vende el insumo %s: el restaurante no vende materia prima", d.NumeroCompleto, l.SKU)
+			}
 		}
 	}
 }

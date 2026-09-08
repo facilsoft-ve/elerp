@@ -34,6 +34,7 @@ var (
 	ErrPlatoSinInsumos         = errors.New("un plato necesita al menos un insumo en su receta")
 	ErrPlatoInsumoInvalido     = errors.New("insumo de plato inválido: el SKU debe existir, estar activo y llevar cantidad mayor que cero")
 	ErrPlatoAnidado            = errors.New("un insumo de plato no puede ser otro plato ni un combo (sin anidar)")
+	ErrInsumoNoVendible        = errors.New("un insumo no se vende directamente: no puede ser a la vez un plato ni un combo")
 )
 
 // validarCombo valida y normaliza la receta de un producto combo. Un combo:
@@ -112,6 +113,21 @@ func (s *Service) validarPlato(empresaID string, p *inventario.Producto) error {
 	}
 	p.TipoVenta = inventario.TipoVentaUnidad
 	p.UnidadBase = inventario.UnidadUnidad
+	return nil
+}
+
+// validarInsumo valida la marca de MATERIA PRIMA. Un insumo se compra y se stockea pero
+// NO se vende: por eso no puede ser a la vez un plato o un combo (que son formas de
+// VENDER), y su precio de venta se pone en cero — dejarle un precio sugeriría en el
+// catálogo que se puede vender, que es justo lo que la marca niega.
+func validarInsumo(p *inventario.Producto) error {
+	if !p.EsInsumo {
+		return nil
+	}
+	if p.EsPlato || p.EsCombo {
+		return ErrInsumoNoVendible
+	}
+	p.Precio = 0
 	return nil
 }
 
@@ -239,6 +255,10 @@ func (s *Service) CrearProducto(empresaID, actor, origen string, p inventario.Pr
 	if p.Receta == nil {
 		p.Receta = []inventario.ComboComponente{}
 	}
+	// Insumo (materia prima): no se vende, así que no lleva precio de venta.
+	if err := validarInsumo(&p); err != nil {
+		return inventario.Producto{}, err
+	}
 	if p.Presentaciones == nil {
 		p.Presentaciones = []inventario.Presentacion{}
 	}
@@ -306,6 +326,7 @@ type CambiosProducto struct {
 	Componentes  []inventario.ComboComponente
 	EsPlato      *bool
 	Receta       []inventario.ComboComponente
+	EsInsumo     *bool
 }
 
 // ActualizarProducto edita los datos del catálogo (nombre, precio, moneda, IVA,
@@ -392,6 +413,13 @@ func (s *Service) ActualizarProducto(empresaID, actor, origen, sku string, cambi
 	}
 	if p.Receta == nil {
 		p.Receta = []inventario.ComboComponente{}
+	}
+	// Insumo (materia prima): *bool, nil = conserva.
+	if cambios.EsInsumo != nil {
+		p.EsInsumo = *cambios.EsInsumo
+	}
+	if err := validarInsumo(&p); err != nil {
+		return inventario.Producto{}, err
 	}
 	// IVA y estado activo son *bool: nil = no enviado = conserva el valor actual (no
 	// se pisan a false en un PATCH parcial); no-nil aplica el valor, incluido false.

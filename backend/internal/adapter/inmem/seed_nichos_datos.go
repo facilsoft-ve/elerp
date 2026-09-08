@@ -64,23 +64,23 @@ func restauranteDemo() especNicho {
 		// INSUMOS: lo que de verdad se stockea y se descuenta al vender un plato.
 		// Van por peso/volumen porque una receta consume gramos, no unidades.
 		productos: []prodNicho{
-			{sku: "INS-PASTA", nombre: "Pasta larga (spaghetti)", rubro: "Insumos", costo: 3200, precio: 4800, stock: 40, porPeso: true},
-			{sku: "INS-QUESO", nombre: "Queso parmesano", rubro: "Insumos", costo: 28000, precio: 42000, stock: 12, porPeso: true},
-			{sku: "INS-CARNE", nombre: "Carne molida de res", rubro: "Insumos", costo: 21000, precio: 31000, stock: 25, porPeso: true},
-			{sku: "INS-TOMATE", nombre: "Salsa de tomate natural", rubro: "Insumos", costo: 5400, precio: 8100, stock: 30, porPeso: true},
-			{sku: "INS-POLLO", nombre: "Pechuga de pollo", rubro: "Insumos", costo: 14500, precio: 21000, stock: 30, porPeso: true},
-			{sku: "INS-ARROZ", nombre: "Arroz blanco", rubro: "Insumos", costo: 2400, precio: 3600, stock: 50, porPeso: true, exento: true},
-			{sku: "INS-PAPA", nombre: "Papa para freír", rubro: "Insumos", costo: 3900, precio: 5800, stock: 45, porPeso: true},
-			{sku: "INS-LECHUGA", nombre: "Lechuga romana", rubro: "Insumos", costo: 4200, precio: 6300, stock: 10, porPeso: true},
-			{sku: "INS-ACEITE", nombre: "Aceite de oliva", rubro: "Insumos", unidad: "litro", costo: 32000, precio: 46000, stock: 8},
-			{sku: "INS-SAL", nombre: "Sal marina", rubro: "Insumos", costo: 900, precio: 1400, stock: 15, porPeso: true},
+			{sku: "INS-PASTA", nombre: "Pasta larga (spaghetti)", rubro: "Insumos", costo: 3200, precio: 4800, stock: 40, porPeso: true, insumo: true},
+			{sku: "INS-QUESO", nombre: "Queso parmesano", rubro: "Insumos", costo: 28000, precio: 42000, stock: 12, porPeso: true, insumo: true},
+			{sku: "INS-CARNE", nombre: "Carne molida de res", rubro: "Insumos", costo: 21000, precio: 31000, stock: 25, porPeso: true, insumo: true},
+			{sku: "INS-TOMATE", nombre: "Salsa de tomate natural", rubro: "Insumos", costo: 5400, precio: 8100, stock: 30, porPeso: true, insumo: true},
+			{sku: "INS-POLLO", nombre: "Pechuga de pollo", rubro: "Insumos", costo: 14500, precio: 21000, stock: 30, porPeso: true, insumo: true},
+			{sku: "INS-ARROZ", nombre: "Arroz blanco", rubro: "Insumos", costo: 2400, precio: 3600, stock: 50, porPeso: true, exento: true, insumo: true},
+			{sku: "INS-PAPA", nombre: "Papa para freír", rubro: "Insumos", costo: 3900, precio: 5800, stock: 45, porPeso: true, insumo: true},
+			{sku: "INS-LECHUGA", nombre: "Lechuga romana", rubro: "Insumos", costo: 4200, precio: 6300, stock: 10, porPeso: true, insumo: true},
+			{sku: "INS-ACEITE", nombre: "Aceite de oliva", rubro: "Insumos", unidad: "litro", costo: 32000, precio: 46000, stock: 8, insumo: true},
+			{sku: "INS-SAL", nombre: "Sal marina", rubro: "Insumos", costo: 900, precio: 1400, stock: 15, porPeso: true, insumo: true},
 			// Bebidas y postres se venden tal cual (no llevan receta).
 			{sku: "BEB-REFRESCO", nombre: "Refresco 355 ml", rubro: "Bebidas", unidad: "unidad", costo: 1100, precio: 2200, stock: 120},
 			{sku: "BEB-AGUA", nombre: "Agua mineral 600 ml", rubro: "Bebidas", unidad: "unidad", costo: 700, precio: 1600, stock: 90},
 			{sku: "BEB-CERVEZA", nombre: "Cerveza nacional 222 ml", rubro: "Bebidas", unidad: "unidad", costo: 1500, precio: 3200, stock: 150},
 			{sku: "POS-TORTA", nombre: "Porción de torta de chocolate", rubro: "Postres", unidad: "unidad", costo: 3800, precio: 8500, stock: 18},
 			// Agotado a propósito: enseña cómo se ve un insumo sin existencia.
-			{sku: "INS-CAMARON", nombre: "Camarón pelado", rubro: "Insumos", costo: 62000, precio: 89000, stock: 0, porPeso: true},
+			{sku: "INS-CAMARON", nombre: "Camarón pelado", rubro: "Insumos", costo: 62000, precio: 89000, stock: 0, porPeso: true, insumo: true},
 		},
 
 		// PLATOS (escandallo). Las cantidades están en la unidad del insumo: kg para los

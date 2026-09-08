@@ -105,8 +105,9 @@ func (s *Server) handleCrearProducto(c *fiber.Ctx) error {
 		Componentes []inventario.ComboComponente `json:"componentes"`
 		// Plato con receta (escandallo, módulo Restaurante): se vende como una línea y
 		// descuenta sus insumos del inventario al facturar.
-		EsPlato bool                         `json:"esPlato"`
-		Receta  []inventario.ComboComponente `json:"receta"`
+		EsPlato  bool                         `json:"esPlato"`
+		EsInsumo bool                         `json:"esInsumo"`
+		Receta   []inventario.ComboComponente `json:"receta"`
 	}
 	if err := c.BodyParser(&in); err != nil || in.SKU == "" || in.Nombre == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "SKU y nombre requeridos"})
@@ -116,7 +117,7 @@ func (s *Server) handleCrearProducto(c *fiber.Ctx) error {
 		TipoVenta: in.TipoVenta, Precio: in.Precio, Moneda: in.Moneda,
 		CodigoBarras: in.CodigoBarras, ExentoIVA: in.ExentoIVA,
 		EsCombo: in.EsCombo, Componentes: in.Componentes,
-		EsPlato: in.EsPlato, Receta: in.Receta,
+		EsPlato: in.EsPlato, Receta: in.Receta, EsInsumo: in.EsInsumo,
 	}
 	out, err := s.svc.CrearProducto(empresaIDOf(c), principalOf(c).UserID, origen(c), p)
 	if err != nil {
@@ -183,6 +184,7 @@ func (s *Server) handleActualizarProducto(c *fiber.Ctx) error {
 		EsCombo     *bool                        `json:"esCombo"`
 		Componentes []inventario.ComboComponente `json:"componentes"`
 		EsPlato     *bool                        `json:"esPlato"`
+		EsInsumo    *bool                        `json:"esInsumo"`
 		Receta      []inventario.ComboComponente `json:"receta"`
 	}
 	if err := c.BodyParser(&in); err != nil {

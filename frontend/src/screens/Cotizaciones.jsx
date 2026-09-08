@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect, Fragment } from 'react'
+import { vendibles } from '../lib/catalogo.js'
 import { Icon } from '../components/Icon.jsx'
 import { Button, Badge, Input, Select, VistaDetalle, Modal, Empty, useToast, Field } from '../components/primitives.jsx'
 import { TablaDatos } from '../components/TablaDatos.jsx'
@@ -341,7 +342,7 @@ function FormCotizacion({ cotizacion, onVolver, onSaved, toast }) {
   const { ui } = useUI()
   const tasa = useTasa()
   const editando = !!cotizacion
-  const productos = db.PRODUCTOS || []
+  const productos = vendibles(db.PRODUCTOS)
   const clientes = db.CLIENTES || []
   const monedaEmpresa = db.EMPRESA?.monedaPrincipal || 'VES'
 

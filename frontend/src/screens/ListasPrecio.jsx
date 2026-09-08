@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { vendibles } from '../lib/catalogo.js'
 import { Icon } from '../components/Icon.jsx'
 import { Button, Badge, Input, Select, Toggle, Field, VistaDetalle, Empty, TableSkeleton, useToast } from '../components/primitives.jsx'
 import { fmtCurrency, fmtNum } from '../lib/format.js'
@@ -143,7 +144,8 @@ function FormLista({ lista, tipo, copy, onVolver, onSaved, toast }) {
   const productos = useMemo(() => {
     // Activos del catálogo, más cualquier SKU ya listado aunque se desactivara
     // (para no perder su precio al editar).
-    const activos = (db.PRODUCTOS || []).filter((p) => p.activo !== false)
+    // Una lista de precios es de VENTA: un insumo no tiene precio de venta.
+    const activos = vendibles(db.PRODUCTOS)
     if (!lista) return activos
     const enLista = new Set((lista.items || []).map((it) => String(it.sku || '').toLowerCase()))
     const faltantes = (db.PRODUCTOS || []).filter((p) => p.activo === false && enLista.has(String(p.sku || '').toLowerCase()))

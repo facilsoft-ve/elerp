@@ -59,6 +59,9 @@ type prodNicho struct {
 	stock              float64
 	exento             bool // exento de IVA (cesta básica, medicinas)
 	porPeso            bool // se cobra por kg
+	// insumo marca la MATERIA PRIMA: se stockea y se consume por receta, pero NO se
+	// vende (queda fuera del POS y de la comandera) y no lleva precio de venta.
+	insumo bool
 }
 
 // platoNicho es un producto COMPUESTO (escandallo): se vende como una línea a su precio
@@ -168,10 +171,16 @@ func (s *Store) seedEmpresaNicho(e especNicho) {
 		if p.porPeso {
 			unidad, tipoVenta = "kg", inventario.TipoVentaPeso
 		}
+		// Un insumo no se vende: su precio de venta queda en cero (el costo vive en el
+		// movimiento de entrada, que es de donde sale el escandallo).
+		precio := p.precio
+		if p.insumo {
+			precio = 0
+		}
 		prod := s.Productos.Create(inventario.Producto{
 			EmpresaID: e.empID, SKU: p.sku, Nombre: p.nombre, Rubro: p.rubro,
-			UnidadBase: unidad, TipoVenta: tipoVenta, Precio: p.precio,
-			ExentoIVA: p.exento, Activo: true,
+			UnidadBase: unidad, TipoVenta: tipoVenta, Precio: precio,
+			ExentoIVA: p.exento, EsInsumo: p.insumo, Activo: true,
 		})
 		if p.stock <= 0 {
 			continue

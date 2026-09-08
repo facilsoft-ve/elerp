@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
+import { vendibles } from '../lib/catalogo.js'
 import { Icon } from '../components/Icon.jsx'
 import { Wordmark } from '../components/Logo.jsx'
 import { Button, useToast, useConfirm, Modal, Field, Input, Select, Badge } from '../components/primitives.jsx'
@@ -63,7 +64,7 @@ export function ModoCaja({ onSalir }) {
   const toast = useToast()
   const confirm = useConfirm()
 
-  const productos = (db.PRODUCTOS || []).filter((p) => p.activo !== false)
+  const productos = vendibles(db.PRODUCTOS)
   const existencias = db.EXISTENCIAS || []
   const monedaEmpresa = db.EMPRESA?.monedaPrincipal || 'VES'
   const sedeNombre = db.SEDE_ACTIVA?.nombre || ''

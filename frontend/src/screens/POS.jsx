@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
+import { vendibles } from '../lib/catalogo.js'
 import { Icon } from '../components/Icon.jsx'
 import { Button, Input, Select, Toggle, Empty, useToast, Field, Modal } from '../components/primitives.jsx'
 import { fmtCurrency, fmtNum, TIPOS_DOCUMENTO, validarRIF } from '../lib/format.js'
@@ -35,7 +36,9 @@ export function POS({ onModoCaja }) {
   const [verTasa, setVerTasa] = useState(false)
   const { ui } = useUI()
   const toast = useToast()
-  const productos = db.PRODUCTOS || []
+  // Los INSUMOS no se venden (ver lib/catalogo.js): no se ofrecen ni se pueden
+  // escanear en el mostrador.
+  const productos = vendibles(db.PRODUCTOS)
 
   const puede = puedeEmitir(ui.rol)
 

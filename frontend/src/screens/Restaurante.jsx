@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { vendibles } from '../lib/catalogo.js'
 import { Icon } from '../components/Icon.jsx'
 import { Button, Badge, Select, Segmented, Toggle, Empty, Input, Field, Modal, PageHeader, useToast, useConfirm, TableSkeleton } from '../components/primitives.jsx'
 import { useData } from '../context/DataContext.jsx'
@@ -458,7 +459,7 @@ export function Comandera() {
     return (<>
       <CuentaDetalle cuenta={cuenta} busy={busy} onVolver={() => setCuenta(null)}
         onAgregar={() => setMenuOpen(true)} onCancelar={cancelarItem} onEnviar={enviar} onCerrar={cerrar} onCobrar={() => setCobroOpen(true)} />
-      {menuOpen ? <MenuProductos productos={db.PRODUCTOS || []} monedaEmpresa={monedaEmpresa}
+      {menuOpen ? <MenuProductos productos={vendibles(db.PRODUCTOS)} monedaEmpresa={monedaEmpresa}
         onAgregar={agregarProducto} onClose={() => setMenuOpen(false)} /> : null}
       {comanda ? <ComandaModal cuenta={cuenta} comanda={comanda} impresora={db.IMPRESORA_COMANDAS} onClose={() => setComanda(null)} /> : null}
       {cobroOpen ? <CobroModal cuenta={cuenta} cuentasCobro={db.CUENTAS_COBRO || []} onClose={() => setCobroOpen(false)}
