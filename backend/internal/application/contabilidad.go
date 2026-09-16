@@ -433,8 +433,8 @@ func (s *Service) asentarContrarioDe(empresaID, actor, fecha, descripcion, refTi
 // asentarDiferenciaDeCaja registra el sobrante o el faltante declarado en el arqueo
 // al cerrar el turno.
 //
-//	Faltante: Debe 5203 Sobrantes y faltantes / Haber 1101 Caja y bancos.
-//	Sobrante: Debe 1101 Caja y bancos          / Haber 5203 Sobrantes y faltantes.
+//	Faltante: Debe 5210 Sobrantes y faltantes de caja / Haber 1101 Caja y bancos.
+//	Sobrante: Debe 1101 Caja y bancos                 / Haber 5210.
 //
 // Va contra Caja y bancos porque el efectivo que falta (o sobra) es efectivo: si solo
 // se anotara la diferencia en la sesión, el libro seguiría diciendo que en la gaveta
