@@ -33,6 +33,11 @@ var (
 	ErrReservaMesaChica     = errors.New("esa mesa no tiene capacidad para tantas personas")
 	ErrReservaMesaOcupada   = errors.New("esa mesa ya está reservada a esa hora")
 	ErrReservaEstado        = errors.New("la reserva no está en un estado que permita esta acción")
+	ErrReservaZonaNoExiste  = errors.New("esa zona no existe en esta sede")
+	ErrReservaPasado        = errors.New("no se puede reservar para una fecha y hora que ya pasaron")
+	// ErrHorarioServicioInvalido: el horario de atención viene a medias o mal
+	// formado. A medias no se puede comparar contra nada.
+	ErrHorarioServicioInvalido = errors.New("el horario de atención necesita apertura y cierre en formato HH:MM")
 )
 
 // VentanaReserva es cuánto ANTES de la hora la mesa reservada se aparta en el tablero.
@@ -124,6 +129,11 @@ func (s *Service) CrearReserva(in EntradaReserva) (reserva.Reserva, error) {
 	}
 	if err := s.validarReserva(&r, ""); err != nil {
 		return reserva.Reserva{}, err
+	}
+	// Solo al CREAR: editar una reserva vieja (corregir el teléfono, dejar una
+	// nota) tiene que seguir siendo posible.
+	if esPasado(r.Fecha, r.Hora) {
+		return reserva.Reserva{}, ErrReservaPasado
 	}
 	out := s.reservas.Create(r)
 	s.audit.Append(evento(in.EmpresaID, in.Actor, in.Origen, "restaurante.reserva.crear", out.ID,
@@ -294,6 +304,12 @@ func (s *Service) validarReserva(r *reserva.Reserva, excluirID string) error {
 	}
 	if r.Nombre == "" {
 		return ErrReservaNombre
+	}
+	// Zona: una zona inventada no es una decisión del negocio, es un dato mal
+	// escrito. La reserva apuntaría a un sector que no existe y nadie la
+	// encontraría en la puerta.
+	if s.mesas != nil && !zonaExiste(s.mesas.List(r.EmpresaID, r.SedeID), r.Zona) {
+		return ErrReservaZonaNoExiste
 	}
 	if r.MesaID == "" {
 		r.MesaNombre = ""

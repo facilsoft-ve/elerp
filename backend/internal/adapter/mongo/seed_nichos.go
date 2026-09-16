@@ -216,6 +216,14 @@ func sembrarNichos(st *Store, semilla *inmem.Store) {
 			}
 		}
 
+		// Credenciales de turno del salón (MS-): aditivas por código. Sin ellas la
+		// pantalla de Turnos arranca vacía y no se entiende para qué sirve.
+		for _, ms := range snap.Mesoneros {
+			if _, ya := st.Mesoneros.ByCodigo(n.EmpresaID, ms.Codigo); !ya {
+				st.Mesoneros.Create(ms)
+			}
+		}
+
 		// Comanderas (puestos de impresión de comandas): aditivas por nombre.
 		if len(snap.Comanderas) > 0 {
 			yaComandera := map[string]bool{}

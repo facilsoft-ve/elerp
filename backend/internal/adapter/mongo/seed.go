@@ -95,7 +95,12 @@ import (
 // común de Venezuela (conteo/peso/volumen/longitud) vía unidadmedida.PorDefecto,
 // del que el catálogo elige su UnidadBase. Se regenera con el resto de datos de
 // negocio de la demo.
-const versionSeedDemo = 28
+// v29: jornada de revisión con la contadora. Los clientes demo llevan DIRECCIÓN
+// FISCAL (sin ella la validación nueva dejaba la demo sin poder facturar en su
+// paso principal), el catálogo lleva su clasificación de alícuota, y la limpieza
+// incluye por fin las colecciones del módulo Restaurante y los maestros nuevos:
+// sin eso, una base ya sembrada nunca veía ninguno de estos cambios.
+const versionSeedDemo = 29
 
 // Seed siembra la base con los datos demo (misma fuente que in-memory), de
 // forma idempotente: si ya hay empresas, no hace nada.
@@ -422,6 +427,10 @@ func limpiarDemo(st *Store, demoID string) {
 		st.CuentasCobro.c.delMany(f) + st.MetodosPago.c.delMany(f) + st.Dispositivos.c.delMany(f) + st.Cotizaciones.c.delMany(f) + st.Cajas.c.delMany(f) + st.Cajeros.c.delMany(f) +
 		st.SesionesCaja.c.delMany(f) + st.CuentasContables.c.delMany(f) + st.Asientos.c.delMany(f) +
 		st.Proveedores.c.delMany(f) + st.OrdenesCompra.c.delMany(f) + st.Solicitudes.c.delMany(f) + st.ListasPrecio.c.delMany(f) + st.Cupones.c.delMany(f) + st.Promociones.c.delMany(f) + st.Unidades.c.delMany(f) + st.Retenciones.c.delMany(f)
+	// Maestros nuevos: se borran para que la siembra perezosa los vuelva a crear
+	// con los valores de hoy. Un maestro de impuestos sembrado antes de que
+	// existiera la alícuota suntuaria se quedaría sin ella para siempre.
+	n += st.Alicuotas.c.delMany(f) + st.ConceptosISLR.c.delMany(f)
 	// El numerador fiscal también se reinicia para que la siembra lo deje otra vez
 	// adelantado sobre los folios nuevos. Va con la colección cruda porque el
 	// numerador no usa el envoltorio genérico; y su filtro es por PREFIJO del id

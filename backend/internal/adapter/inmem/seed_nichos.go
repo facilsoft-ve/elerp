@@ -16,6 +16,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/inventario"
 	"github.com/mornix/elerp/internal/domain/mesa"
+	"github.com/mornix/elerp/internal/domain/mesonero"
 	"github.com/mornix/elerp/internal/domain/organizacion"
 	"github.com/mornix/elerp/internal/domain/proveedor"
 	"github.com/mornix/elerp/internal/domain/sede"
@@ -325,6 +326,10 @@ type SnapshotEmpresa struct {
 	CuentasMesa  []cuenta.Cuenta
 	Asignaciones []mesa.Asignacion
 	Comanderas   []cocina.Impresora
+	// Mesoneros son las credenciales de turno (MS-) del salón. Sin ellas, la
+	// pantalla de Turnos arranca vacía en una base con Mongo y no se entiende
+	// para qué sirve.
+	Mesoneros []mesonero.Mesonero
 	// Contadores es el estado del numerador fiscal de ESTA empresa tras sembrar
 	// ("empresa|sede|serie" → último folio). Sin ellos, la primera factura real del
 	// prospecto reiniciaría en 1 y colisionaría con un folio sembrado.
@@ -382,6 +387,7 @@ func (s *Store) SnapshotNicho(n NichoDemo) SnapshotEmpresa {
 		CuentasMesa:  s.Cuentas.Abiertas(n.EmpresaID, n.SedeID),
 		Asignaciones: s.Asignaciones.List(n.EmpresaID, n.SedeID),
 		Comanderas:   s.Impresoras.List(n.EmpresaID, n.SedeID),
+		Mesoneros:    s.Mesoneros.List(n.EmpresaID),
 		Contadores:   contadores,
 	}
 }
