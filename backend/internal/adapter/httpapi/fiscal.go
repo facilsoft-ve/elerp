@@ -92,6 +92,11 @@ func (s *Server) registerFiscal(r fiber.Router) {
 	// Configuración › Dispositivos fiscales. Igual gate que métodos de pago: los
 	// ve quien accede a Ajustes; solo Dueña/Desarrollador los administran. El
 	// enlace real con la impresora lo hace el agente fiscal local (fuera del backend).
+	// El CATÁLOGO precargado (marcas/modelos del mercado venezolano) es dato de
+	// referencia, no del tenant: lo consume tanto esta pantalla como la de
+	// comanderas del módulo Restaurante. Va antes que "/dispositivos/:id" por
+	// claridad; no colisiona porque aquel es PATCH.
+	cfg.Get("/dispositivos/catalogo", s.handleCatalogoDispositivos)
 	cfg.Get("/dispositivos", s.handleDispositivos)
 	cfg.Post("/dispositivos", cfgAdmin, s.handleCrearDispositivo)
 	cfg.Patch("/dispositivos/:id", cfgAdmin, s.handleActualizarDispositivo)
@@ -579,6 +584,10 @@ func (s *Server) handleEliminarMetodoPago(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+func (s *Server) handleCatalogoDispositivos(c *fiber.Ctx) error {
+	return c.JSON(s.svc.CatalogoDispositivos())
 }
 
 func (s *Server) handleDispositivos(c *fiber.Ctx) error {

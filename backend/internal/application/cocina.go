@@ -7,6 +7,7 @@ import (
 
 	"github.com/mornix/elerp/internal/domain/cocina"
 	"github.com/mornix/elerp/internal/domain/cuenta"
+	"github.com/mornix/elerp/internal/domain/dispositivo"
 )
 
 var (
@@ -47,6 +48,8 @@ func (s *Service) Impresoras(empresaID, sedeID string) []cocina.Impresora {
 type ImpresoraBody struct {
 	ID             string   `json:"id"`
 	Nombre         string   `json:"nombre"`
+	Marca          string   `json:"marca"`
+	Modelo         string   `json:"modelo"`
 	Conexion       string   `json:"conexion"`
 	Host           string   `json:"host"`
 	Puerto         int      `json:"puerto"`
@@ -79,6 +82,15 @@ func (s *Service) GuardarImpresora(empresaID, sedeID, actor, origen string, b Im
 	if ancho != 58 && ancho != 80 {
 		ancho = 80
 	}
+	// Grafía canónica del catálogo, y si no vino ancho explícito, el del modelo:
+	// elegir "Xprinter XP-58IIH" ya dice que el papel es de 58 mm.
+	marca, modelo := strings.TrimSpace(b.Marca), strings.TrimSpace(b.Modelo)
+	if m, ok := dispositivo.Buscar(dispositivo.TipoComandera, marca, modelo); ok {
+		marca, modelo = m.Marca, m.Modelo
+		if b.AnchoMM == 0 && m.AnchoMM != 0 {
+			ancho = m.AnchoMM
+		}
+	}
 	nombre := strings.TrimSpace(b.Nombre)
 	if nombre == "" {
 		nombre = "Cocina"
@@ -91,7 +103,8 @@ func (s *Service) GuardarImpresora(empresaID, sedeID, actor, origen string, b Im
 
 	imp := cocina.Impresora{
 		ID: strings.TrimSpace(b.ID), EmpresaID: empresaID, SedeID: sedeID,
-		Nombre: nombre, Conexion: conexion, Host: host, Puerto: puerto, AnchoMM: ancho,
+		Nombre: nombre, Marca: marca, Modelo: modelo,
+		Conexion: conexion, Host: host, Puerto: puerto, AnchoMM: ancho,
 		Rubros: limpiarRubros(b.Rubros), Predeterminada: predeterminada,
 		Activa: b.Activa, Actualizada: ahora(),
 	}

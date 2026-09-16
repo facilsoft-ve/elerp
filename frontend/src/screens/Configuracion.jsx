@@ -9,6 +9,7 @@ import { useData, useTasa } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
+import { SelectorModelo, NotaCatalogo } from '../components/dispositivo.jsx'
 import { fechaCortaVE, explicarFallo } from '../components/tasa.jsx'
 import { monedaLabel, monedaNombre, monedaSimbolo, permiteFuenteBcv } from '../lib/precio.js'
 import { Promociones } from './Promociones.jsx'
@@ -3501,16 +3502,18 @@ function DispositivoForm({ dispositivo, sedes, onClose, onSaved }) {
             </Select>
           </Field>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Marca" hint="opcional">
-            <Input value={f.marca} placeholder="Ej. The Factory HKA"
-              onChange={(e) => setF((s) => ({ ...s, marca: e.target.value }))} />
-          </Field>
-          <Field label="Modelo" hint="opcional">
-            <Input value={f.modelo} placeholder="Ej. PP-9"
-              onChange={(e) => setF((s) => ({ ...s, modelo: e.target.value }))} />
-          </Field>
-        </div>
+        {/* Marca y modelo salen del catálogo precargado del mercado venezolano.
+            Elegir un modelo conocido PRECARGA la conexión (en la balanza, el
+            protocolo y el puerto: el dato que nadie en el mostrador se sabe). */}
+        <SelectorModelo tipo={f.tipo}
+          marca={f.marca} modelo={f.modelo}
+          onChange={({ marca, modelo }, ficha) => setF((s) => ({
+            ...s, marca, modelo,
+            // El catálogo SUGIERE: solo rellena lo que está en blanco, nunca
+            // pisa lo que la persona ya escribió a mano.
+            puerto: ficha && !s.puerto ? (ficha.puerto || '') : s.puerto,
+            protocolo: ficha && !s.protocolo ? (ficha.protocolo || '') : s.protocolo,
+          }))} />
         {esBalanza ? (
           <div className="grid grid-cols-2 gap-3">
             <Field label="Puerto" hint="opcional — dónde la ve el equipo">
@@ -3531,6 +3534,7 @@ function DispositivoForm({ dispositivo, sedes, onClose, onSaved }) {
           </Field>
         )}
         {error && f.nombre.trim() ? <div className="text-[12px] text-red-600 dark:text-red-400">{error}</div> : null}
+        <NotaCatalogo tipo={f.tipo} />
       </div>
     </Modal>
   )

@@ -403,6 +403,10 @@ export const api = {
   // real con la impresora la hace el agente fiscal local (binario aparte). Sin
   // borrado duro: se desactiva (Activo=false), reversible con el toggle.
   dispositivos: () => request('/api/config/dispositivos'),
+  // Catálogo precargado de marcas/modelos del mercado venezolano (impresoras
+  // fiscales, balanzas y comanderas). Dato de referencia, igual para todos los
+  // tenants: se pide una vez por carga (ver components/dispositivo.jsx).
+  catalogoDispositivos: () => request('/api/config/dispositivos/catalogo'),
   crearDispositivo: (body) => request('/api/config/dispositivos', { method: 'POST', body: JSON.stringify(body) }),
   actualizarDispositivo: (id, body) => request(`/api/config/dispositivos/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   desactivarDispositivo: (id) => request(`/api/config/dispositivos/${encodeURIComponent(id)}/desactivar`, { method: 'POST' }),

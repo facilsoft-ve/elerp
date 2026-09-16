@@ -8,6 +8,7 @@ import { RestauranteInicio } from './RestauranteInicio.jsx'
 import { Reservaciones } from './Reservaciones.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
+import { SelectorModelo, NotaCatalogo } from '../components/dispositivo.jsx'
 import { precioEnBs, monedaDe } from '../lib/precio.js'
 import { fmtCurrency } from '../lib/format.js'
 
@@ -449,6 +450,9 @@ function ImpresoraComandas() {
                 </div>
                 <div className="text-[12.5px] text-slate-500 mt-0.5">
                   {imp.conexion === 'red' ? `Red · ${imp.host}:${imp.puerto}` : 'Local (agente del equipo)'} · {imp.anchoMm || 80} mm
+                  {[imp.marca, imp.modelo].filter(Boolean).length
+                    ? ` · ${[imp.marca, imp.modelo].filter(Boolean).join(' ')}`
+                    : ''}
                 </div>
                 <div className="text-[12.5px] text-slate-500 mt-1 flex flex-wrap items-center gap-1">
                   {(imp.rubros || []).length ? (
@@ -485,6 +489,7 @@ function ComanderaModal({ imp, rubros, hayOtras, onClose, onGuardado }) {
   const toast = useToast()
   const [f, setF] = useState({
     id: imp.id || '', nombre: imp.nombre || '', conexion: imp.conexion || 'local',
+    marca: imp.marca || '', modelo: imp.modelo || '',
     host: imp.host || '', puerto: imp.puerto || 9100, anchoMm: imp.anchoMm || 80,
     rubros: imp.rubros || [], predeterminada: !!imp.predeterminada || !hayOtras,
     activa: imp.activa !== undefined ? imp.activa : true,
@@ -504,7 +509,8 @@ function ComanderaModal({ imp, rubros, hayOtras, onClose, onGuardado }) {
     setBusy(true)
     try {
       await api.guardarImpresora({
-        id: f.id, nombre: f.nombre, conexion: f.conexion, host: f.host,
+        id: f.id, nombre: f.nombre, marca: f.marca, modelo: f.modelo,
+        conexion: f.conexion, host: f.host,
         puerto: Number(f.puerto) || 0, anchoMm: Number(f.anchoMm) || 80,
         rubros: f.rubros, predeterminada: !!f.predeterminada, activa: !!f.activa,
       })
@@ -528,6 +534,19 @@ function ComanderaModal({ imp, rubros, hayOtras, onClose, onGuardado }) {
           <Input value={f.nombre} onChange={(e) => set('nombre', e.target.value)} placeholder="Cocina, Barra, Postres…" />
         </Field>
 
+        {/* Qué EQUIPO es (distinto del puesto: el puesto es "Barra", el equipo es
+            una "Epson TM-T20III"). Elegirlo del catálogo precarga el ancho del
+            rollo y si se conecta por red o por el equipo — que es lo que a nadie
+            en una cocina le consta de memoria. */}
+        <SelectorModelo tipo="comandera" marca={f.marca} modelo={f.modelo}
+          onChange={({ marca, modelo }, ficha) => setF((s) => ({
+            ...s, marca, modelo,
+            // Solo en alta: en una comandera ya configurada, cambiar el modelo no
+            // puede reescribir un ancho o una conexión que ya funcionan.
+            anchoMm: ficha && !s.id ? (ficha.anchoMm || s.anchoMm) : s.anchoMm,
+            conexion: ficha && !s.id ? (ficha.conexion || s.conexion) : s.conexion,
+          }))} />
+
         <div>
           <div className="text-[13px] font-semibold mb-1.5 text-slate-700 dark:text-slate-300">Conexión</div>
           <Segmented value={f.conexion} onChange={(v) => set('conexion', v)}
@@ -550,6 +569,8 @@ function ComanderaModal({ imp, rubros, hayOtras, onClose, onGuardado }) {
           <Segmented value={String(f.anchoMm)} onChange={(v) => set('anchoMm', Number(v))}
             options={[{ value: '80', label: '80 mm' }, { value: '58', label: '58 mm' }]} />
         </div>
+
+        <NotaCatalogo tipo="comandera" />
 
         <Field label="¿Qué rubros imprime?" hint="Los productos de estos rubros salen por esta comandera.">
           {rubros.length === 0 ? (

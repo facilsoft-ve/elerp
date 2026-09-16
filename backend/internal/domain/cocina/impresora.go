@@ -40,6 +40,11 @@ type Impresora struct {
 	EmpresaID string `json:"empresaId" bson:"empresaid"`
 	SedeID    string `json:"sedeId" bson:"sedeid"`
 	Nombre    string `json:"nombre" bson:"nombre"`     // "Cocina", "Barra", "Postres"
+	// Marca y Modelo identifican el EQUIPO (no el puesto): "Epson TM-T20III".
+	// Salen del catálogo precargado (domain/dispositivo) o se teclean libres.
+	// Sirven para que quien da soporte sepa qué hay instalado sin ir a verlo.
+	Marca  string `json:"marca" bson:"marca"`
+	Modelo string `json:"modelo" bson:"modelo"`
 	Conexion  string `json:"conexion" bson:"conexion"` // local | red
 	Host      string `json:"host" bson:"host"`         // IP/host (solo red)
 	Puerto    int    `json:"puerto" bson:"puerto"`     // 9100 típico (solo red)
