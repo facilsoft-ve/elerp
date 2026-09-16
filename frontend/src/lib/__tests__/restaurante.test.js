@@ -4,7 +4,7 @@
 // equivocado se ve igual de convincente que el correcto. Por eso el cálculo vive fuera de
 // la pantalla y se prueba acá.
 import { describe, it, expect } from 'vitest'
-import { metricasRestaurante, totalDeCuenta, esperaMinutos, solicitudesDeMesa } from '../restaurante.js'
+import { metricasRestaurante, totalDeCuenta, pendienteDeCuenta, facturadoDeCuenta, esperaMinutos, solicitudesDeMesa } from '../restaurante.js'
 
 const AHORA = new Date('2026-09-08T20:00:00Z').getTime()
 const haceMin = (m) => new Date(AHORA - m * 60000).toISOString()
@@ -45,7 +45,8 @@ describe('metricasRestaurante · estado del salón', () => {
     const mesas = [mesa('m1'), mesa('m2'), mesa('m3'), mesa('m4')]
     const cuentas = [
       { mesaId: 'm1', comensales: 2, items: [item()] },                          // ocupada
-      { mesaId: 'm2', comensales: 4, items: [item()], prefacturas: ['cot_1'] },   // por cobrar
+      // Por cobrar = TODO su consumo ya se pidió facturar y espera en la caja.
+      { mesaId: 'm2', comensales: 4, items: [item({ prefacturaId: 'cot_1' })], prefacturas: ['cot_1'] },
     ]
     const m = metricasRestaurante({ mesas, cuentas }, { ahora: AHORA })
     expect(m.mesasTotal).toBe(4)
@@ -204,5 +205,36 @@ describe('solicitudesDeMesa', () => {
   it('aguanta una lista vacía o indefinida', () => {
     expect(solicitudesDeMesa()).toEqual([])
     expect(solicitudesDeMesa([])).toEqual([])
+  })
+})
+
+/* Facturación por partes: una mesa donde uno ya pagó y otro sigue comiendo. El tablero
+ * tiene que mostrar lo que FALTA por cobrar, no el consumo completo: si muestra el
+ * total, el mesonero le cobra al segundo lo que el primero ya pagó. */
+describe('cuenta facturada por partes', () => {
+  const cuentaMixta = {
+    mesaId: 'm1', comensales: 2, prefacturas: ['cot_1'],
+    items: [
+      item({ nombre: 'Pagado', precioUnitario: 30000, prefacturaId: 'cot_1' }),
+      item({ nombre: 'Sin pedir', precioUnitario: 12000 }),
+      item({ nombre: 'Anulado', precioUnitario: 99999, estado: 'cancelado' }),
+    ],
+  }
+
+  it('separa consumo total, ya facturado y pendiente', () => {
+    expect(totalDeCuenta(cuentaMixta)).toBe(42000)
+    expect(facturadoDeCuenta(cuentaMixta)).toBe(30000)
+    expect(pendienteDeCuenta(cuentaMixta)).toBe(12000)
+  })
+
+  it('sigue contando como OCUPADA mientras quede consumo sin pedir', () => {
+    const m = metricasRestaurante({ mesas: [mesa('m1')], cuentas: [cuentaMixta] }, { ahora: AHORA })
+    expect(m.ocupadas).toBe(1)
+    expect(m.porCobrar).toBe(0)
+  })
+
+  it('el consumo en curso no cuenta lo que ya se pidió facturar', () => {
+    const m = metricasRestaurante({ mesas: [mesa('m1')], cuentas: [cuentaMixta] }, { ahora: AHORA })
+    expect(m.consumoEnCurso).toBe(12000)
   })
 })

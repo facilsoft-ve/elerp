@@ -12,9 +12,24 @@ import { diaLocal, hoy, facturasVigentes } from './metricas.js'
 
 const suma = (xs, f) => xs.reduce((a, x) => a + (Number(f(x)) || 0), 0)
 
-/** totalDeCuenta suma los renglones NO cancelados de una cuenta de mesa. */
+/** totalDeCuenta suma TODO lo consumido en la mesa (renglones no cancelados),
+ *  esté facturado o no. Es el consumo de la mesa, no lo que falta por cobrar. */
 export function totalDeCuenta(c) {
   return suma((c?.items || []).filter((it) => it.estado !== 'cancelado'),
+    (it) => (it.precioUnitario || 0) * (it.cantidad || 0))
+}
+
+/** pendienteDeCuenta es lo que TODAVÍA no entró en ninguna solicitud de facturación.
+ *  Es lo que el tablero debe mostrar: una mesa donde uno ya pagó y se fue no le debe
+ *  al local lo que ese comensal pagó, y mostrarlo hace que el mesonero cobre de más. */
+export function pendienteDeCuenta(c) {
+  return suma((c?.items || []).filter((it) => it.estado !== 'cancelado' && !it.prefacturaId),
+    (it) => (it.precioUnitario || 0) * (it.cantidad || 0))
+}
+
+/** facturadoDeCuenta es lo que ya se pidió facturar (cobrado o esperando en la caja). */
+export function facturadoDeCuenta(c) {
+  return suma((c?.items || []).filter((it) => it.estado !== 'cancelado' && it.prefacturaId),
     (it) => (it.precioUnitario || 0) * (it.cantidad || 0))
 }
 
@@ -37,12 +52,14 @@ export function metricasRestaurante({ mesas = [], cuentas = [], documentos = [],
   const activas = (mesas || []).filter((m) => m.activa !== false)
   const cuentaDe = new Map((cuentas || []).map((c) => [c.mesaId, c]))
 
-  // Estado del salón. «Por cobrar» = ya pidió la cuenta (tiene prefactura).
+  // Estado del salón. «Por cobrar» = ya pidió factura de algo y sigue esperando a la
+  // caja. Una mesa donde ya pagaron una parte y siguen comiendo cuenta como ocupada
+  // mientras quede consumo sin pedir: lo que le falta al local es atenderla, no cobrarla.
   let ocupadas = 0, porCobrar = 0
   for (const m of activas) {
     const c = cuentaDe.get(m.id)
     if (!c) continue
-    if ((c.prefacturas || []).length > 0) porCobrar++
+    if ((c.prefacturas || []).length > 0 && pendienteDeCuenta(c) === 0) porCobrar++
     else ocupadas++
   }
   const libres = activas.length - ocupadas - porCobrar
@@ -50,7 +67,9 @@ export function metricasRestaurante({ mesas = [], cuentas = [], documentos = [],
   // Comensales sentados y consumo en curso (lo que hay en el salón sin cobrar).
   const abiertas = activas.map((m) => cuentaDe.get(m.id)).filter(Boolean)
   const comensales = suma(abiertas, (c) => c.comensales || 0)
-  const consumoEnCurso = suma(abiertas, totalDeCuenta)
+  // Consumo EN CURSO = lo que todavía no se pidió facturar. Lo ya facturado no está
+  // "en curso": o está en la caja o ya se cobró.
+  const consumoEnCurso = suma(abiertas, pendienteDeCuenta)
 
   // Cocina: renglones enviados y todavía no servidos, con la espera más larga.
   const enCocina = []

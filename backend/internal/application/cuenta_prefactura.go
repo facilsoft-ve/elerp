@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/mornix/elerp/internal/domain/cotizacion"
@@ -308,7 +309,7 @@ func (g parteCuenta) nota(mesaNombre string, total int, div DivisionCuenta) stri
 		// Referencia para el cajero: el total definitivo (con IVA) lo calcula la
 		// cotización; acá se deja el reparto sobre el consumo para orientar el cobro.
 		porPersona := math.Round(suma/float64(div.Comensales)*100) / 100
-		return fmt.Sprintf("%s · pagan %d personas (≈ Bs %.2f cada una sobre el consumo)", base, div.Comensales, porPersona)
+		return fmt.Sprintf("%s · pagan %d personas (≈ Bs %s cada una sobre el consumo)", base, div.Comensales, bolivares(porPersona))
 	}
 	return base
 }
@@ -355,4 +356,32 @@ func agruparPorParte(items []cuenta.Item, div DivisionCuenta) ([]parteCuenta, er
 		return out, nil
 	}
 	return nil, ErrDivisionInvalida
+}
+
+// bolivares escribe un monto como se lee en Venezuela: miles con punto y decimales con
+// coma. Esta nota la lee el cajero en pantalla, y "17100.00" no es un monto en Bs.
+func bolivares(v float64) string {
+	neg := v < 0
+	if neg {
+		v = -v
+	}
+	ent := int64(v)
+	dec := int64(math.Round((v - float64(ent)) * 100))
+	if dec == 100 { // el redondeo empujó al siguiente entero
+		ent++
+		dec = 0
+	}
+	s := strconv.FormatInt(ent, 10)
+	var b strings.Builder
+	for i, r := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte('.')
+		}
+		b.WriteRune(r)
+	}
+	out := fmt.Sprintf("%s,%02d", b.String(), dec)
+	if neg {
+		return "-" + out
+	}
+	return out
 }

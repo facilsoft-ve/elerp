@@ -69,6 +69,10 @@ const ITEM_COLOR = {
 }
 const ITEM_LABEL = { pendiente: 'Por enviar', en_cocina: 'En cocina', listo: 'Listo', servido: 'Servido', cancelado: 'Anulado' }
 const totalCuenta = (c) => (c?.items || []).reduce((a, it) => a + (it.estado === 'cancelado' ? 0 : (it.precioUnitario || 0) * (it.cantidad || 0)), 0)
+// Lo que falta por facturar en la mesa. El tablero muestra ESTO y no el consumo: con
+// facturación por partes, una mesa donde uno ya pagó seguiría enseñando su plato.
+const pendienteCuenta = (c) => (c?.items || []).reduce(
+  (a, it) => a + (it.estado === 'cancelado' || it.prefacturaId ? 0 : (it.precioUnitario || 0) * (it.cantidad || 0)), 0)
 
 // `soloMesonero: true` marca las pestañas que también alcanza el mesonero. El resto son
 // de administración o de cocina: mostrárselas al mesero no aporta y confunde (el sidebar
@@ -721,7 +725,10 @@ export function Comandera() {
                 <span className="inline-flex items-center gap-1 text-[13px] opacity-80"><Icon.Users size={15} /> {m.capacidad || 0}</span>
               </div>
               <div className="text-[12.5px] mt-1.5 opacity-80">{m.zona || '—'}</div>
-              <div className="mt-2 text-[15px] font-bold">{cta ? fmtCurrency(totalCuenta(cta), 'VES') : col.label}</div>
+              <div className="mt-2 text-[15px] font-bold">{cta ? fmtCurrency(pendienteCuenta(cta), 'VES') : col.label}</div>
+              {cta && pendienteCuenta(cta) !== totalCuenta(cta) ? (
+                <div className="text-[11px] opacity-70">de {fmtCurrency(totalCuenta(cta), 'VES')} · parte ya facturada</div>
+              ) : null}
             </button>
           )
         })}
@@ -749,8 +756,11 @@ function CuentaDetalle({ cuenta, busy, onVolver, onAgregar, onCancelar, onEnviar
             <div className="text-[11.5px] text-slate-500">{cuenta.mesoneroNombre || '—'} · {cuenta.comensales || 0} comensal(es)</div>
           </div>
           <div className="ml-auto text-right">
-            <div className="text-[11px] text-slate-500">Total</div>
-            <div className="font-display font-bold text-[18px]">{fmtCurrency(totalCuenta(cuenta), 'VES')}</div>
+            <div className="text-[11px] text-slate-500">{solicitudes ? 'Falta por facturar' : 'Total'}</div>
+            <div className="font-display font-bold text-[18px]">{fmtCurrency(pendienteCuenta(cuenta), 'VES')}</div>
+            {solicitudes ? (
+              <div className="text-[11px] text-slate-400">consumo {fmtCurrency(totalCuenta(cuenta), 'VES')}</div>
+            ) : null}
           </div>
         </div>
         <div className="p-3 space-y-3 max-h-[62vh] overflow-auto">
@@ -768,6 +778,11 @@ function CuentaDetalle({ cuenta, busy, onVolver, onAgregar, onCancelar, onEnviar
                       {it.nota ? <div className="text-[11px] text-slate-400">{it.nota}</div> : null}
                     </div>
                     <span className={`text-[10.5px] px-2 py-0.5 rounded-full font-semibold ${ITEM_COLOR[it.estado] || ITEM_COLOR.pendiente}`}>{ITEM_LABEL[it.estado] || it.estado}</span>
+                    {/* Ya entró en una solicitud: no se vuelve a pedir ni se toca. */}
+                    {it.prefacturaId ? (
+                      <span title="Ya está en una factura pedida"
+                        className="text-[10.5px] px-2 py-0.5 rounded-full font-semibold bg-teal-50 text-teal-700 dark:bg-teal-950/50 dark:text-teal-300">Facturado</span>
+                    ) : null}
                     <span className="text-[12.5px] font-medium tabular-nums w-20 text-right">{fmtCurrency((it.precioUnitario || 0) * (it.cantidad || 0), 'VES')}</span>
                     {/* Quitar: libre mientras el renglón NO fue a cocina. Ya enviado, el
                         mesonero no lo anula solo (cuesta comida) — lo autoriza la caja.

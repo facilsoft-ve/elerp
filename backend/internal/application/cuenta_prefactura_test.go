@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/mornix/elerp/internal/adapter/inmem"
@@ -515,4 +516,23 @@ func primerClienteSalon(t *testing.T, st *inmem.Store) string {
 		t.Fatal("el restaurante demo debería tener clientes sembrados")
 	}
 	return cs[0].ID
+}
+
+// La nota de la solicitud la lee el cajero en pantalla: el monto va como se lee en
+// Venezuela (miles con punto, decimales con coma), no como lo imprime Go por defecto.
+func TestSolicitud_NotaConMontoEnFormatoVenezolano(t *testing.T) {
+	svc, st := servicioSalon(t)
+	c := cuentaConPedido(t, svc, st, "2") // 2×32000 + 2×2200 = 68.400
+	_, prefs, err := svc.PrefacturarCuenta(empSalon, c.ID, "usr_meso", origenTst,
+		application.DivisionCuenta{Modo: application.DivisionUnica, Comensales: 4})
+	if err != nil {
+		t.Fatalf("prefacturar: %v", err)
+	}
+	nota := prefs[0].Notas
+	if !strings.Contains(nota, "Bs 17.100,00") {
+		t.Errorf("la nota debe traer el monto en formato venezolano, dice: %q", nota)
+	}
+	if strings.Contains(nota, "17100.00") {
+		t.Errorf("la nota no debe traer el monto crudo de Go: %q", nota)
+	}
 }
