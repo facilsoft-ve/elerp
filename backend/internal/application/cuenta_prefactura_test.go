@@ -125,9 +125,10 @@ func TestPrefactura_RenglonSinAsignarEsError(t *testing.T) {
 	}
 }
 
-// Con la cuenta ya pedida no se agregan renglones: la prefactura quedaría desactualizada
-// y el cliente pagaría menos de lo que consumió. Anularla devuelve la mesa a servicio.
-func TestPrefactura_BloqueaAgregarYSeAnula(t *testing.T) {
+// Con una solicitud de facturación en curso la mesa SIGUE VIVA: lo que se agregue
+// después queda sin pedir y entra en la próxima solicitud. Antes esto se bloqueaba —
+// el modelo era una prefactura única por cuenta— y obligaba a anular para seguir.
+func TestSolicitud_SeSigueConsumiendoDespues(t *testing.T) {
 	svc, st := servicioSalon(t)
 	c := cuentaConPedido(t, svc, st, "2")
 	if _, _, err := svc.PrefacturarCuenta(empSalon, c.ID, "usr_meso", origenTst,
@@ -135,22 +136,31 @@ func TestPrefactura_BloqueaAgregarYSeAnula(t *testing.T) {
 		t.Fatalf("prefacturar: %v", err)
 	}
 
-	_, err := svc.AgregarItems(empSalon, c.ID, "usr_meso", usuario.RolMesonero, origenTst,
+	out, err := svc.AgregarItems(empSalon, c.ID, "usr_meso", usuario.RolMesonero, origenTst,
 		[]application.ItemInput{{SKU: "POS-TORTA", Nombre: "Torta", Cantidad: 1, PrecioUnitario: 8500}})
-	if !errors.Is(err, application.ErrCuentaYaPrefacturada) {
-		t.Fatalf("no debe poder agregar sobre una cuenta pedida, se obtuvo: %v", err)
+	if err != nil {
+		t.Fatalf("con la cuenta pedida se debe poder seguir agregando: %v", err)
+	}
+	sueltos := out.ItemsSinFacturar()
+	if len(sueltos) != 1 || sueltos[0].SKU != "POS-TORTA" {
+		t.Fatalf("el renglón nuevo debe quedar sin pedir, quedaron %d: %+v", len(sueltos), sueltos)
 	}
 
-	// Anular la prefactura devuelve la mesa a servicio y permite seguir agregando.
+	// Y anular lo pendiente devuelve la mesa a servicio, liberando sus renglones.
 	if _, err := svc.CancelarPrefacturasCuenta(empSalon, c.ID, "usr_meso", origenTst); err != nil {
-		t.Fatalf("anular prefactura: %v", err)
+		t.Fatalf("anular solicitud: %v", err)
 	}
 	if m, ok := st.Mesas.ByID(empSalon, c.MesaID); ok && m.Estado != mesa.EstadoOcupada {
 		t.Errorf("al volver a servicio la mesa debe quedar ocupada, quedó %q", m.Estado)
 	}
-	if _, err := svc.AgregarItems(empSalon, c.ID, "usr_meso", usuario.RolMesonero, origenTst,
-		[]application.ItemInput{{SKU: "POS-TORTA", Nombre: "Torta", Cantidad: 1, PrecioUnitario: 8500}}); err != nil {
-		t.Errorf("tras anular la prefactura debe poder agregar: %v", err)
+	tras, _ := svc.Cuenta(empSalon, c.ID)
+	if len(tras.Prefacturas) != 0 {
+		t.Errorf("no debe quedar ninguna solicitud viva, quedaron %d", len(tras.Prefacturas))
+	}
+	for _, it := range tras.Items {
+		if it.Estado != cuenta.ItemCancelado && it.PrefacturaID != "" {
+			t.Errorf("el renglón %s debe quedar libre tras anular, sigue en %s", it.SKU, it.PrefacturaID)
+		}
 	}
 }
 
@@ -352,4 +362,157 @@ func TestCancelarItem_MesoneroSoloAntesDeEnviar(t *testing.T) {
 	if !visto {
 		t.Error("un renglón ya enviado no se borra: queda en la cuenta marcado como cancelado")
 	}
+}
+
+// ===================== SOLICITUDES DE FACTURACIÓN SEGMENTADAS =====================
+//
+// Dos personas en la misma mesa, cada una paga lo suyo: el mesonero manda una solicitud
+// con los renglones de una y, cuando la otra termine, manda la suya. La mesa solo se
+// cierra cuando ya no queda consumo sin pedir Y todo lo pedido está cobrado.
+
+// El mesonero segmenta: pide factura SOLO de unos renglones y el resto sigue en la mesa.
+func TestSolicitud_SegmentaLaMesa(t *testing.T) {
+	svc, st := servicioSalon(t)
+	c := cuentaConPedido(t, svc, st, "2") // [0] spaghetti, [1] refresco
+
+	cta, prefs, err := svc.PrefacturarCuenta(empSalon, c.ID, "usr_meso", origenTst,
+		application.DivisionCuenta{Seleccion: []string{c.Items[0].ID}})
+	if err != nil {
+		t.Fatalf("solicitar por segmento: %v", err)
+	}
+	if len(prefs) != 1 || len(prefs[0].Lineas) != 1 || prefs[0].Lineas[0].SKU != "PLA-BOLONESA" {
+		t.Fatalf("la solicitud debe llevar SOLO el renglón elegido, llevó %+v", prefs)
+	}
+	sueltos := cta.ItemsSinFacturar()
+	if len(sueltos) != 1 || sueltos[0].SKU != "BEB-REFRESCO" {
+		t.Fatalf("el resto de la mesa debe quedar disponible, quedó %+v", sueltos)
+	}
+
+	// La segunda solicitud se lleva lo que quedaba, sin repetir nada.
+	cta2, prefs2, err := svc.PrefacturarCuenta(empSalon, c.ID, "usr_meso", origenTst,
+		application.DivisionCuenta{})
+	if err != nil {
+		t.Fatalf("segunda solicitud: %v", err)
+	}
+	if len(prefs2) != 1 || len(prefs2[0].Lineas) != 1 || prefs2[0].Lineas[0].SKU != "BEB-REFRESCO" {
+		t.Fatalf("la segunda solicitud debe llevar solo lo que faltaba, llevó %+v", prefs2)
+	}
+	if len(cta2.Prefacturas) != 2 {
+		t.Errorf("la cuenta debe acumular las 2 solicitudes, tiene %d", len(cta2.Prefacturas))
+	}
+	if cta2.TieneSinFacturar() {
+		t.Error("ya no debe quedar consumo sin pedir")
+	}
+
+	// Y una tercera no tiene nada que pedir: es un error explícito, no una solicitud vacía.
+	if _, _, err := svc.PrefacturarCuenta(empSalon, c.ID, "usr_meso", origenTst,
+		application.DivisionCuenta{}); !errors.Is(err, application.ErrNadaPorFacturar) {
+		t.Errorf("sin consumo suelto debe decir que no queda nada, dio: %v", err)
+	}
+}
+
+// Un renglón que ya se llevó otra solicitud no se puede volver a pedir.
+func TestSolicitud_NoRepiteRenglon(t *testing.T) {
+	svc, st := servicioSalon(t)
+	c := cuentaConPedido(t, svc, st, "2")
+	if _, _, err := svc.PrefacturarCuenta(empSalon, c.ID, "usr_meso", origenTst,
+		application.DivisionCuenta{Seleccion: []string{c.Items[0].ID}}); err != nil {
+		t.Fatalf("primera solicitud: %v", err)
+	}
+	_, _, err := svc.PrefacturarCuenta(empSalon, c.ID, "usr_meso", origenTst,
+		application.DivisionCuenta{Seleccion: []string{c.Items[0].ID}})
+	if !errors.Is(err, application.ErrItemYaFacturado) {
+		t.Fatalf("pedir dos veces el mismo renglón debe fallar, dio: %v", err)
+	}
+}
+
+// La mesa se cierra SOLA cuando se cobró todo lo pedido y no queda consumo suelto.
+// Mientras falte cobrar una parte —o alguien siga comiendo— la mesa sigue viva.
+func TestSolicitud_MesaSeCierraCuandoTodoEstaPago(t *testing.T) {
+	svc, st := servicioSalon(t)
+	c := cuentaConPedido(t, svc, st, "2")
+
+	_, prefs1, err := svc.PrefacturarCuenta(empSalon, c.ID, "usr_meso", origenTst,
+		application.DivisionCuenta{Seleccion: []string{c.Items[0].ID}})
+	if err != nil {
+		t.Fatalf("solicitud 1: %v", err)
+	}
+	// Se cobra la primera parte: la mesa NO se cierra, queda consumo sin pedir.
+	if _, _, err := svc.FacturarCotizacion(empSalon, prefs1[0].ID, "usr_caja", origenTst,
+		application.EntradaFacturacion{Pagos: []application.PagoEntrada{{Metodo: "efectivo_bs", Monto: 100000, Moneda: "VES"}}}); err != nil {
+		t.Fatalf("facturar parte 1: %v", err)
+	}
+	viva, _ := svc.Cuenta(empSalon, c.ID)
+	if viva.Estado != cuenta.EstadoAbierta {
+		t.Fatalf("con consumo sin pedir la mesa debe seguir abierta, quedó %q", viva.Estado)
+	}
+	if m, ok := st.Mesas.ByID(empSalon, c.MesaID); ok && m.Estado == mesa.EstadoLibre {
+		t.Error("la mesa no debe liberarse: el otro comensal sigue en ella")
+	}
+
+	// Se pide y se cobra el resto: ahí sí cierra sola.
+	_, prefs2, err := svc.PrefacturarCuenta(empSalon, c.ID, "usr_meso", origenTst, application.DivisionCuenta{})
+	if err != nil {
+		t.Fatalf("solicitud 2: %v", err)
+	}
+	if _, _, err := svc.FacturarCotizacion(empSalon, prefs2[0].ID, "usr_caja", origenTst,
+		application.EntradaFacturacion{Pagos: []application.PagoEntrada{{Metodo: "efectivo_bs", Monto: 10000, Moneda: "VES"}}}); err != nil {
+		t.Fatalf("facturar parte 2: %v", err)
+	}
+	cerrada, _ := svc.Cuenta(empSalon, c.ID)
+	if cerrada.Estado != cuenta.EstadoCerrada {
+		t.Errorf("con todo cobrado la mesa debe cerrarse sola, quedó %q", cerrada.Estado)
+	}
+	if m, ok := st.Mesas.ByID(empSalon, c.MesaID); ok && m.Estado != mesa.EstadoLibre {
+		t.Errorf("la mesa debe quedar libre, quedó %q", m.Estado)
+	}
+}
+
+// El mesonero puede mandar la solicitud con el cliente ya identificado; y si la manda
+// sin datos, el cajero los pone al cobrar y la factura sale a ese cliente.
+func TestSolicitud_ClienteDelMesoneroODelCajero(t *testing.T) {
+	svc, st := servicioSalon(t)
+	clienteSalon := primerClienteSalon(t, st)
+
+	// a) con cliente desde la mesa
+	c := cuentaConPedido(t, svc, st, "2")
+	_, prefs, err := svc.PrefacturarCuenta(empSalon, c.ID, "usr_meso", origenTst,
+		application.DivisionCuenta{Seleccion: []string{c.Items[0].ID}, ClienteID: clienteSalon})
+	if err != nil {
+		t.Fatalf("solicitud con cliente: %v", err)
+	}
+	if prefs[0].ClienteID != clienteSalon {
+		t.Errorf("la solicitud debe llevar el cliente que tomó el mesonero, lleva %q", prefs[0].ClienteID)
+	}
+
+	// b) sin cliente: lo pone el cajero al facturar
+	_, prefs2, err := svc.PrefacturarCuenta(empSalon, c.ID, "usr_meso", origenTst, application.DivisionCuenta{})
+	if err != nil {
+		t.Fatalf("solicitud sin cliente: %v", err)
+	}
+	if prefs2[0].ClienteID != "" {
+		t.Fatalf("esta solicitud debe venir sin cliente, trae %q", prefs2[0].ClienteID)
+	}
+	_, doc, err := svc.FacturarCotizacion(empSalon, prefs2[0].ID, "usr_caja", origenTst,
+		application.EntradaFacturacion{
+			ClienteID: clienteSalon,
+			Pagos:     []application.PagoEntrada{{Metodo: "efectivo_bs", Monto: 10000, Moneda: "VES"}},
+		})
+	if err != nil {
+		t.Fatalf("facturar poniendo el cliente en caja: %v", err)
+	}
+	if doc.ClienteID != clienteSalon {
+		t.Errorf("la factura debe salir al cliente que puso el cajero, salió a %q", doc.ClienteID)
+	}
+}
+
+// primerClienteSalon devuelve un cliente sembrado del restaurante demo: los ids se
+// generan al sembrar, así que se resuelve por catálogo y no se teclea.
+func primerClienteSalon(t *testing.T, st *inmem.Store) string {
+	t.Helper()
+	cs := st.Clientes.List(empSalon)
+	if len(cs) == 0 {
+		t.Fatal("el restaurante demo debería tener clientes sembrados")
+	}
+	return cs[0].ID
 }

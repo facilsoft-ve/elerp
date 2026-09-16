@@ -20,6 +20,16 @@ import (
 // conoce mesas— y al cobrar emite la factura por la MISMA ruta que el mostrador
 // (FacturarCotizacion → EmitirFactura: inventario, IGTF, vuelto y asiento contable).
 //
+// La solicitud es INCREMENTAL: el mesonero puede pedir factura de una parte de la mesa
+// (los renglones de quien se va), y más tarde de otra. Cada solicitud se lleva SUS
+// renglones —quedan marcados con su PrefacturaID— y los que nadie pidió siguen
+// disponibles para la siguiente. La mesa se cierra sola cuando no queda consumo sin
+// pedir Y todas las solicitudes están facturadas: así el cajero nunca tiene que
+// decidir si cierra la mesa o no.
+//
+// Cada solicitud puede llevar además el CLIENTE ya identificado (el mesonero le tomó
+// los datos en la mesa) o venir sin él, para que el cajero los pida al cobrar.
+//
 // Dividir la cuenta tiene DOS naturalezas distintas y por eso se resuelven distinto:
 //
 //   - PARTES IGUALES: es un reparto del COBRO, no del documento. Se emite UNA prefactura
@@ -33,6 +43,8 @@ import (
 var (
 	ErrCuentaSinItems         = errors.New("la cuenta no tiene renglones para prefacturar")
 	ErrCuentaYaPrefacturada   = errors.New("la cuenta ya tiene prefactura: anulala para volver a armarla")
+	ErrNadaPorFacturar        = errors.New("no queda consumo sin facturar en esta mesa")
+	ErrItemYaFacturado        = errors.New("ese renglón ya entró en una solicitud de facturación")
 	ErrDivisionInvalida       = errors.New("la división de la cuenta no es válida")
 	ErrParteSinItems          = errors.New("cada parte de la cuenta necesita al menos un renglón")
 	ErrPrefacturaNoDisponible = errors.New("las prefacturas no están disponibles")
@@ -58,6 +70,13 @@ type DivisionCuenta struct {
 	Items map[string]int
 	// Nombres rotula cada parte ("Ana", "Luis"). Opcional.
 	Nombres map[int]string
+	// Seleccion limita ESTA solicitud a esos renglones (ids de la cuenta). Vacía =
+	// entra todo lo que todavía no se pidió. Es lo que permite segmentar la mesa:
+	// "esto lo paga él" ahora, el resto después.
+	Seleccion []string
+	// ClienteID identifica a quien paga ESTA solicitud cuando el mesonero ya tomó
+	// los datos en la mesa. Vacío = los pone el cajero al cobrar.
+	ClienteID string
 }
 
 // PrefacturarCuenta convierte la cuenta de una mesa en prefacturas confirmadas.
@@ -69,18 +88,18 @@ func (s *Service) PrefacturarCuenta(empresaID, cuentaID, actor, origen string, d
 	if err != nil {
 		return cuenta.Cuenta{}, nil, err
 	}
-	if len(c.Prefacturas) > 0 {
-		return cuenta.Cuenta{}, nil, ErrCuentaYaPrefacturada
-	}
-	// Los renglones cancelados no se cobran.
-	vivos := make([]cuenta.Item, 0, len(c.Items))
-	for _, it := range c.Items {
-		if it.Estado != cuenta.ItemCancelado {
-			vivos = append(vivos, it)
-		}
-	}
-	if len(vivos) == 0 {
+	// Disponibles = lo vivo que todavía no se llevó ninguna solicitud. Los cancelados
+	// no se cobran y los ya pedidos son de otra solicitud.
+	disponibles := c.ItemsSinFacturar()
+	if len(c.Items) == 0 {
 		return cuenta.Cuenta{}, nil, ErrCuentaSinItems
+	}
+	if len(disponibles) == 0 {
+		return cuenta.Cuenta{}, nil, ErrNadaPorFacturar
+	}
+	vivos, err := seleccionarItems(disponibles, div.Seleccion)
+	if err != nil {
+		return cuenta.Cuenta{}, nil, err
 	}
 
 	grupos, err := agruparPorParte(vivos, div)
@@ -103,6 +122,9 @@ func (s *Service) PrefacturarCuenta(empresaID, cuentaID, actor, origen string, d
 			Lineas: lineas, CondicionesPago: "Contado",
 			Notas:        g.nota(c.MesaNombre, len(grupos), div),
 			CuentaMesaID: c.ID, MesaNombre: c.MesaNombre,
+			// Si el mesonero ya tomó los datos en la mesa, la solicitud llega
+			// identificada y el cajero no pregunta nada.
+			ClienteID: strings.TrimSpace(div.ClienteID),
 		})
 		if err != nil {
 			return cuenta.Cuenta{}, nil, err
@@ -114,10 +136,22 @@ func (s *Service) PrefacturarCuenta(empresaID, cuentaID, actor, origen string, d
 		}
 		creadas = append(creadas, conf)
 		ids = append(ids, conf.ID)
+		// Los renglones de esta parte quedan marcados: ya no entran en otra solicitud.
+		for _, it := range g.items {
+			for i := range c.Items {
+				if c.Items[i].ID == it.ID {
+					c.Items[i].PrefacturaID = conf.ID
+					break
+				}
+			}
+		}
 	}
 
-	c.Prefacturas = ids
-	c.PrefacturadaEn = ahora()
+	// Se ACUMULAN: una mesa puede pedir factura varias veces (uno se va antes).
+	c.Prefacturas = append(c.Prefacturas, ids...)
+	if c.PrefacturadaEn == "" {
+		c.PrefacturadaEn = ahora()
+	}
 	actualizada, ok := s.cuentasMesa.Update(c)
 	if !ok {
 		return cuenta.Cuenta{}, nil, ErrCuentaMesaNoExiste
@@ -140,21 +174,38 @@ func (s *Service) CancelarPrefacturasCuenta(empresaID, cuentaID, actor, origen s
 	if len(c.Prefacturas) == 0 {
 		return c, nil
 	}
+	// Se anulan las solicitudes PENDIENTES y sus renglones vuelven a estar disponibles.
+	// Las ya facturadas se quedan: su documento fiscal existe y no se deshace por acá
+	// (para eso está la nota de crédito). Así una mesa que pagó una parte y sigue
+	// comiendo puede volver a servicio sin tocar lo ya cobrado.
+	quedan := make([]string, 0, len(c.Prefacturas))
+	anuladas := make(map[string]bool, len(c.Prefacturas))
 	for _, id := range c.Prefacturas {
 		cot, ok := s.cotizaciones.ByID(empresaID, id)
 		if !ok {
 			continue
 		}
-		// Una prefactura YA FACTURADA no se toca: el documento fiscal existe.
 		if cot.Estado == cotizacion.EstadoFacturada {
-			return cuenta.Cuenta{}, ErrTransicionCotizacion
+			quedan = append(quedan, id)
+			continue
 		}
 		if _, err := s.CancelarCotizacion(empresaID, id, actor, origen, "la mesa volvió a servicio"); err != nil {
 			return cuenta.Cuenta{}, err
 		}
+		anuladas[id] = true
 	}
-	c.Prefacturas = nil
-	c.PrefacturadaEn = ""
+	if len(anuladas) == 0 {
+		return c, nil
+	}
+	for i := range c.Items {
+		if anuladas[c.Items[i].PrefacturaID] {
+			c.Items[i].PrefacturaID = ""
+		}
+	}
+	c.Prefacturas = quedan
+	if len(quedan) == 0 {
+		c.PrefacturadaEn = ""
+	}
 	actualizada, ok := s.cuentasMesa.Update(c)
 	if !ok {
 		return cuenta.Cuenta{}, ErrCuentaMesaNoExiste
@@ -173,6 +224,10 @@ func (s *Service) cerrarCuentaSiPrefacturasFacturadas(empresaID, cuentaMesaID, d
 	}
 	c, ok := s.cuentasMesa.ByID(empresaID, cuentaMesaID)
 	if !ok || c.Estado != cuenta.EstadoAbierta {
+		return
+	}
+	// Queda consumo que nadie pidió: la mesa sigue viva aunque lo emitido ya se cobró.
+	if c.TieneSinFacturar() {
 		return
 	}
 	for _, id := range c.Prefacturas {
@@ -195,6 +250,38 @@ func (s *Service) cerrarCuentaSiPrefacturasFacturadas(empresaID, cuentaMesaID, d
 }
 
 // --- Reparto de renglones ---
+
+// seleccionarItems reduce los renglones disponibles a los que pide la solicitud.
+// Sin selección entra todo lo disponible (el caso normal: "la cuenta, por favor").
+// Un id que no está disponible es un error explícito y no un renglón que se ignora
+// en silencio: significa que la comandera y el servidor no ven lo mismo.
+func seleccionarItems(disponibles []cuenta.Item, seleccion []string) ([]cuenta.Item, error) {
+	if len(seleccion) == 0 {
+		return disponibles, nil
+	}
+	porID := make(map[string]cuenta.Item, len(disponibles))
+	for _, it := range disponibles {
+		porID[it.ID] = it
+	}
+	vistos := make(map[string]bool, len(seleccion))
+	out := make([]cuenta.Item, 0, len(seleccion))
+	for _, id := range seleccion {
+		id = strings.TrimSpace(id)
+		if id == "" || vistos[id] {
+			continue
+		}
+		it, ok := porID[id]
+		if !ok {
+			return nil, ErrItemYaFacturado
+		}
+		vistos[id] = true
+		out = append(out, it)
+	}
+	if len(out) == 0 {
+		return nil, ErrCuentaSinItems
+	}
+	return out, nil
+}
 
 type parteCuenta struct {
 	numero int

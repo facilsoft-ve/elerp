@@ -136,6 +136,9 @@ func (s *Server) handleFacturarCotizacion(c *fiber.Ctx) error {
 		VueltoTelefono string `json:"vueltoTelefono"`
 		// Vuelto MIXTO: el excedente repartido en varias partes (misma vía que el POS).
 		VueltoPartes []vueltoParteReq `json:"vueltoPartes"`
+		// ClienteID: quien factura identifica al cliente si la cotización venía sin
+		// él (mesa de restaurante prefacturada sin datos).
+		ClienteID string `json:"clienteId"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
@@ -145,6 +148,7 @@ func (s *Server) handleFacturarCotizacion(c *fiber.Ctx) error {
 		VueltoMoneda: in.VueltoMoneda, VueltoMetodo: in.VueltoMetodo,
 		VueltoBanco: in.VueltoBanco, VueltoCedula: in.VueltoCedula, VueltoTelefono: in.VueltoTelefono,
 		VueltoPartes: vueltoPartesDe(in.VueltoPartes),
+		ClienteID:    in.ClienteID,
 	}
 	for _, p := range in.Pagos {
 		ent.Pagos = append(ent.Pagos, application.PagoEntrada{

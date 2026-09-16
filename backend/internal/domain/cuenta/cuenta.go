@@ -52,6 +52,12 @@ type Item struct {
 	// EnviadoEn es el instante en que el renglón se mandó a cocina (RFC3339); vacío
 	// mientras está pendiente. La pantalla de cocina lo usa para «hace X min».
 	EnviadoEn string `json:"enviadoEn,omitempty" bson:"enviadoen,omitempty"`
+	// PrefacturaID es la SOLICITUD DE FACTURACIÓN que ya se llevó este renglón
+	// (id de la cotización confirmada). Vacío = todavía está sin pedir, así que
+	// entra en la próxima solicitud. Es lo que permite que una misma mesa se
+	// facture por partes: dos comensales que pagan lo suyo son dos solicitudes
+	// sobre renglones distintos de la MISMA cuenta.
+	PrefacturaID string `json:"prefacturaId,omitempty" bson:"prefacturaid,omitempty"`
 }
 
 // Importe del renglón (Bs). Un renglón cancelado no aporta.
@@ -110,6 +116,23 @@ func (c Cuenta) TienePendientes() bool {
 	}
 	return false
 }
+
+// ItemsSinFacturar devuelve los renglones vivos que todavía no entraron en ninguna
+// solicitud de facturación: son los que se pueden pedir en la próxima.
+func (c Cuenta) ItemsSinFacturar() []Item {
+	out := make([]Item, 0, len(c.Items))
+	for _, it := range c.Items {
+		if it.Estado != ItemCancelado && it.PrefacturaID == "" {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// TieneSinFacturar indica si queda consumo sin pedir. Mientras sea cierto la mesa NO
+// se cierra aunque ya se hayan cobrado todas las solicitudes emitidas: alguien sigue
+// comiendo en esa mesa.
+func (c Cuenta) TieneSinFacturar() bool { return len(c.ItemsSinFacturar()) > 0 }
 
 // NormalizarNota recorta la nota de un renglón.
 func NormalizarNota(s string) string { return strings.TrimSpace(s) }

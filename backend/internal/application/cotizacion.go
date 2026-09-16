@@ -3,6 +3,7 @@ package application
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/mornix/elerp/internal/domain/cotizacion"
 	"github.com/mornix/elerp/internal/domain/empresa"
@@ -239,6 +240,10 @@ type EntradaFacturacion struct {
 	// VueltoPartes reparte el vuelto en varias partes (moneda + medio + monto).
 	// Igual que en el POS: si viene, manda sobre los campos únicos de arriba.
 	VueltoPartes []VueltoParteEntrada
+	// ClienteID identifica a quien paga cuando la cotización no lo traía. Es el caso
+	// de la mesa de restaurante: el mesonero manda la solicitud sin datos y el
+	// cajero pregunta el RIF al cobrar. Vacío ⇒ se respeta el de la cotización.
+	ClienteID string
 }
 
 // FacturarCotizacion emite la factura forma libre de una cotización confirmada.
@@ -256,8 +261,14 @@ func (s *Service) FacturarCotizacion(empresaID, id, actor, origen string, in Ent
 	}
 	// Venta forma libre: sin caja (canal administrativo, no POS). El cobro se procesa
 	// por la MISMA ruta que el mostrador: EmitirFactura hace conversión, IGTF y vuelto.
+	// El cliente sale de la cotización; el cajero puede ponerlo si venía sin él (o
+	// corregirlo): la factura la firma quien paga, no quien tomó el pedido.
+	clienteID := c.ClienteID
+	if v := strings.TrimSpace(in.ClienteID); v != "" {
+		clienteID = v
+	}
 	ent := EmitirEntrada{
-		ClienteID: c.ClienteID, Moneda: c.Moneda, Pagos: in.Pagos, SinCaja: true,
+		ClienteID: clienteID, Moneda: c.Moneda, Pagos: in.Pagos, SinCaja: true,
 		// La mercancía sale del almacén de despacho elegido en la cotización. La
 		// factura fiscal se registra en la sede de la cotización (c.SedeID); solo la
 		// salida de inventario se descuenta de SedeDespacho (vacío ⇒ misma sede).

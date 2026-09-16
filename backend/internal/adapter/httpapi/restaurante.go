@@ -344,6 +344,11 @@ func (s *Server) handlePrefacturarCuenta(c *fiber.Ctx) error {
 		Comensales int               `json:"comensales"`
 		Items      map[string]int    `json:"items"`
 		Nombres    map[string]string `json:"nombres"`
+		// Seleccion: los renglones que entran en ESTA solicitud (segmentar la mesa).
+		// Vacía = todo lo que quede sin pedir.
+		Seleccion []string `json:"seleccion"`
+		// ClienteID: el mesonero ya tomó los datos de quien paga esta parte.
+		ClienteID string `json:"clienteId"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
@@ -358,6 +363,7 @@ func (s *Server) handlePrefacturarCuenta(c *fiber.Ctx) error {
 	cta, prefacturas, err := s.svc.PrefacturarCuenta(empresaIDOf(c), c.Params("id"),
 		principalOf(c).UserID, origen(c), application.DivisionCuenta{
 			Modo: in.Modo, Comensales: in.Comensales, Items: in.Items, Nombres: nombres,
+			Seleccion: in.Seleccion, ClienteID: in.ClienteID,
 		})
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
