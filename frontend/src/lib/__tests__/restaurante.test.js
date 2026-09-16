@@ -4,7 +4,7 @@
 // equivocado se ve igual de convincente que el correcto. Por eso el cálculo vive fuera de
 // la pantalla y se prueba acá.
 import { describe, it, expect } from 'vitest'
-import { metricasRestaurante, totalDeCuenta, esperaMinutos } from '../restaurante.js'
+import { metricasRestaurante, totalDeCuenta, esperaMinutos, solicitudesDeMesa } from '../restaurante.js'
 
 const AHORA = new Date('2026-09-08T20:00:00Z').getTime()
 const haceMin = (m) => new Date(AHORA - m * 60000).toISOString()
@@ -144,5 +144,65 @@ describe('metricasRestaurante · lo vendido hoy', () => {
     const m = metricasRestaurante(undefined, { ahora: AHORA })
     expect(m.mesasTotal).toBe(0)
     expect(m.platosTop).toEqual([])
+  })
+})
+
+/* Solicitudes de facturación que esperan en la caja.
+ *
+ * Es lo único que el cajero ve del módulo Restaurante: qué mesa pidió factura y por
+ * cuánto. Si esta lista trae de más (una cotización de Ventas que no es de mesa) o de
+ * menos (una parte que sí se pidió), el cajero cobra lo que no es o deja a alguien
+ * esperando. */
+describe('solicitudesDeMesa', () => {
+  const cot = (over = {}) => ({
+    id: 'cot_1', estado: 'confirmada', numeroCompleto: 'COT-000001',
+    mesaNombre: '4', cuentaMesaId: 'cta_1', notas: 'Mesa 4', total: 1000,
+    creada: '2026-09-16T10:00:00Z', lineas: [{ sku: 'A', nombre: 'Plato', cantidad: 1, precioUnitario: 1000 }],
+    ...over,
+  })
+
+  it('solo trae cotizaciones CONFIRMADAS de una mesa', () => {
+    const out = solicitudesDeMesa([
+      cot(),
+      cot({ id: 'cot_2', estado: 'borrador' }),                       // todavía no se pidió
+      cot({ id: 'cot_3', estado: 'facturada' }),                      // ya se cobró
+      cot({ id: 'cot_4', mesaNombre: '', cuentaMesaId: '' }),         // venta normal de Ventas
+    ])
+    expect(out.map((s) => s.id)).toEqual(['cot_1'])
+  })
+
+  it('ordena por mesa en orden numérico, no alfabético', () => {
+    const out = solicitudesDeMesa([
+      cot({ id: 'a', mesaNombre: '10' }),
+      cot({ id: 'b', mesaNombre: '2' }),
+      cot({ id: 'c', mesaNombre: '9' }),
+    ])
+    expect(out.map((s) => s.mesaNombre)).toEqual(['2', '9', '10'])
+  })
+
+  it('una mesa que pidió dos veces muestra primero la que lleva más esperando', () => {
+    const out = solicitudesDeMesa([
+      cot({ id: 'nueva', creada: '2026-09-16T12:00:00Z' }),
+      cot({ id: 'vieja', creada: '2026-09-16T11:00:00Z' }),
+    ])
+    expect(out.map((s) => s.id)).toEqual(['vieja', 'nueva'])
+  })
+
+  it('conserva el cliente cuando el mesonero ya lo tomó', () => {
+    const [s] = solicitudesDeMesa([cot({ clienteId: 'cli_1', clienteNombre: 'Ana Pérez' })])
+    expect(s.clienteId).toBe('cli_1')
+    expect(s.clienteNombre).toBe('Ana Pérez')
+  })
+
+  it('normaliza las líneas a lo que el carrito del POS espera', () => {
+    const [s] = solicitudesDeMesa([cot({
+      lineas: [{ sku: 'PLA-1', nombre: 'Pasta', cantidad: '2', precioUnitario: '32000', exento: 1 }],
+    })])
+    expect(s.lineas).toEqual([{ sku: 'PLA-1', nombre: 'Pasta', cantidad: 2, precioUnitario: 32000, exento: true }])
+  })
+
+  it('aguanta una lista vacía o indefinida', () => {
+    expect(solicitudesDeMesa()).toEqual([])
+    expect(solicitudesDeMesa([])).toEqual([])
   })
 })

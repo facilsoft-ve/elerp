@@ -13,6 +13,7 @@ import { TasaModal, fechaCortaVE } from '../components/tasa.jsx'
 import { precioEnBs, monedaDe, porCodigo } from '../lib/precio.js'
 import { CobroModal, VentaEmitida } from './Cobro.jsx'
 import { useEspera, DejarEnEsperaModal, EsperaModal } from './Espera.jsx'
+import { useSolicitudesMesa, BotonMesasPorCobrar, EtiquetaMesa, MesasPorCobrarModal } from './PosMesas.jsx'
 
 export const puedeEmitir = (rol) => rol !== 'contadora'
 export const puedeCrearCliente = (rol) => ['dueno', 'desarrollador', 'vendedor', 'cajero'].includes(rol)
@@ -74,6 +75,24 @@ export function POS({ onModoCaja }) {
 
   const [cobrando, setCobrando] = useState(false)
   const [emitida, setEmitida] = useState(null) // documento emitido (estado de éxito)
+
+  // Módulo Restaurante: las mesas que pidieron factura se cobran ACÁ, no en una
+  // pantalla aparte. `mesaSel` es la solicitud cargada en el carrito; mientras
+  // exista, el cobro emite por la ruta de la prefactura (que además cierra la mesa).
+  const solicitudes = useSolicitudesMesa()
+  const [verMesas, setVerMesas] = useState(false)
+  const [mesaSel, setMesaSel] = useState(null)
+
+  const tomarMesa = (s) => {
+    setMesaSel(s)
+    setCart(s.lineas.map((l) => ({ ...l })))
+    setClienteId(s.clienteId || '')
+    setVerMesas(false)
+    toast({ title: `Mesa ${s.mesaNombre} en el carrito`, body: s.nota || `${s.lineas.length} renglón(es)` })
+  }
+  // Soltar la mesa vacía el carrito: esos renglones son de la mesa, no de una venta
+  // suelta del mostrador. La solicitud sigue esperando para cobrarse.
+  const soltarMesa = () => { setMesaSel(null); setCart([]); setClienteId('') }
 
   // Ventas en espera (2.6): el carrito apartado del mostrador.
   const espera = useEspera()
@@ -160,6 +179,7 @@ export function POS({ onModoCaja }) {
   const nuevaVenta = () => {
     setEmitida(null)
     setCart([]); setQ(''); setClienteId('')
+    setMesaSel(null)
     setContingencia(false)
     searchRef.current?.focus()
   }
@@ -181,8 +201,17 @@ export function POS({ onModoCaja }) {
       <BarraTurno sesion={sesion} onCerrada={recargarSesion} onModoCaja={onModoCaja} />
       <DisponibilidadModal sku={infoSku} open={!!infoSku} onClose={() => setInfoSku('')} />
       <TasaModal open={verTasa} onClose={() => setVerTasa(false)} />
+      <MesasPorCobrarModal open={verMesas} solicitudes={solicitudes}
+        onElegir={tomarMesa} onClose={() => setVerMesas(false)} />
       <CobroModal open={cobrando} onClose={() => setCobrando(false)}
         lineas={cart} clienteId={clienteId} clienteNombre={clienteNombre} contingencia={contingencia}
+        onCobrar={mesaSel ? async (cobro) => {
+          // Misma ruta fiscal que el mostrador (FacturarCotizacion → EmitirFactura),
+          // y además enlaza la factura con la mesa y la cierra cuando ya no queda
+          // nada por cobrar. El cliente puede ponerlo el cajero si vino sin datos.
+          const res = await api.facturarCotizacion(mesaSel.id, { ...cobro, clienteId })
+          return res?.documento || res
+        } : undefined}
         onEmitida={async (doc) => {
           setCobrando(false)
           setEmitida(doc)
@@ -226,6 +255,7 @@ export function POS({ onModoCaja }) {
             <Button variant={catalogo ? 'primary' : 'secondary'} size="lg"
               icon={<Icon.Boxes size={17} />} onClick={() => setCatalogo((c) => !c)}
               title="Ver el catálogo con imágenes">Catálogo</Button>
+            <BotonMesasPorCobrar cantidad={solicitudes.length} onClick={() => setVerMesas(true)} />
             {espera.lista.length ? (
               <Button variant="secondary" size="lg" icon={<Icon.Clock size={17} />}
                 onClick={() => setVerEspera(true)} title="Ventas apartadas de esta sede">
@@ -241,6 +271,7 @@ export function POS({ onModoCaja }) {
           ) : null}
 
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
+            <EtiquetaMesa solicitud={mesaSel} onQuitar={soltarMesa} />
             {cart.length === 0 ? (
               <Empty icon={<Icon.Cart size={22} />} title="Carrito vacío"
                 body="Busca un producto arriba y presiona Enter para agregarlo. Repetir el mismo ítem incrementa su cantidad." />

@@ -9,7 +9,6 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
 import { precioEnBs, monedaDe } from '../lib/precio.js'
 import { fmtCurrency } from '../lib/format.js'
-import { ComprobanteModal, comprobanteDeFactura } from '../components/ComprobantePDF.jsx'
 
 /* Módulo Restaurante — Fase 0: el MAPA DE MESAS (editor de arrastrar y soltar) y
  * la CONFIGURACIÓN DE LA IMPRESORA de comandas.
@@ -588,11 +587,7 @@ export function Comandera() {
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [comanda, setComanda] = useState(null)
-  const [cobroOpen, setCobroOpen] = useState(false)
   const [divisionOpen, setDivisionOpen] = useState(false)
-  const [factura, setFactura] = useState(null)
-  // Cobrar es de la caja: el mesonero pide la cuenta y ahí termina su parte.
-  const puedeCobrar = ['dueno', 'desarrollador', 'cajero', 'vendedor'].includes(ui.rol)
   const esMesonero = ui.rol === 'mesonero'
 
   const cuentaDeMesa = (mesaId) => cuentasAbiertas.find((c) => c.mesaId === mesaId)
@@ -645,12 +640,9 @@ export function Comandera() {
       const r = await api.prefacturarCuenta(cuenta.id, division)
       setCuenta(r.cuenta)
       setDivisionOpen(false)
-      const n = (r.prefacturas || []).length
       toast({
-        title: n > 1 ? `Cuenta dividida en ${n} prefacturas` : 'Cuenta pedida',
-        body: n > 1
-          ? 'La caja cobra cada parte por separado.'
-          : `La caja la busca como «Mesa ${cuenta.mesaNombre}» en Ventas › Confirmadas.`,
+        title: 'Factura pedida',
+        body: `La caja la ve como «Mesa ${cuenta.mesaNombre}» en el Punto de Venta.`,
       })
       reload()
     } catch (e) { toast({ title: 'No se pudo pedir la cuenta', body: e?.message || 'Error', kind: 'error' }) }
@@ -687,37 +679,27 @@ export function Comandera() {
     catch (e) { toast({ title: 'No se pudo cerrar', body: e?.message || 'Error', kind: 'error' }) }
   }
 
-  // Modal de factura emitida (reusa el comprobante, que imprime con el formato).
-  const facturaModal = factura ? (
-    <ComprobanteModal open onClose={() => setFactura(null)} empresa={db.EMPRESA}
-      data={comprobanteDeFactura(factura, db.EMPRESA, null)} />
-  ) : null
-
   if (!mesas.length) {
-    return <>{facturaModal}<Empty icon={<Icon.Utensils size={22} />} title="Aún no hay mesas" body="Crea el salón en «Mapa de mesas» para empezar a tomar pedidos." /></>
+    return <Empty icon={<Icon.Utensils size={22} />} title="Aún no hay mesas" body="Crea el salón en «Mapa de mesas» para empezar a tomar pedidos." />
   }
   if (cuenta) {
     return (<>
       <CuentaDetalle cuenta={cuenta} busy={busy} onVolver={() => setCuenta(null)}
         onAgregar={() => setMenuOpen(true)} onCancelar={cancelarItem} onEnviar={enviar} onCerrar={cerrar}
-        onCobrar={() => setCobroOpen(true)} onPedirCuenta={() => setDivisionOpen(true)}
-        onVolverAServicio={volverAServicio} puedeCobrar={puedeCobrar}
+        onPedirCuenta={() => setDivisionOpen(true)}
+        onVolverAServicio={volverAServicio}
         puedeAnularEnviado={ui.rol !== 'mesonero'} />
-      {divisionOpen ? <DivisionModal cuenta={cuenta} busy={busy}
+      {divisionOpen ? <SolicitarFacturaModal cuenta={cuenta} clientes={db.CLIENTES || []} busy={busy}
         onClose={() => setDivisionOpen(false)} onConfirmar={pedirCuenta} /> : null}
       {menuOpen ? <MenuProductos productos={vendibles(db.PRODUCTOS)} monedaEmpresa={monedaEmpresa}
         onAgregar={agregarProducto} onClose={() => setMenuOpen(false)} /> : null}
       {comanda ? <ComandaModal cuenta={cuenta} comanda={comanda} onClose={() => setComanda(null)} /> : null}
-      {cobroOpen ? <CobroModal cuenta={cuenta} cuentasCobro={db.CUENTAS_COBRO || []} onClose={() => setCobroOpen(false)}
-        onCobrado={(doc) => { setCobroOpen(false); setCuenta(null); setFactura(doc); reload() }} /> : null}
-      {facturaModal}
     </>)
   }
   // Tablero de mesas
   const c = (e) => (ESTADO_COLOR[e] || ESTADO_COLOR.libre)
   return (
     <div>
-      {facturaModal}
       <div className="text-[12.5px] text-slate-500 dark:text-slate-400 mb-3">Toca una mesa para abrir su cuenta y tomar el pedido. Cada envío a cocina genera una comanda.</div>
       <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {mesas.map((m) => {
@@ -748,11 +730,13 @@ export function Comandera() {
   )
 }
 
-function CuentaDetalle({ cuenta, busy, onVolver, onAgregar, onCancelar, onEnviar, onCerrar, onCobrar, onPedirCuenta, onVolverAServicio, puedeCobrar, puedeAnularEnviado }) {
+function CuentaDetalle({ cuenta, busy, onVolver, onAgregar, onCancelar, onEnviar, onCerrar, onPedirCuenta, onVolverAServicio, puedeAnularEnviado }) {
   const items = cuenta.items || []
   const pendientes = items.filter((it) => it.estado === 'pendiente')
-  // Cuenta ya pedida (prefacturada): no se agregan renglones y lo que queda es cobrar.
-  const pedida = (cuenta.prefacturas || []).length > 0
+  // Solicitudes de facturación ya emitidas y renglones que todavía nadie pidió. Una
+  // mesa puede tener las dos cosas a la vez: uno pagó y se fue, el otro sigue comiendo.
+  const solicitudes = (cuenta.prefacturas || []).length
+  const sinPedir = items.filter((it) => it.estado !== 'cancelado' && !it.prefacturaId)
   // Agrupar por ronda: 0 = por enviar, luego 1..n.
   const rondas = [...new Set(items.map((it) => it.ronda || 0))].sort((a, b) => a - b)
   return (
@@ -809,50 +793,39 @@ function CuentaDetalle({ cuenta, busy, onVolver, onAgregar, onCancelar, onEnviar
       </div>
 
       <div className="space-y-2">
-        {pedida ? (
-          /* Cuenta ya pedida: el mesonero terminó su parte. Lo que queda es cobrar, y
-             eso es de la caja. Se le muestra qué prefactura(s) generó para que sepa
-             qué va a buscar el cajero, y una salida para volver a servicio. */
-          <>
-            <div className="rounded-xl border border-teal-200 dark:border-teal-900/60 bg-teal-50 dark:bg-teal-950/40 p-3">
-              <div className="flex items-center gap-1.5 font-semibold text-[13px] text-teal-900 dark:text-teal-100">
-                <Icon.CircleCheck size={15} /> Cuenta pedida
-              </div>
-              <div className="text-[12px] text-teal-800 dark:text-teal-200 mt-1 leading-relaxed">
-                {(cuenta.prefacturas || []).length > 1
-                  ? `Se generaron ${(cuenta.prefacturas || []).length} prefacturas (cuenta dividida). La caja las cobra por separado.`
-                  : 'La prefactura está lista. La caja la cobra y emite la factura.'}
-              </div>
+        {solicitudes ? (
+          /* Ya hay solicitudes en la caja. La mesa NO se bloquea: el que sigue comiendo
+             puede pedir más y eso entra en la próxima solicitud. Se muestra qué está
+             esperando la caja para que el mesonero sepa en qué va la mesa. */
+          <div className="rounded-xl border border-teal-200 dark:border-teal-900/60 bg-teal-50 dark:bg-teal-950/40 p-3">
+            <div className="flex items-center gap-1.5 font-semibold text-[13px] text-teal-900 dark:text-teal-100">
+              <Icon.CircleCheck size={15} /> {solicitudes === 1 ? 'Factura pedida' : `${solicitudes} facturas pedidas`}
             </div>
-            <Button className="w-full" size="lg" variant="ghost" loading={busy} onClick={onVolverAServicio}>
-              Volver a servicio (anular prefactura)
-            </Button>
-            <div className="text-[11px] text-slate-400 px-1 pt-1">
-              Vuelve a servicio si el cliente pide algo más: con la cuenta pedida no se pueden agregar renglones,
-              porque la prefactura quedaría desactualizada.
+            <div className="text-[12px] text-teal-800 dark:text-teal-200 mt-1 leading-relaxed">
+              La caja la ve como «Mesa {cuenta.mesaNombre}» en el Punto de Venta y la cobra ahí.
+              {sinPedir.length ? ` Quedan ${sinPedir.length} renglón(es) sin facturar.` : ' Al cobrarla, la mesa se libera sola.'}
             </div>
-          </>
-        ) : (
-          <>
-            <Button className="w-full" size="xl" icon={<Icon.Plus size={18} />} variant="secondary" onClick={onAgregar}>Agregar productos</Button>
-            <Button className="w-full" size="xl" loading={busy} disabled={!pendientes.length} icon={<Icon.Send size={18} />} onClick={onEnviar}>
-              Enviar a cocina{pendientes.length ? ` (${pendientes.length})` : ''}
-            </Button>
-            <Button className="w-full" size="xl" disabled={!items.length} icon={<Icon.Receipt size={18} />} onClick={onPedirCuenta}>
-              Pedir la cuenta
-            </Button>
-            {puedeCobrar ? (
-              <Button className="w-full" size="lg" variant="secondary" disabled={!items.length} icon={<Icon.Wallet size={18} />} onClick={onCobrar}>
-                Cobrar acá (caja)
-              </Button>
-            ) : null}
-            <Button className="w-full" size="lg" variant="ghost" onClick={onCerrar}>Cerrar sin cobrar</Button>
-            <div className="text-[11px] text-slate-400 px-1 pt-1">
-              «Pedir la cuenta» genera la prefactura rotulada con la mesa; la caja la cobra desde Ventas y emite la
-              factura. Ahí se puede dividir el cobro entre comensales o partir la cuenta por productos.
-            </div>
-          </>
-        )}
+          </div>
+        ) : null}
+
+        <Button className="w-full" size="xl" icon={<Icon.Plus size={18} />} variant="secondary" onClick={onAgregar}>Agregar productos</Button>
+        <Button className="w-full" size="xl" loading={busy} disabled={!pendientes.length} icon={<Icon.Send size={18} />} onClick={onEnviar}>
+          Enviar a cocina{pendientes.length ? ` (${pendientes.length})` : ''}
+        </Button>
+        <Button className="w-full" size="xl" disabled={!sinPedir.length} icon={<Icon.Receipt size={18} />} onClick={onPedirCuenta}>
+          {solicitudes ? 'Pedir factura de lo que falta' : 'Pedir la cuenta'}
+        </Button>
+        {solicitudes ? (
+          <Button className="w-full" size="lg" variant="ghost" loading={busy} onClick={onVolverAServicio}>
+            Anular lo pedido (volver a servicio)
+          </Button>
+        ) : null}
+        <Button className="w-full" size="lg" variant="ghost" onClick={onCerrar}>Cerrar sin cobrar</Button>
+        <div className="text-[11px] text-slate-400 px-1 pt-1">
+          Puedes pedir la factura de toda la mesa o solo de unos renglones —cuando cada quien paga lo suyo— y
+          repetir con el resto más tarde. El cobro es en el Punto de Venta; la mesa se cierra sola cuando ya no
+          queda nada por cobrar.
+        </div>
       </div>
     </div>
   )
@@ -942,57 +915,6 @@ function ComandaModal({ cuenta, comanda, onClose }) {
 
 // Cobro simple de la cuenta → factura fiscal (pago único en Bs). El cobro mixto/
 // multimoneda y la propina se integran con el flujo del POS más adelante.
-function CobroModal({ cuenta, cuentasCobro, onClose, onCobrado }) {
-  const toast = useToast()
-  const [prev, setPrev] = useState(null) // {subtotal, iva, total}
-  const [metodo, setMetodo] = useState('efectivo_bs')
-  const [cuentaCobroId, setCuentaCobroId] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    api.previewCobroCuenta(cuenta.id).then(setPrev).catch(() => setPrev({ subtotal: 0, iva: 0, total: totalCuenta(cuenta) }))
-  }, [cuenta.id])
-
-  const esPagoMovil = metodo === 'pago_movil'
-  const cobrar = async () => {
-    if (esPagoMovil && !cuentaCobroId) { toast({ title: 'Elige la cuenta de destino del pago móvil', kind: 'warn' }); return }
-    setBusy(true)
-    try {
-      const r = await api.cobrarCuenta(cuenta.id, { metodo, cuentaCobroId: esPagoMovil ? cuentaCobroId : '', sinCaja: true })
-      toast({ title: 'Factura emitida', body: r.documento?.numeroCompleto || '' })
-      onCobrado(r.documento)
-    } catch (e) { toast({ title: 'No se pudo cobrar', body: e?.message || 'Error', kind: 'error' }); setBusy(false) }
-  }
-
-  return (
-    <Modal open onClose={onClose} size="sm" icon={<Icon.Receipt size={18} />} title={`Cobrar mesa ${cuenta.mesaNombre}`}
-      sub="Pago único en bolívares. Se emite la factura fiscal y se libera la mesa."
-      footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button>
-        <Button loading={busy} disabled={!prev} onClick={cobrar} icon={<Icon.Check size={15} />}>Cobrar {prev ? fmtCurrency(prev.total, 'VES') : ''}</Button></>}>
-      <div className="space-y-3.5">
-        <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3 text-[13px] space-y-1">
-          <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{prev ? fmtCurrency(prev.subtotal, 'VES') : '—'}</span></div>
-          <div className="flex justify-between text-slate-500"><span>IVA</span><span>{prev ? fmtCurrency(prev.iva, 'VES') : '—'}</span></div>
-          <div className="flex justify-between font-semibold text-[15px] border-t border-slate-200 dark:border-slate-700 pt-1 mt-1"><span>Total</span><span>{prev ? fmtCurrency(prev.total, 'VES') : '—'}</span></div>
-        </div>
-        <div>
-          <div className="text-[13px] font-semibold mb-1.5 text-slate-700 dark:text-slate-300">Método de pago</div>
-          <Segmented value={metodo} onChange={setMetodo}
-            options={[{ value: 'efectivo_bs', label: 'Efectivo Bs' }, { value: 'pago_movil', label: 'Pago móvil' }]} />
-        </div>
-        {esPagoMovil ? (
-          <Field label="Cuenta de destino">
-            <Select value={cuentaCobroId} onChange={(e) => setCuentaCobroId(e.target.value)}>
-              <option value="">Elegir cuenta…</option>
-              {cuentasCobro.map((cc) => <option key={cc.id} value={cc.id}>{cc.nombre || cc.banco || cc.id}</option>)}
-            </Select>
-          </Field>
-        ) : null}
-      </div>
-    </Modal>
-  )
-}
-
 // ======================= PLATOS Y RECETAS (escandallo) =======================
 const PUEDE_EDITAR_PLATOS = ['dueno', 'desarrollador']
 
@@ -1519,125 +1441,106 @@ function MesonerosAsignacion() {
  *     la factura sale limpia ("3 × Spaghetti", no "1,5 ×") y el IGTF se calcula bien.
  *   · Por productos → una prefactura (y después una factura) POR PARTE. Es el caso del
  *     que necesita su propia factura con su RIF. */
-function DivisionModal({ cuenta, busy, onClose, onConfirmar }) {
-  const items = (cuenta.items || []).filter((it) => it.estado !== 'cancelado')
-  const [modo, setModo] = useState('unica')
-  const [comensales, setComensales] = useState(cuenta.comensales || 2)
-  const [partes, setPartes] = useState(2)
-  // itemID → nº de parte. Arranca todo en la parte 1: repartir es mover, no asignar
-  // desde cero (y evita el error de dejar un renglón sin asignar).
-  const [asignacion, setAsignacion] = useState(() => {
-    const m = {}
-    for (const it of items) m[it.id] = 1
-    return m
+/* Solicitar factura de una mesa.
+ *
+ * El mesonero elige QUÉ renglones entran en esta solicitud. Por defecto entran todos
+ * los que nadie pidió todavía —"la cuenta, por favor" es el caso normal— pero si dos
+ * comensales pagan por separado, marca los de uno, manda su solicitud, y después manda
+ * la del otro. Cada solicitud es un documento propio y la caja las cobra por separado.
+ *
+ * Los datos del cliente son opcionales: si el mesonero los tomó en la mesa, la factura
+ * sale a ese nombre sin que el cajero pregunte nada; si no, los pide la caja al cobrar.
+ *
+ * Repartir en partes IGUALES no parte el documento: es una referencia para que el
+ * cajero cobre en varios pagos sobre una sola factura (y así el IVA y el IGTF salen
+ * bien, y la factura no dice "1,5 × Spaghetti").
+ */
+function SolicitarFacturaModal({ cuenta, clientes = [], busy, onClose, onConfirmar }) {
+  // Disponibles = vivos y sin pedir. Lo que ya se llevó otra solicitud no se ofrece.
+  const items = (cuenta.items || []).filter((it) => it.estado !== 'cancelado' && !it.prefacturaId)
+  const [sel, setSel] = useState(() => new Set(items.map((it) => it.id)))
+  const [comensales, setComensales] = useState(1)
+  const [clienteId, setClienteId] = useState('')
+
+  const marcados = items.filter((it) => sel.has(it.id))
+  const total = marcados.reduce((a, it) => a + (it.cantidad || 0) * (it.precioUnitario || 0), 0)
+  const todo = marcados.length === items.length
+  const alternar = (id) => setSel((prev) => {
+    const n = new Set(prev)
+    if (n.has(id)) n.delete(id); else n.add(id)
+    return n
   })
 
-  const total = totalCuenta(cuenta)
-  const nombresParte = (n) => `Parte ${n}`
-
-  const totalDeParte = (n) => items
-    .filter((it) => asignacion[it.id] === n)
-    .reduce((a, it) => a + (it.cantidad || 0) * (it.precioUnitario || 0), 0)
-
-  const vacias = Array.from({ length: partes }, (_, i) => i + 1).filter((n) => totalDeParte(n) <= 0)
-
-  const confirmar = () => {
-    if (modo === 'unica') {
-      onConfirmar({ modo: 'unica', comensales: Number(comensales) || 1 })
-      return
-    }
-    onConfirmar({
-      modo: 'por_items',
-      items: asignacion,
-      nombres: Object.fromEntries(Array.from({ length: partes }, (_, i) => [String(i + 1), nombresParte(i + 1)])),
-    })
-  }
+  const confirmar = () => onConfirmar({
+    modo: 'unica',
+    comensales: Number(comensales) || 1,
+    // Sin selección explícita el servidor toma todo lo que falte: se manda solo
+    // cuando de verdad es un segmento, para que quede claro en la bitácora.
+    seleccion: todo ? [] : marcados.map((it) => it.id),
+    clienteId,
+  })
 
   return (
     <Modal open onClose={onClose} title={`Pedir la cuenta · Mesa ${cuenta.mesaNombre}`} width="max-w-2xl"
       footer={<>
         <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-        <Button size="lg" loading={busy} disabled={modo === 'por_items' && vacias.length > 0} onClick={confirmar}>
-          {modo === 'unica' ? 'Generar prefactura' : `Generar ${partes} prefacturas`}
+        <Button size="lg" loading={busy} disabled={marcados.length === 0} onClick={confirmar}>
+          {todo ? 'Pedir la cuenta' : `Pedir por ${marcados.length} renglón(es)`}
         </Button>
       </>}>
       <div className="space-y-4">
-        <Segmented value={modo} onChange={setModo} options={[
-          { value: 'unica', label: 'Pagan juntos' },
-          { value: 'por_items', label: 'Dividir por productos' },
-        ]} />
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[13px] font-semibold text-slate-700 dark:text-slate-300">¿Qué se factura ahora?</span>
+            <button onClick={() => setSel(todo ? new Set() : new Set(items.map((it) => it.id)))}
+              className="text-[12px] text-elerp-600 hover:underline ring-focus rounded">
+              {todo ? 'Desmarcar todo' : 'Marcar todo'}
+            </button>
+          </div>
+          <div className="border border-slate-200 dark:border-slate-800 rounded-xl divide-y divide-slate-100 dark:divide-slate-800 max-h-64 overflow-auto">
+            {items.map((it) => (
+              <label key={it.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                <input type="checkbox" checked={sel.has(it.id)} onChange={() => alternar(it.id)}
+                  className="w-4 h-4 accent-[#6A2CF0]" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium truncate">{it.cantidad}× {it.nombre}</div>
+                  {it.nota ? <div className="text-[11.5px] text-slate-400 truncate">{it.nota}</div> : null}
+                </div>
+                <span className="text-[12.5px] tabular-nums text-slate-500">{fmtCurrency((it.cantidad || 0) * (it.precioUnitario || 0), 'VES')}</span>
+              </label>
+            ))}
+          </div>
+          {!todo ? (
+            <div className="text-[12px] text-slate-500 mt-1.5">
+              Lo que dejes sin marcar se queda en la mesa y se puede pedir después, en otra factura.
+            </div>
+          ) : null}
+        </div>
 
-        {modo === 'unica' ? (
-          <div className="space-y-3">
-            <Field label="¿Entre cuántas personas reparten el pago?"
-              hint="Es una referencia para la caja: se emite UNA factura y la caja registra un pago por persona. La factura no se parte.">
-              <Input type="number" min="1" value={comensales}
-                onChange={(e) => setComensales(e.target.value)} className="!w-28" />
-            </Field>
-            <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 p-3 text-[13px]">
-              <div className="flex justify-between"><span className="text-slate-500">Consumo</span><span className="tnum font-medium">{fmtCurrency(total, 'VES')}</span></div>
-              {Number(comensales) > 1 ? (
-                <div className="flex justify-between mt-1">
-                  <span className="text-slate-500">≈ por persona</span>
-                  <span className="tnum font-medium">{fmtCurrency(total / (Number(comensales) || 1), 'VES')}</span>
-                </div>
-              ) : null}
-              <div className="text-[11.5px] text-slate-400 mt-2">El total definitivo con IVA lo calcula la prefactura.</div>
+        <Field label="¿A nombre de quién?"
+          hint="Opcional. Si no lo pones, el cajero pide el RIF al cobrar.">
+          <Select value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
+            <option value="">Lo pide la caja (consumidor final)</option>
+            {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}{c.rif ? ` · ${c.rif}` : ''}</option>)}
+          </Select>
+        </Field>
+
+        <Field label="¿Entre cuántas personas reparten el pago?"
+          hint="Es una referencia para la caja: se emite UNA factura y se registra un pago por persona. La factura no se parte.">
+          <Input type="number" min="1" value={comensales}
+            onChange={(e) => setComensales(e.target.value)} className="!w-28" />
+        </Field>
+
+        <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 p-3 text-[13px]">
+          <div className="flex justify-between"><span className="text-slate-500">Consumo de esta solicitud</span><span className="tnum font-medium">{fmtCurrency(total, 'VES')}</span></div>
+          {Number(comensales) > 1 ? (
+            <div className="flex justify-between mt-1">
+              <span className="text-slate-500">≈ por persona</span>
+              <span className="tnum font-medium">{fmtCurrency(total / (Number(comensales) || 1), 'VES')}</span>
             </div>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <Field label="¿En cuántas partes?" hint="Cada parte recibe su propia prefactura y, al cobrarla, su propia factura.">
-              <Input type="number" min="2" max="10" value={partes}
-                onChange={(e) => {
-                  const n = Math.max(2, Math.min(10, Number(e.target.value) || 2))
-                  setPartes(n)
-                  // Los renglones que apuntaban a una parte que ya no existe vuelven a la 1.
-                  setAsignacion((prev) => Object.fromEntries(
-                    Object.entries(prev).map(([k, v]) => [k, v > n ? 1 : v])))
-                }} className="!w-24" />
-            </Field>
-            <div className="border border-slate-200 dark:border-slate-800 rounded-xl divide-y divide-slate-100 dark:divide-slate-800">
-              {items.map((it) => (
-                <div key={it.id} className="flex items-center gap-3 px-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[13px] font-medium truncate">{it.cantidad}× {it.nombre}</div>
-                    <div className="text-[11.5px] text-slate-500 tnum">{fmtCurrency((it.cantidad || 0) * (it.precioUnitario || 0), 'VES')}</div>
-                  </div>
-                  <div className="flex gap-1">
-                    {Array.from({ length: partes }, (_, i) => i + 1).map((n) => (
-                      <button key={n} onClick={() => setAsignacion((prev) => ({ ...prev, [it.id]: n }))}
-                        aria-label={`Asignar ${it.nombre} a la parte ${n}`}
-                        className={`${T.chip} border ring-focus transition-colors ${
-                          asignacion[it.id] === n
-                            ? 'bg-elerp-500 text-white border-elerp-500'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
-                        {n}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-[13px]">
-              {Array.from({ length: partes }, (_, i) => i + 1).map((n) => (
-                <div key={n} className={`rounded-lg border p-2.5 flex justify-between ${
-                  totalDeParte(n) <= 0
-                    ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900'
-                    : 'border-slate-200 dark:border-slate-700'}`}>
-                  <span className="text-slate-500">{nombresParte(n)}</span>
-                  <span className="tnum font-medium">{fmtCurrency(totalDeParte(n), 'VES')}</span>
-                </div>
-              ))}
-            </div>
-            {vacias.length > 0 ? (
-              <div className="text-[12.5px] text-amber-700 dark:text-amber-300">
-                {vacias.length === 1 ? `La ${nombresParte(vacias[0]).toLowerCase()} quedó vacía` : `Hay ${vacias.length} partes vacías`}:
-                asigna al menos un renglón a cada una o reduce el número de partes.
-              </div>
-            ) : null}
-          </div>
-        )}
+          ) : null}
+          <div className="text-[11.5px] text-slate-400 mt-2">El total definitivo con IVA lo calcula la caja al cobrar.</div>
+        </div>
       </div>
     </Modal>
   )

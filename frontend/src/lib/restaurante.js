@@ -96,3 +96,47 @@ export function metricasRestaurante({ mesas = [], cuentas = [], documentos = [],
     hayDatos: mesasCobradasHoy > 0 || abiertas.length > 0,
   }
 }
+
+/* solicitudesDeMesa son las SOLICITUDES DE FACTURACIÓN que esperan en la caja.
+ *
+ * Cuando el mesonero pide la cuenta (entera o de un segmento de la mesa), el servidor
+ * crea una cotización CONFIRMADA rotulada con la mesa. Eso es lo único que el cajero
+ * necesita ver: qué mesa pidió factura y por cuánto. No busca números de cotización.
+ *
+ * Se ordenan por mesa —el cajero piensa en mesas, no en documentos— y, dentro de la
+ * misma mesa, por antigüedad: si una mesa pidió dos veces, primero la que lleva
+ * esperando más rato.
+ */
+export function solicitudesDeMesa(cotizaciones = []) {
+  const vivas = (cotizaciones || []).filter(
+    (c) => c && c.estado === 'confirmada' && (c.cuentaMesaId || c.mesaNombre))
+  return vivas
+    .map((c) => ({
+      id: c.id,
+      numero: c.numeroCompleto || '',
+      mesaNombre: c.mesaNombre || '',
+      cuentaMesaId: c.cuentaMesaId || '',
+      // La nota es lo que distingue una parte de otra ("Mesa 4 · parte 2 de 3").
+      nota: c.notas || '',
+      clienteId: c.clienteId || '',
+      clienteNombre: c.clienteNombre || '',
+      total: Number(c.total) || 0,
+      creada: c.creada || '',
+      lineas: (c.lineas || []).map((l) => ({
+        sku: l.sku, nombre: l.nombre, cantidad: Number(l.cantidad) || 0,
+        precioUnitario: Number(l.precioUnitario) || 0, exento: !!l.exento,
+      })),
+    }))
+    .sort((a, b) => {
+      const m = compararMesa(a.mesaNombre, b.mesaNombre)
+      return m !== 0 ? m : String(a.creada).localeCompare(String(b.creada))
+    })
+}
+
+/* compararMesa ordena "2" antes que "10" (numérico cuando ambos lo son) y, si no,
+ * alfabéticamente: los nombres de mesa suelen ser números, pero admiten "Terraza 1". */
+function compararMesa(a, b) {
+  const na = Number(a), nb = Number(b)
+  if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb
+  return String(a).localeCompare(String(b), 'es', { numeric: true })
+}
