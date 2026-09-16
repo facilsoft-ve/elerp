@@ -165,6 +165,14 @@ type Documento struct {
 	ClienteID        string `json:"clienteId" bson:"clienteid"`
 	ClienteNombre    string `json:"clienteNombre" bson:"clientenombre"`
 	ClienteDocumento string `json:"clienteDocumento" bson:"clientedocumento"`
+	// ClienteDireccion es el DOMICILIO FISCAL del receptor, requisito de la
+	// factura venezolana. Se COPIA del maestro al emitir, igual que el nombre y
+	// el documento y por la misma razón: la factura no puede depender de que el
+	// cliente siga viviendo en el mismo sitio dentro de dos años.
+	//
+	// Vacío en el consumidor final (venta de mostrador sin identificar) y en los
+	// documentos emitidos antes de que existiera este campo.
+	ClienteDireccion string `json:"clienteDireccion" bson:"clientedireccion"`
 
 	Lineas   []Linea `json:"lineas" bson:"lineas"`
 	Subtotal float64 `json:"subtotal" bson:"subtotal"`

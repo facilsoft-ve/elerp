@@ -245,10 +245,16 @@ func (s *Store) seedEmpresaNicho(e especNicho) {
 	}
 
 	for i, c := range e.clientes {
+		// La dirección fiscal NO es decorativa: la factura la exige al cliente
+		// identificado, así que un cliente demo sin ella no se podría facturar y
+		// la demostración quedaría trancada justo en el paso principal. Se compone
+		// a partir de la zona de la propia empresa, que es lo verosímil para una
+		// cartera local.
 		s.Clientes.Create(cliente.Cliente{
 			EmpresaID: e.empID, Nombre: c.nombre, TipoDocumento: c.tipoDoc,
 			Documento: c.doc, Telefono: c.telefono, Activo: true,
-			Notas: fmt.Sprintf("cliente de demostración %d", i+1),
+			Direccion: fmt.Sprintf("Sector %d, cerca de %s", i+1, e.direccion),
+			Notas:     fmt.Sprintf("cliente de demostración %d", i+1),
 		})
 	}
 

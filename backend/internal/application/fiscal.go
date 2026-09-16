@@ -84,6 +84,10 @@ var (
 	// documento (RIF/cédula) debe ser válido. El consumidor final (sin cliente) no
 	// lleva documento y queda permitido para la venta minorista.
 	ErrReceptorDocumentoInvalido = errors.New("el documento del cliente (receptor) no es válido para facturar")
+	// ErrReceptorSinDireccion: la factura venezolana exige el domicilio fiscal del
+	// receptor. Se pide con el mismo criterio que el RIF —solo al cliente
+	// identificado— porque al consumidor final tampoco se le pide RIF.
+	ErrReceptorSinDireccion = errors.New("el cliente no tiene dirección fiscal y la factura la exige")
 	ErrDocumentoNoExiste         = errors.New("documento no existe")
 	ErrYaAnulado                 = errors.New("el documento ya fue anulado")
 	ErrNotaCreditoVacia          = errors.New("la nota de crédito no acredita ninguna cantidad")
@@ -443,9 +447,17 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 		if err := fiscal.ValidarDocumento(cl.TipoDocumento, cl.Documento); err != nil {
 			return fiscal.Documento{}, fmt.Errorf("%w: %v", ErrReceptorDocumentoInvalido, err)
 		}
+		// El domicilio fiscal es requisito de la factura, y se exige con el MISMO
+		// criterio que el RIF: solo cuando hay un cliente identificado. Al
+		// consumidor final no se le pide ni RIF ni dirección — sería trabar la
+		// venta de mostrador, que es la mayoría del volumen de una bodega.
+		if strings.TrimSpace(cl.Direccion) == "" {
+			return fiscal.Documento{}, fmt.Errorf("%w: «%s»", ErrReceptorSinDireccion, cl.Nombre)
+		}
 		doc.ClienteID = cl.ID
 		doc.ClienteNombre = cl.Nombre
 		doc.ClienteDocumento = cl.TipoDocumento + "-" + cl.Documento
+		doc.ClienteDireccion = strings.TrimSpace(cl.Direccion)
 	}
 	if doc.ClienteNombre == "" {
 		doc.ClienteNombre = "Consumidor final"
@@ -558,6 +570,7 @@ func (s *Service) AnularDocumento(empresaID, sedeID, actor, origen, refID, motiv
 	rev := fiscal.Documento{
 		EmpresaID: empresaID, SedeID: sedeID, Tipo: fiscal.TipoAnulacion, Modalidad: orig.Modalidad,
 		ClienteID: orig.ClienteID, ClienteNombre: orig.ClienteNombre, ClienteDocumento: orig.ClienteDocumento,
+		ClienteDireccion: orig.ClienteDireccion,
 		Lineas: orig.Lineas, Subtotal: -orig.Subtotal, IVA: -orig.IVA, IGTF: -orig.IGTF, Total: -orig.Total,
 		// Las dos bases también se revierten: los libros fiscales se cuadran por
 		// base imponible y base exenta, no solo por el total.
@@ -646,6 +659,7 @@ func (s *Service) EmitirNotaCredito(empresaID, sedeID, actor, origen, refID, mot
 	nc := fiscal.Documento{
 		EmpresaID: empresaID, SedeID: sedeID, Tipo: fiscal.TipoNotaCredito, Modalidad: orig.Modalidad,
 		ClienteID: orig.ClienteID, ClienteNombre: orig.ClienteNombre, ClienteDocumento: orig.ClienteDocumento,
+		ClienteDireccion: orig.ClienteDireccion,
 		// La nota hereda la tasa del original: acredita la misma operación con la
 		// misma conversión. Usar la tasa de hoy descuadraría el asiento.
 		Moneda: orig.Moneda, TasaCambio: orig.TasaCambio, TasaFuente: orig.TasaFuente,
@@ -816,6 +830,7 @@ func (s *Service) EmitirNotaDebito(empresaID, sedeID, actor, origen, refID strin
 	nd := fiscal.Documento{
 		EmpresaID: empresaID, SedeID: sedeID, Tipo: fiscal.TipoNotaDebito, Modalidad: orig.Modalidad,
 		ClienteID: orig.ClienteID, ClienteNombre: orig.ClienteNombre, ClienteDocumento: orig.ClienteDocumento,
+		ClienteDireccion: orig.ClienteDireccion,
 		// La nota hereda la tasa del original: carga sobre la misma operación con la
 		// misma conversión. Usar la tasa de hoy descuadraría contra la factura.
 		Moneda: orig.Moneda, TasaCambio: orig.TasaCambio, TasaFuente: orig.TasaFuente,

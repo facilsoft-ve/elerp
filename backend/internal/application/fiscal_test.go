@@ -1186,3 +1186,116 @@ func TestEmitir_SinMaestroUsaLaTasaDeLaEmpresa(t *testing.T) {
 		t.Errorf("IVA = %v, se esperaban 16 con la tasa de la empresa", doc.IVA)
 	}
 }
+
+/* --- Dirección fiscal del receptor ----------------------------------------
+ *
+ * Nota de la contadora (14:44): «DIRECCIÓN OBLIGATORIA EN FACTURA». Es
+ * requisito de la factura venezolana y se exige con el MISMO criterio que el
+ * RIF: solo al cliente identificado. Al consumidor final no se le pide ni RIF
+ * ni dirección — pedírsela trabaría la venta de mostrador, que es la mayoría
+ * del volumen de una bodega. */
+
+// La dirección se COPIA al documento, igual que el nombre y el RIF: la factura
+// no puede depender de que el cliente siga viviendo en el mismo sitio.
+func TestEmitir_SellaLaDireccionDelReceptor(t *testing.T) {
+	svc, st := nuevoServicio(t)
+	abrirTurno(t, svc, actorA)
+	st.Clientes.Create(cliente.Cliente{
+		ID: "cli_con_dir", EmpresaID: empDemo, Nombre: "Con Dirección, C.A.",
+		TipoDocumento: cliente.DocJ, Documento: "40123456-9",
+		Direccion: "Av. Libertador, Edif. Centro, Piso 2, Caracas", Activo: true,
+	})
+	doc, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		ClienteID: "cli_con_dir",
+		Lineas:    []application.LineaEntrada{{SKU: "REF-2L", Cantidad: 1, PrecioUnitario: 10}},
+		Pagos:     []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 11.6, Moneda: "VES"}},
+	})
+	if err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+	if doc.ClienteDireccion != "Av. Libertador, Edif. Centro, Piso 2, Caracas" {
+		t.Errorf("la dirección no se selló en el documento: %q", doc.ClienteDireccion)
+	}
+}
+
+// Un cliente identificado SIN dirección no puede facturar: es el requisito.
+func TestEmitir_RechazaClienteSinDireccion(t *testing.T) {
+	svc, st := nuevoServicio(t)
+	abrirTurno(t, svc, actorA)
+	st.Clientes.Create(cliente.Cliente{
+		ID: "cli_sin_dir", EmpresaID: empDemo, Nombre: "Sin Dirección, C.A.",
+		TipoDocumento: cliente.DocJ, Documento: "40123456-9", Activo: true,
+	})
+	_, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		ClienteID: "cli_sin_dir",
+		Lineas:    []application.LineaEntrada{{SKU: "REF-2L", Cantidad: 1, PrecioUnitario: 10}},
+		Pagos:     []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 11.6, Moneda: "VES"}},
+	})
+	if !errors.Is(err, application.ErrReceptorSinDireccion) {
+		t.Fatalf("se esperaba ErrReceptorSinDireccion, se obtuvo: %v", err)
+	}
+}
+
+// Una dirección de puros espacios NO es una dirección: si pasara, el requisito
+// se cumpliría con la barra espaciadora.
+func TestEmitir_DireccionEnBlancoNoCuenta(t *testing.T) {
+	svc, st := nuevoServicio(t)
+	abrirTurno(t, svc, actorA)
+	st.Clientes.Create(cliente.Cliente{
+		ID: "cli_dir_blanco", EmpresaID: empDemo, Nombre: "Blanco, C.A.",
+		TipoDocumento: cliente.DocJ, Documento: "40123456-9", Direccion: "   ", Activo: true,
+	})
+	_, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		ClienteID: "cli_dir_blanco",
+		Lineas:    []application.LineaEntrada{{SKU: "REF-2L", Cantidad: 1, PrecioUnitario: 10}},
+		Pagos:     []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 11.6, Moneda: "VES"}},
+	})
+	if !errors.Is(err, application.ErrReceptorSinDireccion) {
+		t.Fatalf("una dirección en blanco no debe pasar: %v", err)
+	}
+}
+
+// EL caso que no se puede romper: el consumidor final sigue facturando. Si esto
+// falla, la bodega no puede vender.
+func TestEmitir_ConsumidorFinalNoNecesitaDireccion(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	abrirTurno(t, svc, actorA)
+	doc, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{{SKU: "REF-2L", Cantidad: 1, PrecioUnitario: 10}},
+		Pagos:  []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 11.6, Moneda: "VES"}},
+	})
+	if err != nil {
+		t.Fatalf("el consumidor final debe poder facturar sin dirección: %v", err)
+	}
+	if doc.ClienteNombre != "Consumidor final" || doc.ClienteDireccion != "" {
+		t.Errorf("consumidor final mal: nombre %q, dirección %q", doc.ClienteNombre, doc.ClienteDireccion)
+	}
+}
+
+// El reverso declara el MISMO receptor que el documento que revierte: si la
+// anulación perdiera la dirección, los dos documentos declararían receptores
+// distintos ante el SENIAT.
+func TestAnular_ConservaLaDireccionDelOriginal(t *testing.T) {
+	svc, st := nuevoServicio(t)
+	abrirTurno(t, svc, actorA)
+	st.Clientes.Create(cliente.Cliente{
+		ID: "cli_anul", EmpresaID: empDemo, Nombre: "Anulable, C.A.",
+		TipoDocumento: cliente.DocJ, Documento: "40123456-9",
+		Direccion: "Calle Real, Galpón 3, Maracay", Activo: true,
+	})
+	doc, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		ClienteID: "cli_anul",
+		Lineas:    []application.LineaEntrada{{SKU: "REF-2L", Cantidad: 1, PrecioUnitario: 10}},
+		Pagos:     []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 11.6, Moneda: "VES"}},
+	})
+	if err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+	rev, err := svc.AnularDocumento(empDemo, sede1, actorA, origenTst, doc.ID, "prueba")
+	if err != nil {
+		t.Fatalf("anular: %v", err)
+	}
+	if rev.ClienteDireccion != doc.ClienteDireccion {
+		t.Errorf("la reversa perdió la dirección: %q vs %q", rev.ClienteDireccion, doc.ClienteDireccion)
+	}
+}
