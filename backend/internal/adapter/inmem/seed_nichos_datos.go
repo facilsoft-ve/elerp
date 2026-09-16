@@ -85,11 +85,21 @@ func restauranteDemo() especNicho {
 			{sku: "INS-LECHUGA", nombre: "Lechuga romana", rubro: "Insumos", costo: 4200, precio: 6300, stock: 10, porPeso: true, insumo: true},
 			{sku: "INS-ACEITE", nombre: "Aceite de oliva", rubro: "Insumos", unidad: "litro", costo: 32000, precio: 46000, stock: 8, insumo: true},
 			{sku: "INS-SAL", nombre: "Sal marina", rubro: "Insumos", costo: 900, precio: 1400, stock: 15, porPeso: true, insumo: true},
-			// Bebidas y postres se venden tal cual (no llevan receta).
+			// Repostería: los postres de la casa se preparan, así que consumen insumos
+			// igual que un plato de cocina. Los que se compran hechos (una barra de
+			// chocolate) se siguen vendiendo tal cual.
+			{sku: "INS-HARINA", nombre: "Harina de trigo", rubro: "Insumos", costo: 1800, precio: 2700, stock: 35, porPeso: true, insumo: true},
+			{sku: "INS-CHOCOLATE", nombre: "Chocolate de cobertura", rubro: "Insumos", costo: 24000, precio: 36000, stock: 6, porPeso: true, insumo: true},
+			{sku: "INS-AZUCAR", nombre: "Azúcar", rubro: "Insumos", costo: 1600, precio: 2400, stock: 40, porPeso: true, insumo: true},
+			{sku: "INS-HUEVO", nombre: "Huevos", rubro: "Insumos", unidad: "unidad", costo: 800, precio: 1200, stock: 180, insumo: true},
+			{sku: "INS-LECHE", nombre: "Leche líquida", rubro: "Insumos", unidad: "litro", costo: 4200, precio: 6300, stock: 24, insumo: true},
+			{sku: "INS-MANTEQUILLA", nombre: "Mantequilla", rubro: "Insumos", costo: 19000, precio: 28000, stock: 5, porPeso: true, insumo: true},
+			// Bebidas: se venden tal cual (no llevan receta).
 			{sku: "BEB-REFRESCO", nombre: "Refresco 355 ml", rubro: "Bebidas", unidad: "unidad", costo: 1100, precio: 2200, stock: 120},
 			{sku: "BEB-AGUA", nombre: "Agua mineral 600 ml", rubro: "Bebidas", unidad: "unidad", costo: 700, precio: 1600, stock: 90},
 			{sku: "BEB-CERVEZA", nombre: "Cerveza nacional 222 ml", rubro: "Bebidas", unidad: "unidad", costo: 1500, precio: 3200, stock: 150},
-			{sku: "POS-TORTA", nombre: "Porción de torta de chocolate", rubro: "Postres", unidad: "unidad", costo: 3800, precio: 8500, stock: 18},
+			// Postre COMPRADO hecho: éste sí es reventa y no lleva receta.
+			{sku: "POS-HELADO", nombre: "Helado en copa", rubro: "Postres", unidad: "unidad", costo: 2600, precio: 6000, stock: 24},
 			// Agotado a propósito: enseña cómo se ve un insumo sin existencia.
 			{sku: "INS-CAMARON", nombre: "Camarón pelado", rubro: "Insumos", costo: 62000, precio: 89000, stock: 0, porPeso: true, insumo: true},
 		},
@@ -97,6 +107,23 @@ func restauranteDemo() especNicho {
 		// PLATOS (escandallo). Las cantidades están en la unidad del insumo: kg para los
 		// que van por peso, litro para el aceite.
 		platos: []platoNicho{
+			// Postres DE LA CASA: llevan receta igual que un plato y salen por la barra
+			// de postres, no por cocina. Es el caso que enseña que "plato con receta"
+			// no significa "comida de cocina".
+			{sku: "POS-TORTA", nombre: "Porción de torta de chocolate", precio: 8500,
+				rubro: "Postres", comandera: "Postres", receta: []inventario.ComboComponente{
+					{SKU: "INS-HARINA", Cantidad: 0.060},
+					{SKU: "INS-CHOCOLATE", Cantidad: 0.040},
+					{SKU: "INS-AZUCAR", Cantidad: 0.050},
+					{SKU: "INS-HUEVO", Cantidad: 1},
+					{SKU: "INS-MANTEQUILLA", Cantidad: 0.030},
+				}},
+			{sku: "POS-QUESILLO", nombre: "Quesillo criollo", precio: 7000,
+				rubro: "Postres", comandera: "Postres", receta: []inventario.ComboComponente{
+					{SKU: "INS-LECHE", Cantidad: 0.120},
+					{SKU: "INS-HUEVO", Cantidad: 2},
+					{SKU: "INS-AZUCAR", Cantidad: 0.060},
+				}},
 			{sku: "PLA-BOLONESA", nombre: "Spaghetti a la boloñesa", precio: 32000, receta: []inventario.ComboComponente{
 				{SKU: "INS-PASTA", Cantidad: 0.140},
 				{SKU: "INS-CARNE", Cantidad: 0.120},

@@ -126,6 +126,13 @@ type Producto struct {
 	// el kilo de pasta cruda. Por eso los insumos quedan fuera de las pantallas de
 	// venta (POS, comandera, ventas y cotizaciones) y no necesitan precio de venta.
 	EsInsumo bool `json:"esInsumo" bson:"esinsumo"`
+	// ComanderaID fija POR QUÉ COMANDERA sale este producto cuando la comanda se
+	// manda a preparación, sin depender de su rubro. Un postre con receta y un plato
+	// de cocina son los dos "platos", pero se preparan en puestos distintos; y dos
+	// postres de la misma carta pueden ir uno a la barra de postres y otro a cocina.
+	// Vacío ⇒ se rutea por el RUBRO (comportamiento de siempre) y, si no encaja en
+	// ninguno, por la comandera predeterminada: así un producto nuevo nunca se pierde.
+	ComanderaID string `json:"comanderaId,omitempty" bson:"comanderaid,omitempty"`
 }
 
 // Movimiento es una entrada inmutable del ledger de inventario.

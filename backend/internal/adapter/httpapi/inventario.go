@@ -108,6 +108,9 @@ func (s *Server) handleCrearProducto(c *fiber.Ctx) error {
 		EsPlato  bool                         `json:"esPlato"`
 		EsInsumo bool                         `json:"esInsumo"`
 		Receta   []inventario.ComboComponente `json:"receta"`
+		// Comandera por la que sale este producto (módulo Restaurante). Vacío =
+		// se rutea por su rubro.
+		ComanderaID string `json:"comanderaId"`
 	}
 	if err := c.BodyParser(&in); err != nil || in.SKU == "" || in.Nombre == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "SKU y nombre requeridos"})
@@ -118,6 +121,7 @@ func (s *Server) handleCrearProducto(c *fiber.Ctx) error {
 		CodigoBarras: in.CodigoBarras, ExentoIVA: in.ExentoIVA,
 		EsCombo: in.EsCombo, Componentes: in.Componentes,
 		EsPlato: in.EsPlato, Receta: in.Receta, EsInsumo: in.EsInsumo,
+		ComanderaID: in.ComanderaID,
 	}
 	out, err := s.svc.CrearProducto(empresaIDOf(c), principalOf(c).UserID, origen(c), p)
 	if err != nil {
@@ -186,6 +190,7 @@ func (s *Server) handleActualizarProducto(c *fiber.Ctx) error {
 		EsPlato     *bool                        `json:"esPlato"`
 		EsInsumo    *bool                        `json:"esInsumo"`
 		Receta      []inventario.ComboComponente `json:"receta"`
+		ComanderaID *string                      `json:"comanderaId"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
@@ -195,7 +200,8 @@ func (s *Server) handleActualizarProducto(c *fiber.Ctx) error {
 		Precio: in.Precio, Moneda: in.Moneda,
 		CodigoBarras: in.CodigoBarras, ExentoIVA: in.ExentoIVA, Activo: in.Activo,
 		EsCombo: in.EsCombo, Componentes: in.Componentes,
-		EsPlato: in.EsPlato, Receta: in.Receta,
+		EsPlato: in.EsPlato, Receta: in.Receta, EsInsumo: in.EsInsumo,
+		ComanderaID: in.ComanderaID,
 	})
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})

@@ -71,6 +71,12 @@ type platoNicho struct {
 	sku, nombre string
 	precio      float64
 	receta      []inventario.ComboComponente
+	// rubro clasifica el plato en la carta. Vacío ⇒ "Cocina". Un postre con receta es
+	// un plato igual que un pabellón: lo que cambia es dónde se prepara.
+	rubro string
+	// comandera fija el puesto por el que sale su comanda, por NOMBRE (el id se
+	// genera al sembrar). Vacío ⇒ se rutea por su rubro.
+	comandera string
 }
 
 type cliNicho struct {
@@ -223,9 +229,16 @@ func (s *Store) seedEmpresaNicho(e especNicho) {
 
 	// Platos: producto compuesto, se vende por unidad y NO se stockea (su existencia
 	// sale de los insumos al facturar).
+	// La comandera de cada plato se resuelve DESPUÉS (asignarComanderasAPlatos): los
+	// puestos se siembran en seedOperacionNicho, que corre más abajo, y sus ids se
+	// generan al crearlos.
 	for _, pl := range e.platos {
+		rubro := pl.rubro
+		if rubro == "" {
+			rubro = "Cocina"
+		}
 		s.Productos.Create(inventario.Producto{
-			EmpresaID: e.empID, SKU: pl.sku, Nombre: pl.nombre, Rubro: "Cocina",
+			EmpresaID: e.empID, SKU: pl.sku, Nombre: pl.nombre, Rubro: rubro,
 			UnidadBase: "unidad", TipoVenta: inventario.TipoVentaUnidad, Precio: pl.precio,
 			EsPlato: true, Receta: pl.receta, Activo: true,
 		})

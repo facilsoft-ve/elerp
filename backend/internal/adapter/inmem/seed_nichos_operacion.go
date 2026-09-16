@@ -186,6 +186,11 @@ func (s *Store) seedOperacionNicho(e especNicho) {
 		})
 	}
 
+	// Con los puestos ya creados se puede fijar la comandera de los platos que la
+	// declaran por nombre (un postre con receta sale por la barra de postres, no por
+	// cocina). Va acá y no en el catálogo porque los ids nacen al crear el puesto.
+	s.asignarComanderasAPlatos(e)
+
 	// --- Un mes de facturación ---
 	s.seedFacturacionNicho(e)
 
@@ -484,4 +489,28 @@ func em0Dias(d fiscal.Documento) int {
 		return 1
 	}
 	return dias - 1
+}
+
+// asignarComanderasAPlatos fija en cada plato el puesto por el que sale su comanda,
+// resolviendo por NOMBRE el id que se generó al sembrar las comanderas.
+func (s *Store) asignarComanderasAPlatos(e especNicho) {
+	porNombre := map[string]string{}
+	for _, i := range s.Impresoras.List(e.empID, e.sedeID) {
+		porNombre[i.Nombre] = i.ID
+	}
+	for _, pl := range e.platos {
+		if pl.comandera == "" {
+			continue
+		}
+		id, ok := porNombre[pl.comandera]
+		if !ok {
+			continue
+		}
+		p, ok := s.Productos.BySKU(e.empID, pl.sku)
+		if !ok {
+			continue
+		}
+		p.ComanderaID = id
+		s.Productos.Update(p)
+	}
 }

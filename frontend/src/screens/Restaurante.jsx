@@ -946,6 +946,9 @@ function PlatosRecetas() {
 
   const costoDe = (sku) => Number(existencias.find((x) => x.sku === sku)?.costoPromedio) || 0
   const platos = productos.filter((p) => p.esPlato)
+  // Rubros que ya existen en el catálogo: una receta de postre se clasifica igual que
+  // un postre de reventa, y así el ruteo por rubro sigue funcionando sin configurar nada.
+  const rubros = [...new Set(productos.map((p) => (p.rubro || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'))
   const insumosPosibles = productos.filter((p) => !p.esCombo && !p.esPlato && p.activo !== false)
   const costoReceta = (receta) => (receta || []).reduce((a, r) => a + costoDe(r.sku) * (Number(r.cantidad) || 0), 0)
 
@@ -979,7 +982,14 @@ function PlatosRecetas() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="font-display font-semibold text-[14px] truncate">{p.nombre}</div>
-                    <div className="text-[11.5px] text-slate-500">{(p.receta || []).length} insumo(s)</div>
+                    <div className="text-[11.5px] text-slate-500">
+                      {(p.receta || []).length} insumo(s)
+                      {p.rubro ? ` · ${p.rubro}` : ''}
+                    </div>
+                    <div className="text-[11px] text-slate-400 truncate">
+                      Sale por {(db.IMPRESORAS_COMANDAS || []).find((i) => i.id === p.comanderaId)?.nombre
+                        || (p.rubro ? `la comandera de ${p.rubro}` : 'la comandera predeterminada')}
+                    </div>
                   </div>
                   <Badge size="sm" color="huberp">Plato</Badge>
                 </div>
@@ -1007,16 +1017,18 @@ function PlatosRecetas() {
       )}
 
       {form ? <PlatoModal plato={form.sku ? form : null} insumos={insumosPosibles} monedaEmpresa={monedaEmpresa}
+        rubros={rubros} comanderas={db.IMPRESORAS_COMANDAS || []}
         costoDe={costoDe} onClose={() => setForm(null)} onGuardado={() => { setForm(null); reload() }} toast={toast} /> : null}
     </div>
   )
 }
 
-function PlatoModal({ plato, insumos, monedaEmpresa, costoDe, onClose, onGuardado, toast }) {
+function PlatoModal({ plato, insumos, monedaEmpresa, rubros = [], comanderas = [], costoDe, onClose, onGuardado, toast }) {
   const editar = !!plato
   const [f, setF] = useState(() => ({
     sku: plato?.sku || '', nombre: plato?.nombre || '', precio: plato?.precio || 0,
     exentoIva: !!plato?.exentoIva, receta: (plato?.receta || []).map((r) => ({ ...r })),
+    rubro: plato?.rubro || '', comanderaId: plato?.comanderaId || '',
   }))
   const [busy, setBusy] = useState(false)
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
@@ -1032,10 +1044,16 @@ function PlatoModal({ plato, insumos, monedaEmpresa, costoDe, onClose, onGuardad
     setBusy(true)
     try {
       if (editar) {
-        await api.actualizarProducto(f.sku, { nombre: f.nombre.trim(), precio: Number(f.precio) || 0, exentoIva: f.exentoIva, esPlato: true, receta })
+        await api.actualizarProducto(f.sku, {
+          nombre: f.nombre.trim(), precio: Number(f.precio) || 0, exentoIva: f.exentoIva,
+          esPlato: true, receta, rubro: f.rubro, comanderaId: f.comanderaId,
+        })
       } else {
         const sku = (f.sku || ('PLATO-' + Date.now().toString(36).toUpperCase())).trim()
-        await api.createProducto({ sku, nombre: f.nombre.trim(), precio: Number(f.precio) || 0, moneda: monedaEmpresa, exentoIva: f.exentoIva, esPlato: true, receta })
+        await api.createProducto({
+          sku, nombre: f.nombre.trim(), precio: Number(f.precio) || 0, moneda: monedaEmpresa,
+          exentoIva: f.exentoIva, esPlato: true, receta, rubro: f.rubro, comanderaId: f.comanderaId,
+        })
       }
       toast({ title: editar ? 'Plato actualizado' : 'Plato creado', body: f.nombre })
       onGuardado()
@@ -1050,6 +1068,24 @@ function PlatoModal({ plato, insumos, monedaEmpresa, costoDe, onClose, onGuardad
         <div className="grid grid-cols-2 gap-2">
           <Field label="Nombre del plato"><Input autoFocus value={f.nombre} onChange={(e) => set('nombre', e.target.value)} placeholder="Pabellón criollo" /></Field>
           <Field label="Precio de menú (Bs)"><Input type="number" min={0} value={f.precio} onChange={(e) => set('precio', e.target.value)} /></Field>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {/* Una receta no es solo comida de cocina: un postre, un jugo natural o un
+              trago llevan receta igual. El rubro los clasifica y, si hace falta, la
+              comandera manda el ticket al puesto que los prepara. */}
+          <Field label="Rubro" hint="Clasifica el plato en la carta (Cocina, Postres, Bebidas…).">
+            <Select value={f.rubro} onChange={(e) => set('rubro', e.target.value)}>
+              <option value="">Sin rubro</option>
+              {rubros.map((r) => <option key={r} value={r}>{r}</option>)}
+            </Select>
+          </Field>
+          <Field label="¿Por qué comandera sale?"
+            hint="Un postre puede ir a la barra de postres aunque comparta rubro con cocina.">
+            <Select value={f.comanderaId} onChange={(e) => set('comanderaId', e.target.value)}>
+              <option value="">Según su rubro</option>
+              {comanderas.map((i) => <option key={i.id} value={i.id}>{i.nombre}</option>)}
+            </Select>
+          </Field>
         </div>
         <div>
           <div className="flex items-center justify-between mb-1.5">

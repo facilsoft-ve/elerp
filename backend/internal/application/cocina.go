@@ -178,12 +178,22 @@ func (s *Service) repartirComanda(empresaID, sedeID string, items []cuenta.Item)
 		return []ComandaImpresa{{Items: items}}
 	}
 
-	// Rubro de cada SKU (una sola pasada por el catálogo).
+	// Rubro y comandera fija de cada SKU (una sola pasada por el catálogo).
 	rubroDe := map[string]string{}
+	comanderaDe := map[string]string{}
 	if s.productos != nil {
 		for _, p := range s.productos.List(empresaID) {
 			rubroDe[p.SKU] = p.Rubro
+			if p.ComanderaID != "" {
+				comanderaDe[p.SKU] = p.ComanderaID
+			}
 		}
+	}
+	// Índice de las comanderas de esta sede: una comandera fijada en el producto que
+	// ya no existe (o que es de otra sede) NO puede tragarse el renglón en silencio.
+	existe := make(map[string]int, len(impresoras))
+	for i := range impresoras {
+		existe[impresoras[i].ID] = i
 	}
 
 	porImpresora := map[string][]cuenta.Item{}
@@ -200,6 +210,18 @@ func (s *Service) repartirComanda(empresaID, sedeID string, items []cuenta.Item)
 
 	for _, it := range items {
 		destino := predeterminada
+		// 1) La comandera fijada en el producto manda (un postre va a su barra
+		// aunque comparta rubro con la cocina).
+		if id := comanderaDe[it.SKU]; id != "" {
+			if i, ok := existe[id]; ok {
+				porImpresora[impresoras[i].ID] = append(porImpresora[impresoras[i].ID], it)
+				continue
+			}
+			// Apuntaba a una comandera que ya no está (se borró el puesto): en vez de
+			// perder el renglón, se rutea como cualquier otro producto — por su rubro
+			// y, si tampoco encaja, por la predeterminada.
+		}
+		// 2) Si no, por el RUBRO del producto.
 		for i := range impresoras {
 			if impresoras[i].ImprimeRubro(rubroDe[it.SKU]) {
 				destino = &impresoras[i]

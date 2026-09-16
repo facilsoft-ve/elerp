@@ -327,6 +327,9 @@ type CambiosProducto struct {
 	EsPlato      *bool
 	Receta       []inventario.ComboComponente
 	EsInsumo     *bool
+	// ComanderaID es *string: nil = no enviado = no se toca; "" vacía la elección y
+	// devuelve el producto al ruteo por rubro.
+	ComanderaID *string
 }
 
 // ActualizarProducto edita los datos del catálogo (nombre, precio, moneda, IVA,
@@ -355,6 +358,11 @@ func (s *Service) ActualizarProducto(empresaID, actor, origen, sku string, cambi
 	}
 	if cambios.Rubro != "" {
 		p.Rubro = cambios.Rubro
+	}
+	// Comandera fija del producto (módulo Restaurante). Vaciarla es una acción
+	// válida: vuelve a rutearse por su rubro.
+	if cambios.ComanderaID != nil {
+		p.ComanderaID = strings.TrimSpace(*cambios.ComanderaID)
 	}
 	// Forma de venta: vacío = no se toca; si viene se valida y, cuando es "peso",
 	// se fuerza la unidad base a "kg".
