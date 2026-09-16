@@ -60,6 +60,8 @@ type Store struct {
 	Impresoras       *ImpresoraRepo
 	Cuentas          *CuentaRepo
 	Reservas         *ReservaRepo
+	Mesoneros        *MesoneroRepo
+	Turnos           *TurnoRepo
 }
 
 // New arma el Store cableando cada repo a su colección.
@@ -94,6 +96,7 @@ func New(db *gomongo.Database) *Store {
 	st.attachImpresoras(db)   // definido en cocina.go
 	st.attachCuentas(db)      // definido en cuenta.go
 	st.attachReservas(db)     // definido en reserva.go
+	st.attachMesoneros(db)    // definido en mesonero.go (credenciales + turnos)
 	return st
 }
 

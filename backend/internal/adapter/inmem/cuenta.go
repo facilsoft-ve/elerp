@@ -49,6 +49,23 @@ func (r *CuentaRepo) AbiertaDeMesa(empresaID, mesaID string) (cuenta.Cuenta, boo
 	return cuenta.Cuenta{}, false
 }
 
+// DeTurno son las cuentas del turno, en cualquier estado: el resumen del turno
+// se pliega de acá, así que una cuenta anulada también tiene que poder verse.
+func (r *CuentaRepo) DeTurno(empresaID, turnoID string) []cuenta.Cuenta {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := []cuenta.Cuenta{}
+	if turnoID == "" {
+		return out
+	}
+	for _, c := range r.items {
+		if c.EmpresaID == empresaID && c.TurnoID == turnoID {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func (r *CuentaRepo) Create(c cuenta.Cuenta) cuenta.Cuenta {
 	r.mu.Lock()
 	defer r.mu.Unlock()

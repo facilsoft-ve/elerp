@@ -20,6 +20,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/legal"
 	"github.com/mornix/elerp/internal/domain/listaprecio"
 	"github.com/mornix/elerp/internal/domain/mesa"
+	"github.com/mornix/elerp/internal/domain/mesonero"
 	"github.com/mornix/elerp/internal/domain/plantilla"
 	"github.com/mornix/elerp/internal/domain/promocion"
 	"github.com/mornix/elerp/internal/domain/proveedor"
@@ -153,6 +154,12 @@ type Service struct {
 	// reservas son las RESERVACIONES del salón (módulo Restaurante). Opcional: sin
 	// cablear, las pantallas de reservas quedan apagadas y el resto funciona igual.
 	reservas reserva.Repository
+	// mesoneros son las CREDENCIALES de turno del salón y turnos sus JORNADAS
+	// (módulo Restaurante). Se cablean con ConMesoneros; ver mesonero.go. Sin
+	// cablear, el salón trabaja sin turnos —como antes— y el candado que exige
+	// tener uno para tomar mesas queda apagado.
+	mesoneros mesonero.Repository
+	turnos    mesonero.TurnoRepository
 }
 
 // New construye el Service con sus puertos (el orden debe coincidir con cmd/api).

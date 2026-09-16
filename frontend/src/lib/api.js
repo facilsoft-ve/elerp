@@ -448,6 +448,22 @@ export const api = {
   guardarAsignacionMesas: (body) => request('/api/restaurante/asignaciones', { method: 'PUT', body: JSON.stringify(body) }),
   configSalon: () => request('/api/restaurante/config'),
   guardarConfigSalon: (body) => request('/api/restaurante/config', { method: 'PUT', body: JSON.stringify(body) }),
+  // ---- Restaurante › Turnos del salón ----
+  // Credenciales de mesonero (MS-) y sus turnos. El PIN del mesonero y el del
+  // supervisor viajan en el cuerpo y los valida el SERVIDOR: la pantalla nunca
+  // decide si un PIN sirve. Un PIN equivocado vuelve como 403 (403 y no 401: la
+  // sesión es válida, lo que falló es una autorización puntual).
+  mesonerosSalon: () => request('/api/restaurante/salon/mesoneros'),
+  crearMesoneroSalon: (body) => request('/api/restaurante/salon/mesoneros', { method: 'POST', body: JSON.stringify(body) }),
+  actualizarMesoneroSalon: (id, body) => request(`/api/restaurante/salon/mesoneros/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  fijarPinMesonero: (id, body) => request(`/api/restaurante/salon/mesoneros/${encodeURIComponent(id)}/pin`, { method: 'POST', body: JSON.stringify(body) }),
+  turnosSalon: () => request('/api/restaurante/salon/turnos'),
+  historialTurnos: () => request('/api/restaurante/salon/turnos/historial'),
+  iniciarTurno: (body) => request('/api/restaurante/salon/turnos', { method: 'POST', body: JSON.stringify(body) }),
+  finalizarTurno: (id) => request(`/api/restaurante/salon/turnos/${encodeURIComponent(id)}/finalizar`, { method: 'POST' }),
+  relevosTurno: (id) => request(`/api/restaurante/salon/turnos/${encodeURIComponent(id)}/relevos`),
+  forzarCierreTurno: (id, body) => request(`/api/restaurante/salon/turnos/${encodeURIComponent(id)}/forzar-cierre`, { method: 'POST', body: JSON.stringify(body) }),
+
   impresorasComandas: () => request('/api/restaurante/impresoras'),
   guardarImpresora: (body) => request('/api/restaurante/impresoras', { method: 'PUT', body: JSON.stringify(body) }),
   eliminarImpresora: (id) => request(`/api/restaurante/impresoras/${encodeURIComponent(id)}`, { method: 'DELETE' }),

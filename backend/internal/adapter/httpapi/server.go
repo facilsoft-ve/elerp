@@ -155,6 +155,7 @@ func NewServer(cfg config.Config, svc *application.Service, tenancy *application
 	s.registerUnidades(data)
 	s.registerFormatos(data)
 	s.registerRestaurante(data)
+	s.registerTurnosSalon(data)
 	s.registerAlmacenes(data)
 	s.registerAplicaciones(data)
 	s.registerReportes(data)

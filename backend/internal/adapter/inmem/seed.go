@@ -85,6 +85,8 @@ type Store struct {
 	Impresoras       *ImpresoraRepo
 	Cuentas          *CuentaRepo
 	Reservas         *ReservaRepo
+	Mesoneros        *MesoneroRepo
+	Turnos           *TurnoRepo
 }
 
 // IDs fijos del seed demo (facilitan que el frontend seleccione contexto).
@@ -129,6 +131,8 @@ func New() *Store {
 		Impresoras:   NewImpresoraRepo(),
 		Cuentas:      NewCuentaRepo(),
 		Reservas:     NewReservaRepo(),
+		Mesoneros:    NewMesoneroRepo(),
+		Turnos:       NewTurnoRepo(),
 	}
 	s.seedDemo()
 	// Demos por RUBRO (restaurante, ferretería, farmacia): ver seed_nichos.go.

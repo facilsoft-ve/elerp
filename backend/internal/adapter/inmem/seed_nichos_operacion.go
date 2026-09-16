@@ -16,6 +16,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/inventario"
 	"github.com/mornix/elerp/internal/domain/mesa"
+	"github.com/mornix/elerp/internal/domain/mesonero"
 	"github.com/mornix/elerp/internal/domain/proveedor"
 	"github.com/mornix/elerp/internal/domain/tasa"
 	"github.com/mornix/elerp/internal/domain/usuario"
@@ -122,6 +123,15 @@ func (s *Store) seedOperacionNicho(e especNicho) {
 					Zonas: []string{e.zonasMesoneros[i]}, Mesas: []string{}, Actualizada: fecha,
 				})
 			}
+			// Credencial de TURNO (MS-), con su PIN ya fijado: así la pantalla de
+			// Turnos del salón se ve en uso desde el primer minuto y se puede probar
+			// el flujo completo (tocar el nombre → PIN → PIN de supervisor). Sin
+			// esto la grilla arranca vacía y no se entiende para qué sirve.
+			s.Mesoneros.Create(mesonero.Mesonero{
+				ID: "msn_" + slug + "_" + sufijo, EmpresaID: e.empID, SedeID: e.sedeID,
+				Codigo: fmt.Sprintf("MS-%03d", i+1), Nombre: nombre, UsuarioID: id,
+				PinHash: hashDemo(), Activo: true, Creado: fecha,
+			})
 		}
 	}
 

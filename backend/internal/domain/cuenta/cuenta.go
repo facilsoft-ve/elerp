@@ -95,6 +95,12 @@ type Cuenta struct {
 	// DocumentoID es la factura emitida al cerrar (fase fiscal); vacío mientras
 	// tanto.
 	DocumentoID string `json:"documentoId" bson:"documentoid"`
+	// TurnoID es el turno del mesonero que abrió la cuenta (mesonero.Turno).
+	// Se estampa al abrir y no cambia — igual que la sesión de caja se estampa en
+	// el documento fiscal. Es lo que permite PLEGAR el resumen del turno al
+	// cerrarlo (mesas, personas, órdenes, ticket) en vez de llevar contadores.
+	// Vacío cuando la cuenta la abrió alguien sin turno (la dueña, el cajero).
+	TurnoID string `json:"turnoId,omitempty" bson:"turnoid,omitempty"`
 }
 
 // Total de la cuenta en Bs (suma de renglones no cancelados). Es una PROYECCIÓN,
@@ -145,6 +151,10 @@ type Repository interface {
 	ByID(empresaID, id string) (Cuenta, bool)
 	// AbiertaDeMesa devuelve la cuenta abierta de una mesa, si existe.
 	AbiertaDeMesa(empresaID, mesaID string) (Cuenta, bool)
+	// DeTurno devuelve TODAS las cuentas de un turno (abiertas y cerradas). Es la
+	// fuente del resumen que se congela al cerrar el turno, y la que responde
+	// «¿le queda alguna mesa por cerrar?» durante el cierre suave.
+	DeTurno(empresaID, turnoID string) []Cuenta
 	Create(c Cuenta) Cuenta
 	Update(c Cuenta) (Cuenta, bool)
 }

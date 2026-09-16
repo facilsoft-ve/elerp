@@ -8,6 +8,7 @@ import { RestauranteInicio } from './RestauranteInicio.jsx'
 import { Reservaciones } from './Reservaciones.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
+import { TurnosSalon } from './TurnosSalon.jsx'
 import { SelectorModelo, NotaCatalogo } from '../components/dispositivo.jsx'
 import { precioEnBs, monedaDe } from '../lib/precio.js'
 import { fmtCurrency } from '../lib/format.js'
@@ -84,6 +85,7 @@ const TABS = [
   { id: 'comandera', label: 'Comandera', icon: <Icon.ClipboardList size={15} />, mesonero: true },
   { id: 'reservas', label: 'Reservaciones', icon: <Icon.Users size={15} />, mesonero: true },
   { id: 'mesas', label: 'Mapa de mesas', icon: <Icon.Utensils size={15} /> },
+  { id: 'turnos', label: 'Turnos del salón', icon: <Icon.Clock size={15} />, mesonero: true },
   { id: 'mesoneros', label: 'Mesoneros y asignación', icon: <Icon.Users size={15} /> },
   { id: 'cocina', label: 'Cocina', icon: <Icon.Activity size={15} /> },
   { id: 'platos', label: 'Platos y recetas', icon: <Icon.Boxes size={15} /> },
@@ -98,6 +100,7 @@ const SUBTITULO = {
   comandera: 'Toma el pedido de cada mesa y envíalo a cocina. Cuando pidan la cuenta, prefactura y la caja cobra.',
   reservas: 'La agenda del salón: toma reservas y, cuando llegan, verifica por nombre o cédula y siéntalos (se abre su cuenta).',
   mesas: 'Diseña el salón sobre una grilla: ubica las mesas, bloquea los espacios donde no puede haber ninguna y fija cuántas personas caben.',
+  turnos: 'Quién entra a trabajar: toca tu nombre y teclea tu PIN. Cada turno lo autoriza un supervisor, y al terminar queda registrado con lo que atendiste.',
   mesoneros: 'Asigna a cada mesonero las mesas o las zonas que atiende. Sin asignar, cualquiera atiende cualquier mesa.',
   cocina: 'Las comandas entrantes en vivo, con su nota y su tiempo de espera. Marca cada plato listo cuando salga.',
   platos: 'Los platos con su receta (escandallo): al venderlos se descuentan sus insumos del inventario.',
@@ -124,6 +127,7 @@ export function Restaurante({ route }) {
       {tab === 'comandera' ? <Comandera /> : null}
       {tab === 'reservas' ? <Reservaciones /> : null}
       {tab === 'mesas' ? <MapaMesas /> : null}
+      {tab === 'turnos' ? <TurnosSalon /> : null}
       {tab === 'mesoneros' ? <MesonerosAsignacion /> : null}
       {tab === 'cocina' ? <Cocina /> : null}
       {tab === 'platos' ? <PlatosRecetas /> : null}
