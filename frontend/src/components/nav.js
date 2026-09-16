@@ -37,6 +37,9 @@ export const NAV = [
       // El mesonero no lo tiene: él solo alcanza la Comandera.
       { id: 'inicio', label: 'Resumen del salón', grupo: 'Salón', roles: TODOS },
       { id: 'comandera', label: 'Comandera', grupo: 'Salón' },
+      // Reservaciones SIN `roles`: la ve cualquiera que alcance el módulo, mesonero
+      // incluido. Quien recibe en la puerta es del salón.
+      { id: 'reservas', label: 'Reservaciones', grupo: 'Salón' },
       { id: 'mesas', label: 'Mapa de mesas', grupo: 'Salón', roles: TODOS },
       { id: 'mesoneros', label: 'Mesoneros y asignación', grupo: 'Salón', roles: TODOS },
       { id: 'cocina', label: 'Cocina', grupo: 'Cocina', roles: TODOS },
