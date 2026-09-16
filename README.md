@@ -146,14 +146,42 @@ La suite (~257 funciones de prueba en Go + 115 en el frontend) cubre:
   (sidebar/topbar con selector Org▸Empresa▸Sede), Login/Onboarding/Dashboard,
   Inventario (Catálogo/Existencias/Kardex/Transferencias), **Fiscal (POS +
   Documentos)**, Clientes, command palette (Ctrl/⌘+K), y placeholders para el resto.
+- ✅ **Catálogo de dispositivos del mercado venezolano**: al configurar una
+  impresora fiscal, una balanza o una comandera, la marca y el modelo se eligen
+  de una lista precargada (The Factory HKA, Aclas, Bematech, Epson, Dascom,
+  Bixolon, Vmax, Hasar; balanzas Torrey/Aclas/Excell…; térmicas ESC/POS).
+  Elegir un modelo **normaliza la grafía** en el servidor y **precarga la
+  conexión** (protocolo y puerto de la balanza, ancho del rollo de la comandera).
+  Es dato versionado con su fecha de revisión, no código: la homologación
+  vigente la define el SENIAT y la lista solo ayuda a elegir. Un modelo fuera de
+  la lista se acepta igual.
+- ✅ **Turnos del salón** (módulo Restaurante): el mesonero ya no entra con
+  correo y contraseña sino con una **credencial de puesto** (`MS-001` + PIN),
+  espejo de `caja.Cajero`. Dos reglas en el servidor: **todo turno lo valida un
+  supervisor con su PIN** (sin turno vivo el PIN no abre nada — eso cierra el
+  «de madrugada, desde la casa»), y el turno **no se apaga de golpe**: pasa por
+  `cerrando` (no toma mesas nuevas, termina las suyas) y se cierra **solo** al
+  cerrarse la última cuenta. Nunca sale un enlace a un correo ni a un teléfono
+  personal: el PIN lo elige su dueño en la tablet y el supervisor lo autoriza —
+  la prueba de identidad es la presencia física, y queda auditada. Al forzar un
+  cierre el **relevo es obligatorio** y se sugiere a quien menos mesas tiene.
+  Cada jornada guarda su **resumen congelado** (tiempo, mesas, personas,
+  órdenes, facturado y ticket promedio), derivado de las cuentas del turno.
+- ✅ **Horarios y tiempo extra**: patrón semanal por mesonero, con tramos que
+  **cruzan medianoche** (18:00→01:00, lo normal en un restaurante). La sede
+  elige entre **avisar** o **cerrar solo** al vencer. El tiempo extra lo aprueba
+  un supervisor con su PIN; si el turno había entrado en cierre suave *por
+  horario*, extenderlo lo devuelve a abierto — si lo mandó a cerrar *una
+  persona*, no.
 - ⏳ **Diferido** (requiere hardware / trámite / decisión): **homologación SENIAT**
-  —integración real de impresora fiscal vía agente local, número de control,
-  exportaciones oficiales TXT/XML de libros y sello de integridad diario
-  (OpenTimestamps)— y **Cierre Z** atado al turno (se prueban con la impresora);
-  enlaces de pago y ejecución real del pago móvil (pasarelas), envío real de
-  PDF/correo/WhatsApp, portal público de verificación, endurecimiento de
-  `DEV_LOGIN`, RRHH/Nómina, Reportes/BI, Super Admin, conciliación bancaria, MFA,
-  offline-first real y motor de reglas fiscales versionadas.
+  —integración real de impresora fiscal vía agente local, exportaciones
+  oficiales TXT/XML de libros y sello de integridad diario (OpenTimestamps)— y
+  **Cierre Z** atado al turno (se prueban con la impresora); enlaces de pago y
+  ejecución real del pago móvil (pasarelas), envío real de PDF/correo/WhatsApp,
+  portal público de verificación, endurecimiento de `DEV_LOGIN`, RRHH/Nómina,
+  Super Admin (la superficie M2M `/internal/*` existe; falta la pantalla),
+  conciliación bancaria, MFA, offline-first real y motor de reglas fiscales
+  versionadas.
 
 ## Cómo correr
 

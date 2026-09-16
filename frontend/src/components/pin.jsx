@@ -122,3 +122,38 @@ export function PedirPin({ icono, titulo, sub, onEnviar, onCancelar, tono = 'ele
     </div>
   )
 }
+
+
+/* ubicacionActual pide la posición al navegador para la PRESENCIA ESTRICTA.
+ *
+ * Nunca lanza: si el permiso se niega, el GPS no responde o el navegador no
+ * tiene la API, devuelve null y el servidor decide qué hacer con eso (ofrecer la
+ * excepción del supervisor). Una pantalla que se cuelgue esperando al GPS
+ * dejaría al salón sin poder abrir turnos, que es peor que no verificar.
+ *
+ * `enableHighAccuracy` está encendido porque acá importan los metros, y el
+ * timeout es corto: de pie, en la puerta, nadie espera diez segundos.
+ */
+export function ubicacionActual({ timeoutMs = 8000 } = {}) {
+  return new Promise((resolve) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) { resolve(null); return }
+    let resuelto = false
+    const listo = (v) => { if (!resuelto) { resuelto = true; resolve(v) } }
+    // Red de seguridad propia: algunos navegadores ignoran su propio timeout.
+    const t = setTimeout(() => listo(null), timeoutMs + 1000)
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        clearTimeout(t)
+        listo({
+          lat: p.coords.latitude,
+          lon: p.coords.longitude,
+          // La precisión que declara el navegador: el servidor la usa a favor de
+          // quien consulta (con un tope, para que nadie la infle).
+          precisionM: p.coords.accuracy || 0,
+        })
+      },
+      () => { clearTimeout(t); listo(null) },
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 30000 },
+    )
+  })
+}

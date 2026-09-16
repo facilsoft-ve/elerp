@@ -401,12 +401,19 @@ func rolesMatrix() map[string]map[string]string {
 
 // registerPresencia monta la configuración de presencia estricta. Se llama
 // desde server.go junto al resto de rutas de tenencia.
-// Toma los dos grupos porque los ajustes viven en planos distintos: la
-// ubicación es administración de la EMPRESA (va por :id, sin contexto de
-// tenant, como el resto de las rutas de sede) y los roles son configuración del
-// tenant ya resuelto (grupo `data`, con empresaContext).
-func (s *Server) registerPresencia(api, data fiber.Router) {
+// Los dos ajustes viven en PLANOS distintos y por eso se registran por separado:
+//
+//   - la ubicación es administración de la EMPRESA y va por :id, SIN contexto de
+//     tenant, como el resto de las rutas de sede. Tiene que registrarse ANTES de
+//     que se cree el grupo `data`: ese grupo monta `empresaContext` sobre el
+//     mismo prefijo, así que todo lo que se registre después lo hereda y la ruta
+//     empezaría a exigir el header X-Empresa-ID que no usa.
+//   - los roles son configuración del tenant ya resuelto (grupo `data`).
+func (s *Server) registerPresenciaSedes(api fiber.Router) {
 	api.Put("/empresas/:id/sedes/:sedeId/ubicacion", s.handleUbicacionSede)
+}
+
+func (s *Server) registerPresenciaConfig(data fiber.Router) {
 	data.Put("/empresa/config/presencia", s.requireRoles(usuario.RolDueno, usuario.RolDesarrollador), s.handleRolesPresencia)
 }
 

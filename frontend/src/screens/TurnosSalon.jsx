@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Icon } from '../components/Icon.jsx'
 import { Button, Badge, Empty, Modal, Field, Input, Select, Segmented, useToast, useConfirm } from '../components/primitives.jsx'
-import { PedirPin } from '../components/pin.jsx'
+import { PedirPin, ubicacionActual } from '../components/pin.jsx'
 import { useRecurso, EstadoRecurso } from '../lib/useRecurso.jsx'
 import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
@@ -199,8 +199,39 @@ function ModalEntrada({ flujo, setFlujo, onListo }) {
           sub="Un supervisor tiene que validar el inicio del turno con su PIN."
           onCancelar={cerrar}
           onEnviar={async (pinSup) => {
-            const t = await api.iniciarTurno({ mesoneroId: m.id, pin: flujo.pin, pinSupervisor: pinSup })
-            toast({ title: `Turno abierto · ${m.nombre}`, body: `Validó ${t.validadoPor}.` })
+            // Si la empresa exige PRESENCIA ESTRICTA para este rol, el servidor
+            // compara esta posición contra la de la sede. Se pide siempre: pedirla
+            // solo cuando hace falta obligaría a la pantalla a saber la
+            // configuración, y eso lo decide el servidor.
+            const pos = await ubicacionActual()
+            try {
+              const t = await api.iniciarTurno({ mesoneroId: m.id, pin: flujo.pin, pinSupervisor: pinSup, pos })
+              toast({ title: `Turno abierto · ${m.nombre}`, body: `Validó ${t.validadoPor}.` })
+              onListo()
+            } catch (e) {
+              // Sin ubicación NO se tranca el salón: el supervisor puede autorizar
+              // la excepción declarando el motivo, y eso queda auditado. Fuera de
+              // la sede, en cambio, es un rechazo y no se ofrece salida.
+              if (e?.codigo === 'sin_ubicacion') {
+                setFlujo({ paso: 'excepcion', m, pin: flujo.pin, pinSup })
+                return
+              }
+              throw e
+            }
+          }} />
+
+      // La excepción de presencia pide un MOTIVO, no otro PIN: el supervisor ya
+      // acaba de teclear el suyo. Lo que hace falta es que quede escrito por qué,
+      // para poder ver después a quién le hace falta la excepción todas las noches.
+      case 'excepcion':
+        return <MotivoExcepcion mesonero={m} onCancelar={cerrar}
+          onEnviar={async (motivo) => {
+            const pos = await ubicacionActual()
+            const t = await api.iniciarTurno({
+              mesoneroId: m.id, pin: flujo.pin, pinSupervisor: flujo.pinSup,
+              pos, excepcionMotivo: motivo,
+            })
+            toast({ title: `Turno abierto · ${m.nombre}`, body: `Validó ${t.validadoPor} · excepción registrada.` })
             onListo()
           }} />
 
@@ -870,6 +901,54 @@ function Historial() {
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+/* MotivoExcepcion se muestra cuando el navegador no pudo dar la ubicación y la
+ * empresa exige presencia estricta. NO es un atajo: exige que el supervisor
+ * escriba por qué, y el servidor lo audita con su nombre. Sin esto habría que
+ * elegir entre trancar el salón cuando el GPS falla —que pasa: bajo techo, sin
+ * permiso, sin señal— o no verificar nada. */
+function MotivoExcepcion({ mesonero: m, onEnviar, onCancelar }) {
+  const [motivo, setMotivo] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const enviar = async () => {
+    if (motivo.trim().length < 4) { setError('Escribe el motivo: queda en el registro.'); return }
+    setBusy(true); setError('')
+    try {
+      await onEnviar(motivo.trim())
+    } catch (e) {
+      setError(e?.message || 'No se pudo autorizar.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="text-center">
+      <div className="h-12 w-12 rounded-full inline-flex items-center justify-center bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+        <Icon.Globe size={22} />
+      </div>
+      <div className="text-[16px] font-semibold mt-2.5">No se pudo verificar la ubicación</div>
+      <div className="text-[12.5px] text-slate-500 mt-1">
+        El equipo no dio su posición (sin permiso, sin señal o bajo techo). Un supervisor puede
+        dejar entrar a {m.nombre.split(' ')[0]} declarando por qué.
+      </div>
+      <div className="mt-4 text-left">
+        <Field label="Motivo de la excepción" required>
+          <Input value={motivo} autoFocus placeholder="Ej. la tablet no tiene GPS"
+            onChange={(e) => { setMotivo(e.target.value); setError('') }}
+            onKeyDown={(e) => { if (e.key === 'Enter') enviar() }} />
+        </Field>
+      </div>
+      {error ? <div className="mt-2.5 text-[12.5px] text-[#B3362C] dark:text-red-400">{error}</div> : null}
+      <div className="mt-4 flex gap-2">
+        <Button variant="ghost" className="flex-1" onClick={onCancelar}>Cancelar</Button>
+        <Button className="flex-1" loading={busy} onClick={enviar}>Autorizar igual</Button>
+      </div>
+      <div className="text-[11px] text-slate-400 mt-2.5">Queda registrado con el nombre del supervisor.</div>
     </div>
   )
 }

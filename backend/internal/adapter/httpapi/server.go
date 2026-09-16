@@ -105,6 +105,7 @@ func NewServer(cfg config.Config, svc *application.Service, tenancy *application
 	api.Patch("/empresas/:id/sedes/:sedeId", s.handleActualizarSede)
 	api.Post("/empresas/:id/sedes/:sedeId/desactivar", s.handleDesactivarSede)
 	api.Post("/empresas/:id/sedes/:sedeId/reactivar", s.handleReactivarSede)
+	s.registerPresenciaSedes(api)
 	// Invitación de miembros (Configuración › Usuarios y roles). Va en el grupo
 	// /empresas/:id (sin empresaContext, como las demás rutas de administración del
 	// tenant): el permiso lo valida puedeAdministrar contra el :id de la ruta.
@@ -147,7 +148,7 @@ func NewServer(cfg config.Config, svc *application.Service, tenancy *application
 	s.registerPromociones(data)
 	s.registerArchivos(data)
 	s.registerCajas(data)
-	s.registerPresencia(api, data)
+	s.registerPresenciaConfig(data)
 	s.registerTasa(data)
 	s.registerTesoreria(data)
 	s.registerContabilidad(data)

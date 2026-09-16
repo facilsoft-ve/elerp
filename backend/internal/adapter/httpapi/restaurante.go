@@ -633,18 +633,44 @@ func (s *Server) handleHistorialTurnos(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"turnos": s.svc.HistorialTurnos(empresaIDOf(c), sedeIDOf(c))})
 }
 
+// codigoPresencia traduce los fallos de presencia a un código estable. Vacío
+// cuando el error no es de presencia.
+func codigoPresencia(err error) string {
+	switch {
+	case errors.Is(err, application.ErrPresenciaSinUbicacion):
+		return "sin_ubicacion"
+	case errors.Is(err, application.ErrFueraDeSede):
+		return "fuera_de_sede"
+	}
+	return ""
+}
+
 func (s *Server) handleIniciarTurno(c *fiber.Ctx) error {
 	var in struct {
 		MesoneroID    string `json:"mesoneroId"`
 		Pin           string `json:"pin"`
 		PinSupervisor string `json:"pinSupervisor"`
+		// Pos es la ubicación que reportó el navegador. Opcional: solo se exige
+		// cuando la empresa declaró ese rol como de PRESENCIA ESTRICTA.
+		Pos *application.Posicion `json:"pos"`
+		// ExcepcionMotivo lo declara el supervisor cuando el GPS no colabora (sin
+		// permiso, bajo techo, sin señal). No es un atajo: queda auditado con su
+		// nombre y su motivo, que es lo que permite ver después a quién le hace
+		// falta la excepción todas las noches.
+		ExcepcionMotivo string `json:"excepcionMotivo"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
-	out, err := s.svc.IniciarTurno(empresaIDOf(c), principalOf(c).UserID, origen(c),
-		in.MesoneroID, in.Pin, in.PinSupervisor)
+	out, err := s.svc.IniciarTurnoConPresencia(empresaIDOf(c), principalOf(c).UserID, origen(c),
+		in.MesoneroID, in.Pin, in.PinSupervisor, in.Pos, in.ExcepcionMotivo)
 	if err != nil {
+		// `codigo` es legible por la máquina: la pantalla tiene que distinguir «no
+		// hay ubicación» (ofrecer la excepción del supervisor) de «estás fuera del
+		// local» (rechazo), y comparar textos traducibles sería frágil.
+		if cod := codigoPresencia(err); cod != "" {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error(), "codigo": cod})
+		}
 		return c.Status(estadoTurnoError(err)).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(out)

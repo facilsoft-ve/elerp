@@ -41,6 +41,11 @@ async function request(path, opts = {}) {
     try { body = await res.json() } catch { body = null }
     const err = new Error((body && body.error) || `HTTP ${res.status}`)
     err.status = res.status
+    // `codigo` es el identificador estable del fallo cuando el servidor lo
+    // manda. La pantalla necesita distinguir casos que comparten código HTTP
+    // (p. ej. «sin ubicación» vs «fuera de la sede», ambos 403) y comparar los
+    // textos —que son para leer y se pueden reescribir— sería frágil.
+    if (body && body.codigo) err.codigo = body.codigo
     throw err
   }
   if (res.status === 204) return null
@@ -468,6 +473,15 @@ export const api = {
   // aprueba un supervisor con su PIN y queda registrado.
   horariosSalon: () => request('/api/restaurante/salon/horarios'),
   guardarHorarioMesonero: (id, body) => request(`/api/restaurante/salon/mesoneros/${encodeURIComponent(id)}/horario`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  // ---- Presencia estricta (plataforma, la consume el salón) ----
+  // Las coordenadas viven en la SEDE y los roles que exigen presencia en la
+  // empresa: es capacidad de plataforma, no del módulo Restaurante (el cajero es
+  // el otro candidato natural).
+  fijarUbicacionSede: (empresaId, sedeId, body) =>
+    request(`/api/empresas/${encodeURIComponent(empresaId)}/sedes/${encodeURIComponent(sedeId)}/ubicacion`,
+      { method: 'PUT', body: JSON.stringify(body) }),
+  fijarRolesPresencia: (body) => request('/api/empresa/config/presencia', { method: 'PUT', body: JSON.stringify(body) }),
   extenderTurno: (id, body) => request(`/api/restaurante/salon/turnos/${encodeURIComponent(id)}/extender`, { method: 'POST', body: JSON.stringify(body) }),
 
   impresorasComandas: () => request('/api/restaurante/impresoras'),
