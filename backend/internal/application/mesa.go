@@ -2,6 +2,7 @@ package application
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -10,6 +11,10 @@ import (
 
 // Errores de negocio de las mesas (módulo Restaurante).
 var (
+	// ErrMesasSolapadas: dos mesas comparten celdas. Una mesa de más capacidad
+	// ocupa varias (ver mesa.Dimension), así que el choque puede no ser evidente
+	// mirando solo las esquinas.
+	ErrMesasSolapadas = errors.New("hay mesas encimadas en el plano")
 	ErrMesasNoDisponible = errors.New("el módulo de mesas no está disponible")
 	ErrMesaNoExiste      = errors.New("la mesa no existe")
 	ErrMesaSinNombre     = errors.New("la mesa necesita un nombre o número")
@@ -215,12 +220,40 @@ func (s *Service) GuardarMapa(empresaID, actor, origen string, pos []PosicionMes
 	if s.mesas == nil {
 		return ErrMesasNoDisponible
 	}
+	// Se arma el mapa COMPLETO antes de tocar nada: una mesa grande ocupa varias
+	// celdas, así que dos mesas pueden encimarse aunque sus esquinas sean
+	// distintas. Validar de a una dejaría pasar justo ese caso.
+	nuevas := map[string]mesa.Mesa{}
 	for _, p := range pos {
 		m, ok := s.mesas.ByID(empresaID, p.ID)
 		if !ok {
 			continue
 		}
 		m.Columna, m.Fila = p.Columna, p.Fila
+		nuevas[m.ID] = m
+	}
+	// El plano final es: las mesas movidas, más las que no se tocaron.
+	var sedeID string
+	for _, m := range nuevas {
+		sedeID = m.SedeID
+		break
+	}
+	final := []mesa.Mesa{}
+	for _, m := range s.mesas.List(empresaID, sedeID) {
+		if n, movida := nuevas[m.ID]; movida {
+			final = append(final, n)
+		} else if m.Activa {
+			final = append(final, m)
+		}
+	}
+	for i := range final {
+		for j := i + 1; j < len(final); j++ {
+			if final[i].SeSolapaCon(final[j]) {
+				return fmt.Errorf("%w: «%s» y «%s»", ErrMesasSolapadas, final[i].Nombre, final[j].Nombre)
+			}
+		}
+	}
+	for _, m := range nuevas {
 		s.mesas.Update(m)
 	}
 	s.audit.Append(evento(empresaID, actor, origen, "restaurante.mapa.guardar", "", ""))

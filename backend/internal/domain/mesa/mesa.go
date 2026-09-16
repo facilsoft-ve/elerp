@@ -85,3 +85,59 @@ type Repository interface {
 	Update(m Mesa) (Mesa, bool)
 	Delete(empresaID, id string) bool
 }
+
+/* --- Tamaño de la mesa en la grilla ---------------------------------------
+ *
+ * Nota de la jornada con la contadora: «que las mesas de más personas ocupen
+ * mayor dimensión en las cuadrículas». En un plano de salón el tamaño es
+ * información: quien mira el mapa tiene que ver de un vistazo dónde caben ocho
+ * personas y dónde dos, sin leer el número de cada mesa.
+ *
+ * La dimensión se DERIVA de la capacidad y no se guarda: si se guardara,
+ * cambiar la capacidad dejaría el tamaño viejo y el mapa mentiría. Es la misma
+ * regla que el resto del sistema — lo derivable se deriva.
+ *
+ * El corte está en 4 a propósito: la mesa de hasta cuatro es la estándar y sigue
+ * ocupando UNA celda. Si la estándar creciera, todos los planos ya dibujados se
+ * desarmarían de golpe. */
+
+// Dimension devuelve cuántas columnas y filas de la grilla ocupa una mesa según
+// su capacidad.
+//
+//	hasta 4 comensales → 1 × 1 (la mesa estándar)
+//	de 5 a 8           → 2 × 1 (mesa larga)
+//	9 o más            → 2 × 2 (mesón)
+func Dimension(capacidad int) (columnas, filas int) {
+	switch {
+	case capacidad >= 9:
+		return 2, 2
+	case capacidad >= 5:
+		return 2, 1
+	default:
+		return 1, 1
+	}
+}
+
+// Dimension de esta mesa.
+func (m Mesa) Dimension() (int, int) { return Dimension(m.Capacidad) }
+
+// Ocupa indica si la mesa cubre la celda (c, r) contando toda su superficie, no
+// solo su esquina. Es lo que impide poner otra mesa «encima» de la mitad de un
+// mesón, que a simple vista parecería una celda libre.
+func (m Mesa) Ocupa(c, r int) bool {
+	anchoC, altoF := m.Dimension()
+	return c >= m.Columna && c < m.Columna+anchoC && r >= m.Fila && r < m.Fila+altoF
+}
+
+// SeSolapaCon indica si dos mesas comparten alguna celda.
+func (m Mesa) SeSolapaCon(o Mesa) bool {
+	anchoM, altoM := m.Dimension()
+	for c := m.Columna; c < m.Columna+anchoM; c++ {
+		for r := m.Fila; r < m.Fila+altoM; r++ {
+			if o.Ocupa(c, r) {
+				return true
+			}
+		}
+	}
+	return false
+}

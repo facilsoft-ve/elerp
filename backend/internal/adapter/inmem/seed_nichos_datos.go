@@ -180,7 +180,9 @@ func restauranteDemo() especNicho {
 			{nombre: "5", zona: "Salón", forma: mesa.FormaRectangular, capacidad: 6, columna: 6, fila: 3},
 			{nombre: "6", zona: "Terraza", forma: mesa.FormaCuadrada, capacidad: 4, columna: 3, fila: 5},
 			{nombre: "7", zona: "Terraza", forma: mesa.FormaCuadrada, capacidad: 4, columna: 5, fila: 5},
-			{nombre: "8", zona: "Terraza", forma: mesa.FormaRectangular, capacidad: 8, columna: 7, fila: 5},
+			// Capacidad 8 ⇒ ocupa 2 columnas (ver mesa.Dimension). En la última
+			// columna se dibujaría recortada, así que arranca en la 6.
+			{nombre: "8", zona: "Terraza", forma: mesa.FormaRectangular, capacidad: 8, columna: 6, fila: 5},
 		},
 	}
 }

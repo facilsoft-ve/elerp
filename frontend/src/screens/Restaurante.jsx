@@ -172,9 +172,55 @@ function MapaMesas() {
   }, [mesas])
   const cel = Math.max(46, Math.min(96, Math.floor(ancho / (plano.columnas || 8)))) // lado de celda en px
 
-  const mesaEn = (c, r) => (mesas || []).find((m) => (m.columna || 0) === c && (m.fila || 0) === r)
+  // Una mesa de más capacidad ocupa más celdas. La regla es ESPEJO de
+  // `mesa.Dimension` en el backend (mismo patrón que el dígito verificador del
+  // RIF): el servidor la vuelve a aplicar y rechaza los planos encimados, así
+  // que si las dos se separan, guardar falla.
+  //
+  // Se DERIVA de la capacidad y no se guarda: guardarla dejaría el tamaño viejo
+  // al cambiar la capacidad, y el mapa mentiría.
+  const dimension = (m) => {
+    const cap = m?.capacidad || 0
+    if (cap >= 9) return [2, 2]
+    if (cap >= 5) return [2, 1]
+    return [1, 1]
+  }
+  // El ancho se recorta al borde de la grilla: una mesa larga en la última
+  // columna se dibuja angosta en vez de desbordar el plano.
+  const dimensionVisible = (m) => {
+    const [dc, df] = dimension(m)
+    return [
+      Math.max(1, Math.min(dc, plano.columnas - (m.columna || 0))),
+      Math.max(1, Math.min(df, plano.filas - (m.fila || 0))),
+    ]
+  }
+  // Ocupa mira TODA la superficie, no solo la esquina: sin esto se podría soltar
+  // una mesa sobre la mitad de un mesón, que a simple vista parece celda libre.
+  const ocupa = (m, c, r) => {
+    const [dc, df] = dimensionVisible(m)
+    const mc = m.columna || 0, mf = m.fila || 0
+    return c >= mc && c < mc + dc && r >= mf && r < mf + df
+  }
+  const mesaEn = (c, r) => (mesas || []).find((m) => ocupa(m, c, r))
+  // La esquina (donde se dibuja la mesa) frente a una celda cubierta por ella.
+  const anclaEn = (c, r) => (mesas || []).find((m) => (m.columna || 0) === c && (m.fila || 0) === r)
   const bloqueada = (c, r) => (plano.bloqueadas || []).some((b) => b.columna === c && b.fila === r)
   const celdaLibre = (c, r) => c >= 0 && c < plano.columnas && r >= 0 && r < plano.filas && !mesaEn(c, r) && !bloqueada(c, r)
+  // superficieLibre: ¿cabe esta mesa con su esquina en (c, r)? Comprueba cada
+  // celda que ocuparía, ignorándose a sí misma (mover una mesa un paso no puede
+  // chocar consigo misma) y exigiendo que quepa entera dentro del plano.
+  const superficieLibre = (m, c, r) => {
+    const [dc, df] = dimension(m)
+    if (c < 0 || r < 0 || c + dc > plano.columnas || r + df > plano.filas) return false
+    for (let i = 0; i < dc; i++) {
+      for (let j = 0; j < df; j++) {
+        if (bloqueada(c + i, r + j)) return false
+        const otra = mesaEn(c + i, r + j)
+        if (otra && otra.id !== m?.id) return false
+      }
+    }
+    return true
+  }
 
   const setFilas = (n) => { const v = clamp(n, 1, 20); setPlano((p) => ({ ...p, filas: v, bloqueadas: (p.bloqueadas || []).filter((b) => b.fila < v) })); setDirty(true) }
   const setColumnas = (n) => { const v = clamp(n, 1, 20); setPlano((p) => ({ ...p, columnas: v, bloqueadas: (p.bloqueadas || []).filter((b) => b.columna < v) })); setDirty(true) }
@@ -212,7 +258,12 @@ function MapaMesas() {
     const rect = gridRef.current.getBoundingClientRect()
     const c = Math.floor((e.clientX - rect.left) / cel)
     const r = Math.floor((e.clientY - rect.top) / cel)
-    if (!celdaLibre(c, r)) return
+    // Se valida TODA la superficie que ocupará la mesa, no solo la celda donde
+    // se soltó: un mesón de 2×2 puede caer con su esquina en una celda libre y
+    // aun así pisar tres mesas. El servidor rechaza los planos encimados, así
+    // que sin esto el arrastre parecería funcionar y fallaría al guardar.
+    const arrastrada = (mesas || []).find((m) => m.id === d.id)
+    if (!superficieLibre(arrastrada, c, r)) return
     setMesas((ms) => ms.map((m) => m.id === d.id ? { ...m, columna: c, fila: r } : m))
     setDirty(true)
   }
@@ -275,17 +326,25 @@ function MapaMesas() {
         <div ref={wrapRef} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-3 overflow-auto">
           <div ref={gridRef} className="relative mx-auto select-none" style={{ width: cel * plano.columnas, display: 'grid', gridTemplateColumns: `repeat(${plano.columnas}, ${cel}px)`, gridTemplateRows: `repeat(${plano.filas}, ${cel}px)`, gap: 0 }}>
             {Array.from({ length: plano.filas }).flatMap((_, r) => Array.from({ length: plano.columnas }).map((_, c) => {
-              const m = mesaEn(c, r); const blk = bloqueada(c, r)
+              const cubierta = mesaEn(c, r); const m = anclaEn(c, r); const blk = bloqueada(c, r)
+              // Una celda TAPADA por una mesa grande (pero que no es su esquina)
+              // no se dibuja: la mesa ya la abarca con su span.
+              if (cubierta && !m) return null
+              const [dc, df] = m ? dimensionVisible(m) : [1, 1]
               const col = m ? colorEstado(m.estado) : null
               const activo = m && sel === m.id
               return (
                 <div key={c + '-' + r} onPointerDown={() => (m ? null : clicCelda(c, r))}
                   className="border border-slate-100 dark:border-slate-800 flex items-center justify-center"
-                  style={{ background: blk ? 'repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 4px,#cbd5e1 4px,#cbd5e1 7px)' : 'transparent', cursor: puedeEditar && !m ? 'pointer' : 'default' }}>
+                  style={{
+                    gridColumn: `${c + 1} / span ${dc}`, gridRow: `${r + 1} / span ${df}`,
+                    background: blk ? 'repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 4px,#cbd5e1 4px,#cbd5e1 7px)' : 'transparent',
+                    cursor: puedeEditar && !m ? 'pointer' : 'default',
+                  }}>
                   {m ? (
                     <div onPointerDown={(e) => onMesaDown(e, m)} onClick={() => setSel(m.id)}
                       className="flex flex-col items-center justify-center"
-                      style={{ width: cel - 8, height: cel - 8, background: col.bg, border: `2px solid ${activo ? '#6A2CF0' : col.border}`, borderRadius: m.forma === 'redonda' ? '50%' : 8, color: col.text, cursor: puedeEditar && modo === 'mesas' ? 'grab' : 'pointer', boxShadow: activo ? '0 0 0 3px rgba(106,44,240,.18)' : 'none' }}>
+                      style={{ width: cel * dc - 8, height: cel * df - 8, background: col.bg, border: `2px solid ${activo ? '#6A2CF0' : col.border}`, borderRadius: m.forma === 'redonda' ? '50%' : 8, color: col.text, cursor: puedeEditar && modo === 'mesas' ? 'grab' : 'pointer', boxShadow: activo ? '0 0 0 3px rgba(106,44,240,.18)' : 'none' }}>
                       <span className="font-display font-bold leading-none" style={{ fontSize: Math.max(12, cel * 0.24) }}>{m.nombre}</span>
                       <span className="inline-flex items-center gap-0.5 opacity-80" style={{ fontSize: Math.max(9, cel * 0.16) }}><Icon.Users size={Math.max(9, cel * 0.16)} /> {m.capacidad || 0}</span>
                     </div>
