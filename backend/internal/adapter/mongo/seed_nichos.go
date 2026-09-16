@@ -68,6 +68,19 @@ func sembrarNichos(st *Store, semilla *inmem.Store) {
 			log.Printf("Mongo: %s → %d productos y %d movimientos", n.Giro, len(snap.Productos), len(snap.Movimientos))
 		}
 
+		// Puesta al día del CATÁLOGO demo (solo tenants demo).
+		//
+		// El bloque de arriba solo siembra si el catálogo está vacío, así que una
+		// demo ya plantada nunca vería un producto nuevo ni una corrección. Y las
+		// demos son material de venta: si enseñan algo equivocado —los postres
+		// cargados como reventa, cuando la receta de postre es justo lo que hay que
+		// mostrar— el prospecto se lleva esa idea.
+		//
+		// Es aditivo y acotado: inserta lo que falta por SKU y pone al día SOLO la
+		// definición de plato (receta, rubro y comandera) de los que ya están. No
+		// toca precios, existencias ni documentos, ni ninguna empresa que no sea demo.
+		actualizarCatalogoDemo(st, n.EmpresaID, snap)
+
 		if len(st.Clientes.List(n.EmpresaID)) == 0 {
 			for _, cl := range snap.Clientes {
 				st.Clientes.c.insert(cl)
@@ -234,5 +247,85 @@ func sembrarNichos(st *Store, semilla *inmem.Store) {
 			}
 			log.Printf("Mongo: %s → %d mesas y plano del salón", n.Giro, len(snap.Mesas))
 		}
+	}
+}
+
+// actualizarCatalogoDemo mantiene al día el catálogo de una empresa DEMO ya sembrada:
+// agrega los productos (y su carga inicial) que falten por SKU y pone al día la
+// definición de plato de los que ya existen. Idempotente y sin efectos fuera de la
+// empresa demo que recibe.
+func actualizarCatalogoDemo(st *Store, empresaID string, snap inmem.SnapshotEmpresa) {
+	existentes := st.Productos.List(empresaID)
+	if len(existentes) == 0 {
+		return // recién sembrada por el bloque de arriba: ya está al día
+	}
+	porSKU := make(map[string]int, len(existentes))
+	for i, p := range existentes {
+		porSKU[p.SKU] = i
+	}
+
+	// La comandera del snapshot trae el id GENERADO EN MEMORIA, que no es el de esta
+	// base (mismo problema que las cuentas de mesa: los ids de la semilla cambian en
+	// cada arranque). Se traduce por NOMBRE, que sí es estable; si el puesto no existe
+	// acá, se deja sin fijar y el producto se rutea por su rubro.
+	nombreSemilla := make(map[string]string, len(snap.Comanderas)) // idSemilla → nombre
+	for _, c := range snap.Comanderas {
+		nombreSemilla[c.ID] = c.Nombre
+	}
+	idReal := map[string]string{} // nombre → id en esta base
+	for _, c := range snap.Comanderas {
+		for _, m := range st.Impresoras.List(empresaID, c.SedeID) {
+			idReal[m.Nombre] = m.ID
+		}
+	}
+	comanderaLocal := func(idDeLaSemilla string) string {
+		if idDeLaSemilla == "" {
+			return ""
+		}
+		return idReal[nombreSemilla[idDeLaSemilla]]
+	}
+
+	// 1) Productos que faltan: van con sus movimientos de carga inicial, porque la
+	// existencia es una PROYECCIÓN del ledger — sembrar el producto sin su movimiento
+	// deja un insumo en cero y la receta que lo usa no se puede preparar.
+	nuevos := 0
+	for _, pr := range snap.Productos {
+		if _, ya := porSKU[pr.SKU]; ya {
+			continue
+		}
+		pr.ComanderaID = comanderaLocal(pr.ComanderaID)
+		st.Productos.c.insert(pr)
+		for _, mv := range snap.Movimientos {
+			if mv.SKU == pr.SKU {
+				st.Movimientos.c.insert(mv)
+			}
+		}
+		nuevos++
+	}
+
+	// 2) Definición de plato de los que ya existían. Solo estos tres campos: cambiar
+	// precios o nombres de una demo en uso sería pisarle datos al que la está viendo.
+	ajustados := 0
+	for _, pr := range snap.Productos {
+		i, ya := porSKU[pr.SKU]
+		if !ya {
+			continue
+		}
+		actual := existentes[i]
+		comandera := comanderaLocal(pr.ComanderaID)
+		if actual.EsPlato == pr.EsPlato && actual.ComanderaID == comandera &&
+			len(actual.Receta) == len(pr.Receta) && actual.Rubro == pr.Rubro {
+			continue
+		}
+		actual.EsPlato = pr.EsPlato
+		actual.Receta = pr.Receta
+		actual.Rubro = pr.Rubro
+		actual.ComanderaID = comandera
+		st.Productos.Update(actual)
+		ajustados++
+	}
+	if nuevos > 0 || ajustados > 0 {
+		log.Printf("Mongo: %s → catálogo demo al día (%d producto(s) nuevo(s), %d ajustado(s))",
+			empresaID, nuevos, ajustados)
 	}
 }
