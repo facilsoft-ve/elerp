@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 	"time"
 
@@ -66,6 +67,7 @@ func PlanBase() []contabilidad.Cuenta {
 		{contabilidad.CtaCostoDeVentas, "Costo de ventas", contabilidad.TipoCosto},
 		{contabilidad.CtaGastosOperativos, "Gastos operativos", contabilidad.TipoGasto},
 		{contabilidad.CtaDiferenciaEnCompras, "Diferencia en compras", contabilidad.TipoGasto},
+		{contabilidad.CtaDiferenciaEnCaja, "Sobrantes y faltantes de caja", contabilidad.TipoGasto},
 	}
 	out := make([]contabilidad.Cuenta, 0, len(def))
 	for _, d := range def {
@@ -426,6 +428,36 @@ func (s *Service) asentarContrarioDe(empresaID, actor, fecha, descripcion, refTi
 		}
 	}
 	return s.asientos.Append(a), nil
+}
+
+// asentarDiferenciaDeCaja registra el sobrante o el faltante declarado en el arqueo
+// al cerrar el turno.
+//
+//	Faltante: Debe 5203 Sobrantes y faltantes / Haber 1101 Caja y bancos.
+//	Sobrante: Debe 1101 Caja y bancos          / Haber 5203 Sobrantes y faltantes.
+//
+// Va contra Caja y bancos porque el efectivo que falta (o sobra) es efectivo: si solo
+// se anotara la diferencia en la sesión, el libro seguiría diciendo que en la gaveta
+// hay un dinero que no está, y el descuadre aparecería recién en la conciliación.
+func (s *Service) asentarDiferenciaDeCaja(empresaID, actor, fecha string, diferencia float64, glosa string) {
+	if s.asientos == nil || math.Abs(diferencia) <= 0.004 {
+		return
+	}
+	var lineas []contabilidad.Linea
+	if diferencia < 0 {
+		falta := round2(-diferencia)
+		lineas = []contabilidad.Linea{
+			{Codigo: contabilidad.CtaDiferenciaEnCaja, Debe: falta},
+			{Codigo: contabilidad.CtaCajaBancos, Haber: falta},
+		}
+	} else {
+		sobra := round2(diferencia)
+		lineas = []contabilidad.Linea{
+			{Codigo: contabilidad.CtaCajaBancos, Debe: sobra},
+			{Codigo: contabilidad.CtaDiferenciaEnCaja, Haber: sobra},
+		}
+	}
+	s.asentar(empresaID, actor, fecha, glosa, "arqueo", glosa, lineas)
 }
 
 /* --- Asientos derivados de las operaciones ---------------------------------

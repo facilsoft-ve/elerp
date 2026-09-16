@@ -1027,3 +1027,59 @@ func TestSeedDemo_LosCodigosDeBarrasSonUnicos(t *testing.T) {
 		}
 	}
 }
+
+// El arqueo declara un sobrante o un faltante al cerrar el turno: eso es un hecho
+// económico —el dinero está o no está— y tiene que llegar al libro diario. Antes
+// quedaba solo en la sesión y en la bitácora, y el libro seguía diciendo que en la
+// gaveta había un efectivo que en realidad faltaba.
+func TestArqueo_LaDiferenciaLlegaAlLibroDiario(t *testing.T) {
+	casos := []struct {
+		nombre   string
+		contado  float64
+		esperado string // "debe" en 5203 (faltante) o "haber" (sobrante)
+	}{
+		{"faltante", -1500, "debe"},
+		{"sobrante", 1500, "haber"},
+	}
+	for _, c := range casos {
+		t.Run(c.nombre, func(t *testing.T) {
+			svc, _ := nuevoServicio(t)
+			ses, err := svc.AbrirCaja(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo)
+			if err != nil {
+				t.Fatalf("abrir caja: %v", err)
+			}
+			esperado, err := svc.ArqueoDeSesion(empDemo, ses.ID)
+			if err != nil {
+				t.Fatalf("arqueo: %v", err)
+			}
+			contado := esperado.EfectivoEsperadoBs + c.contado
+			antes := len(svc.LibroDiario(empDemo))
+			if _, err := svc.CerrarCajaConArqueo(empDemo, actorA, origenTst, caja1, false,
+				application.CierreArqueo{EfectivoContadoBs: &contado}); err != nil {
+				t.Fatalf("cerrar con arqueo: %v", err)
+			}
+			libro := svc.LibroDiario(empDemo)
+			if len(libro) != antes+1 {
+				t.Fatalf("el arqueo con diferencia debe dejar UN asiento: antes %d, ahora %d", antes, len(libro))
+			}
+			var linea *contabilidad.Linea
+			for i, l := range libro[0].Lineas {
+				if l.Codigo == contabilidad.CtaDiferenciaEnCaja {
+					linea = &libro[0].Lineas[i]
+				}
+			}
+			if linea == nil {
+				t.Fatalf("el asiento debe tocar la cuenta de sobrantes y faltantes: %+v", libro[0].Lineas)
+			}
+			if c.esperado == "debe" && linea.Debe <= 0 {
+				t.Errorf("un faltante es una pérdida: va al DEBE de 5203, quedó %+v", *linea)
+			}
+			if c.esperado == "haber" && linea.Haber <= 0 {
+				t.Errorf("un sobrante va al HABER de 5203, quedó %+v", *linea)
+			}
+			if !libro[0].Cuadra() {
+				t.Error("el asiento del arqueo no cuadra")
+			}
+		})
+	}
+}

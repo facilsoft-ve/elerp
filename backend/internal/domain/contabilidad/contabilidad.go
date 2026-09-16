@@ -72,6 +72,11 @@ const (
 	// inventario NO se re-valúa: el Kardex mantiene el costo recibido y esta cuenta
 	// absorbe la variación, dejándola explícita y auditable en resultados.
 	CtaDiferenciaEnCompras = "5202"
+	// CtaDiferenciaEnCaja recoge el sobrante o el faltante que declara el ARQUEO al
+	// cerrar un turno. Al Debe cuando falta efectivo (una pérdida real: el dinero no
+	// está) y al Haber cuando sobra. Sin esto el arqueo quedaba solo en la sesión y
+	// en la bitácora: la caja "cuadraba" en el libro aunque en la gaveta faltara.
+	CtaDiferenciaEnCaja = "5203"
 )
 
 // Cuenta es una cuenta del plan.

@@ -527,6 +527,10 @@ func (s *Service) CerrarCajaConArqueo(empresaID, actor, origen, cajaID string, f
 	detalle := ses.CajeroNombre
 	if arqueo.Declarado {
 		detalle = fmt.Sprintf("%s · diferencia Bs %.2f", ses.CajeroNombre, arqueo.DiferenciaBs)
+		// El sobrante o el faltante es un hecho económico, no solo una nota del
+		// cierre: va al libro diario como cualquier otra operación.
+		s.asentarDiferenciaDeCaja(empresaID, actor, ses.Cierre, arqueo.DiferenciaBs,
+			fmt.Sprintf("Arqueo de %s · turno de %s", ses.CajaCodigo, ses.CajeroNombre))
 	}
 	s.audit.Append(evento(empresaID, actor, origen, accion, ses.CajaCodigo, detalle))
 	return out, nil

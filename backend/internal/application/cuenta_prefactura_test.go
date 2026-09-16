@@ -2,11 +2,13 @@ package application_test
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
 	"github.com/mornix/elerp/internal/adapter/inmem"
 	"github.com/mornix/elerp/internal/application"
+	"github.com/mornix/elerp/internal/domain/contabilidad"
 	"github.com/mornix/elerp/internal/domain/cotizacion"
 	"github.com/mornix/elerp/internal/domain/cuenta"
 	"github.com/mornix/elerp/internal/domain/mesa"
@@ -534,5 +536,60 @@ func TestSolicitud_NotaConMontoEnFormatoVenezolano(t *testing.T) {
 	}
 	if strings.Contains(nota, "17100.00") {
 		t.Errorf("la nota no debe traer el monto crudo de Go: %q", nota)
+	}
+}
+
+// ============ LA OPERACIÓN DEL SALÓN LLEGA A CONTABILIDAD ============
+//
+// Cobrar una mesa no es un caso aparte: pasa por FacturarCotizacion → EmitirFactura,
+// que es la misma ruta del mostrador. Esta prueba lo fija: si alguien "optimiza" el
+// cobro de mesas por un atajo, el libro diario deja de cuadrar y esto se pone rojo.
+func TestSolicitud_CobrarLaMesaAsientaEnElLibroDiario(t *testing.T) {
+	svc, st := servicioSalon(t)
+	c := cuentaConPedido(t, svc, st, "2")
+	_, prefs, err := svc.PrefacturarCuenta(empSalon, c.ID, "usr_meso", origenTst, application.DivisionCuenta{})
+	if err != nil {
+		t.Fatalf("pedir la cuenta: %v", err)
+	}
+	antes := len(svc.LibroDiario(empSalon))
+
+	_, doc, err := svc.FacturarCotizacion(empSalon, prefs[0].ID, "usr_caja", origenTst,
+		application.EntradaFacturacion{Pagos: []application.PagoEntrada{
+			{Metodo: "efectivo_bs", Monto: 100000, Moneda: "VES"},
+		}})
+	if err != nil {
+		t.Fatalf("cobrar: %v", err)
+	}
+
+	var venta, costo *contabilidad.Asiento
+	for i, a := range svc.LibroDiario(empSalon) {
+		if a.RefTipo != "documento" || a.RefID != doc.ID {
+			continue
+		}
+		as := svc.LibroDiario(empSalon)[i]
+		if strings.Contains(a.Descripcion, "Costo de ventas") {
+			costo = &as
+		} else {
+			venta = &as
+		}
+	}
+	if venta == nil {
+		t.Fatalf("la factura de la mesa %s no dejó asiento (antes había %d)", doc.NumeroCompleto, antes)
+	}
+	// El asiento tiene que CUADRAR: es la propiedad que hace confiable al libro.
+	var debe, haber float64
+	for _, l := range venta.Lineas {
+		debe += l.Debe
+		haber += l.Haber
+	}
+	if math.Abs(debe-haber) > 0.01 {
+		t.Errorf("el asiento de la venta no cuadra: debe %.2f, haber %.2f", debe, haber)
+	}
+	if math.Abs(debe-doc.Total) > 0.01 {
+		t.Errorf("el asiento debe mover el total de la factura (%.2f), movió %.2f", doc.Total, debe)
+	}
+	// Y el costo de lo vendido: la mesa vendió platos, que consumen insumos con costo.
+	if costo == nil {
+		t.Error("vender platos con receta debe asentar el costo de ventas (sale del ledger de inventario)")
 	}
 }
