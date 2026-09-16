@@ -80,6 +80,34 @@ type EntradaRetencion struct {
 	Base       float64 // base gravable de ISLR (el monto sujeto a retención)
 	Concepto   string  // etiqueta del concepto ISLR (honorarios, arrendamientos, …)
 	Sustraendo float64 // se resta al calcular la retención de ISLR
+	// ConceptoCodigo y Sujeto resuelven la tarifa contra el MAESTRO de conceptos
+	// (nota de la contadora, 15:53). Cuando vienen, el porcentaje y el sustraendo
+	// se toman del maestro y NO de lo que haya tecleado el cliente: saberse la
+	// tabla del reglamento de memoria es justo lo que el maestro vino a evitar.
+	// Vacíos = comportamiento anterior (se teclea todo).
+	ConceptoCodigo string
+	Sujeto         string
+}
+
+// resolverConcepto completa la entrada con la tarifa del MAESTRO cuando se eligió
+// un concepto. Devuelve la entrada tal cual si no se eligió ninguno (el
+// comportamiento de antes) y falla si el concepto no existe — facturar con una
+// tarifa inventada es peor que no poder registrar la retención.
+func (s *Service) resolverConcepto(empresaID string, in EntradaRetencion) (EntradaRetencion, error) {
+	cod := strings.TrimSpace(in.ConceptoCodigo)
+	if cod == "" || s.conceptosISLR == nil {
+		return in, nil
+	}
+	c, ok := fiscal.ConceptoPara(s.ConceptosISLR(empresaID), cod, in.Sujeto)
+	if !ok {
+		return in, ErrConceptoNoExiste
+	}
+	in.Porcentaje = c.Porcentaje
+	in.Sustraendo = c.Sustraendo
+	if strings.TrimSpace(in.Concepto) == "" {
+		in.Concepto = c.Nombre
+	}
+	return in, nil
 }
 
 // impuestoNorm normaliza el impuesto de la entrada: vacío → IVA (compatibilidad),
@@ -190,6 +218,10 @@ func (s *Service) RegistrarRetencionRecibida(empresaID, actor, origen, documento
 	}
 	if _, existe := s.retenciones.ByDocumento(empresaID, fiscal.RetencionRecibida, impuesto, doc.ID); existe {
 		return fiscal.Retencion{}, ErrRetencionDuplicada
+	}
+	in, errConcepto := s.resolverConcepto(empresaID, in)
+	if errConcepto != nil {
+		return fiscal.Retencion{}, errConcepto
 	}
 	base, monto, err := calcularRetencion(impuesto, doc.IVA, in)
 	if err != nil {

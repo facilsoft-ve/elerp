@@ -72,4 +72,5 @@ var (
 	_ mesonero.TurnoRepository     = (*TurnoRepo)(nil)
 	_ mesonero.HorarioRepository   = (*HorarioRepo)(nil)
 	_ fiscal.AlicuotaRepo          = (*AlicuotaRepo)(nil)
+	_ fiscal.ConceptoISLRRepo      = (*ConceptoISLRRepo)(nil)
 )

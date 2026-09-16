@@ -88,6 +88,7 @@ type Store struct {
 	Mesoneros        *MesoneroRepo
 	Turnos           *TurnoRepo
 	Alicuotas        *AlicuotaRepo
+	ConceptosISLR    *ConceptoISLRRepo
 	Horarios         *HorarioRepo
 }
 
@@ -136,6 +137,7 @@ func New() *Store {
 		Mesoneros:    NewMesoneroRepo(),
 		Turnos:       NewTurnoRepo(),
 		Alicuotas:    NewAlicuotaRepo(),
+		ConceptosISLR: NewConceptoISLRRepo(),
 		Horarios:     NewHorarioRepo(),
 	}
 	s.seedDemo()
@@ -405,14 +407,14 @@ func (s *Store) seedDemo() {
 	// Clientes que cubren los CUATRO tipos de documento (V, E, J, G) más el caso
 	// sin teléfono y el de nombre largo.
 	for _, c := range []cliente.Cliente{
-		{Nombre: "Inversiones El Molino, C.A.", TipoDocumento: cliente.DocJ, Documento: "40123456-9", Telefono: "0212-5551234", NombreComercial: "El Molino", Contacto: "Ana Torres"},
-		{Nombre: "María Alejandra Rodríguez Pérez", TipoDocumento: cliente.DocV, Documento: "12345678", Telefono: "0414-1234567", Email: "maria.rodriguez@correo.com"},
-		{Nombre: "Giuseppe Antonio Barbieri", TipoDocumento: cliente.DocE, Documento: "84512399", Telefono: ""},
-		{Nombre: "Alcaldía del Municipio Chacao", TipoDocumento: cliente.DocG, Documento: "20000123-2", Telefono: "0212-2088111"},
+		{Nombre: "Inversiones El Molino, C.A.", TipoDocumento: cliente.DocJ, Documento: "40123456-9", Telefono: "0212-5551234", Direccion: "Av. Francisco de Miranda, Torre Europa, Piso 4, Chacao, Caracas", NombreComercial: "El Molino", Contacto: "Ana Torres"},
+		{Nombre: "María Alejandra Rodríguez Pérez", TipoDocumento: cliente.DocV, Documento: "12345678", Telefono: "0414-1234567", Direccion: "Calle Los Cedros, Res. Aurora, Apto. 3-B, El Cafetal, Caracas", Email: "maria.rodriguez@correo.com"},
+		{Nombre: "Giuseppe Antonio Barbieri", TipoDocumento: cliente.DocE, Documento: "84512399", Telefono: "", Direccion: "Av. Bolívar Norte, C.C. Camoruco, Local 12, Valencia, Carabobo"},
+		{Nombre: "Alcaldía del Municipio Chacao", TipoDocumento: cliente.DocG, Documento: "20000123-2", Telefono: "0212-2088111", Direccion: "Av. Francisco de Miranda con Av. Mohedano, Chacao, Caracas"},
 		// Ejemplo de cliente IMPORTADO desde otro CRM/ERP: conserva su procedencia
 		// (Odoo + id externo) para una futura sincronización bidireccional.
-		{Nombre: "Distribuidora de Alimentos y Bebidas del Centro Occidente, C.A.", TipoDocumento: cliente.DocJ, Documento: "31122334-7", Telefono: "0251-2334455", Origen: cliente.OrigenOdoo, SistemaExterno: "odoo", IdExterno: "res.partner:1042"},
-		{Nombre: "Pedro Luis Salas", TipoDocumento: cliente.DocV, Documento: "9876543", Telefono: "0424-9998877"},
+		{Nombre: "Distribuidora de Alimentos y Bebidas del Centro Occidente, C.A.", TipoDocumento: cliente.DocJ, Documento: "31122334-7", Telefono: "0251-2334455", Direccion: "Zona Industrial III, Galpón 7, Barquisimeto, Lara", Origen: cliente.OrigenOdoo, SistemaExterno: "odoo", IdExterno: "res.partner:1042"},
+		{Nombre: "Pedro Luis Salas", TipoDocumento: cliente.DocV, Documento: "9876543", Telefono: "0424-9998877", Direccion: "Calle 5 con Carrera 8, Casa 22, San Cristóbal, Táchira"},
 	} {
 		c.EmpresaID = demoEmpID
 		c.Activo = true

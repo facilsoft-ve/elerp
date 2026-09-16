@@ -168,6 +168,10 @@ type Service struct {
 	// vigencia por fecha. Se cablea con ConAlicuotas; sin él, el motor cae a la
 	// tasa configurada de la empresa y se comporta como antes del maestro.
 	alicuotas fiscal.AlicuotaRepo
+	// conceptosISLR es el maestro de conceptos retenibles de ISLR con su tarifa y
+	// su sustraendo. Se cablea con ConConceptosISLR; sin él, el concepto y el
+	// porcentaje se siguen tecleando en cada comprobante (como antes).
+	conceptosISLR fiscal.ConceptoISLRRepo
 	// sedes da acceso a las COORDENADAS del local, para la presencia estricta
 	// (ver presencia.go). Se cablea con ConSedes; sin él la verificación de
 	// presencia no aplica y todo se comporta como antes.
