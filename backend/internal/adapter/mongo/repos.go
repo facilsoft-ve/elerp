@@ -62,6 +62,7 @@ type Store struct {
 	Reservas         *ReservaRepo
 	Mesoneros        *MesoneroRepo
 	Turnos           *TurnoRepo
+	Horarios         *HorarioRepo
 }
 
 // New arma el Store cableando cada repo a su colección.

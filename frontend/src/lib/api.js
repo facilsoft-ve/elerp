@@ -463,6 +463,12 @@ export const api = {
   finalizarTurno: (id) => request(`/api/restaurante/salon/turnos/${encodeURIComponent(id)}/finalizar`, { method: 'POST' }),
   relevosTurno: (id) => request(`/api/restaurante/salon/turnos/${encodeURIComponent(id)}/relevos`),
   forzarCierreTurno: (id, body) => request(`/api/restaurante/salon/turnos/${encodeURIComponent(id)}/forzar-cierre`, { method: 'POST', body: JSON.stringify(body) }),
+  // Horarios y tiempo extra. El horario AVISA o dispara el cierre suave según el
+  // modo de la sede (`horarioModo` en la config del salón); el tiempo extra lo
+  // aprueba un supervisor con su PIN y queda registrado.
+  horariosSalon: () => request('/api/restaurante/salon/horarios'),
+  guardarHorarioMesonero: (id, body) => request(`/api/restaurante/salon/mesoneros/${encodeURIComponent(id)}/horario`, { method: 'PUT', body: JSON.stringify(body) }),
+  extenderTurno: (id, body) => request(`/api/restaurante/salon/turnos/${encodeURIComponent(id)}/extender`, { method: 'POST', body: JSON.stringify(body) }),
 
   impresorasComandas: () => request('/api/restaurante/impresoras'),
   guardarImpresora: (body) => request('/api/restaurante/impresoras', { method: 'PUT', body: JSON.stringify(body) }),

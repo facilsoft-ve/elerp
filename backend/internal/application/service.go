@@ -21,6 +21,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/listaprecio"
 	"github.com/mornix/elerp/internal/domain/mesa"
 	"github.com/mornix/elerp/internal/domain/mesonero"
+	"github.com/mornix/elerp/internal/domain/sede"
 	"github.com/mornix/elerp/internal/domain/plantilla"
 	"github.com/mornix/elerp/internal/domain/promocion"
 	"github.com/mornix/elerp/internal/domain/proveedor"
@@ -160,6 +161,13 @@ type Service struct {
 	// tener uno para tomar mesas queda apagado.
 	mesoneros mesonero.Repository
 	turnos    mesonero.TurnoRepository
+	// horarios es el patrón semanal de cada mesonero. Se cablea con ConHorarios;
+	// sin él los turnos no tienen hora de salida prevista y nada vence.
+	horarios mesonero.HorarioRepository
+	// sedes da acceso a las COORDENADAS del local, para la presencia estricta
+	// (ver presencia.go). Se cablea con ConSedes; sin él la verificación de
+	// presencia no aplica y todo se comporta como antes.
+	sedes sede.Repository
 }
 
 // New construye el Service con sus puertos (el orden debe coincidir con cmd/api).

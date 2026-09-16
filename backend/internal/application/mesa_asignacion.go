@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mornix/elerp/internal/domain/mesa"
+	"github.com/mornix/elerp/internal/domain/mesonero"
 	"github.com/mornix/elerp/internal/domain/usuario"
 )
 
@@ -48,21 +49,57 @@ func (s *Service) ConfigSalon(empresaID, sedeID string) mesa.ConfigSalon {
 
 // GuardarConfigSalon fija la configuración del módulo en la sede.
 func (s *Service) GuardarConfigSalon(empresaID, sedeID, actor, origen string, estricta bool) (mesa.ConfigSalon, error) {
+	return s.GuardarConfigSalonCompleta(empresaID, sedeID, actor, origen, &estricta, nil)
+}
+
+// GuardarConfigSalonCompleta guarda la configuración del salón. AMBOS ajustes
+// son punteros y nil significa «no lo cambies»: el repositorio hace Upsert de la
+// ficha ENTERA, así que sin esto tocar un interruptor apagaría el otro en
+// silencio. Ya pasó en un sentido; esto lo cierra en los dos.
+func (s *Service) GuardarConfigSalonCompleta(empresaID, sedeID, actor, origen string, estricta *bool, horarioModo *string) (mesa.ConfigSalon, error) {
 	if s.configSalon == nil {
 		return mesa.ConfigSalon{}, ErrAsignacionNoDisponible
 	}
+	actual, _ := s.configSalon.Get(empresaID, sedeID)
+	esEstricta := actual.AsignacionEstricta
+	if estricta != nil {
+		esEstricta = *estricta
+	}
+	modoHorario := mesonero.NormalizarModoHorario(actual.HorarioModo)
+	if horarioModo != nil {
+		modoHorario = mesonero.NormalizarModoHorario(*horarioModo)
+	}
 	c := mesa.ConfigSalon{
 		EmpresaID: empresaID, SedeID: sedeID,
-		AsignacionEstricta: estricta,
+		AsignacionEstricta: esEstricta,
+		HorarioModo:        modoHorario,
 		Actualizada:        time.Now().UTC().Format(time.RFC3339),
 	}
 	out := s.configSalon.Upsert(c)
-	modo := "flexible (se advierte y se registra)"
-	if estricta {
-		modo = "estricta (se rechaza)"
+	if estricta != nil {
+		modo := "flexible (se advierte y se registra)"
+		if esEstricta {
+			modo = "estricta (se rechaza)"
+		}
+		s.audit.Append(evento(empresaID, actor, origen, "restaurante.config", "asignacion", modo))
 	}
-	s.audit.Append(evento(empresaID, actor, origen, "restaurante.config", "asignacion", modo))
+	if horarioModo != nil {
+		detalle := "aviso al vencer el horario"
+		if modoHorario == mesonero.HorarioCierraSolo {
+			detalle = "cierre automático al vencer el horario"
+		}
+		s.audit.Append(evento(empresaID, actor, origen, "restaurante.config", "horario", detalle))
+	}
 	return out, nil
+}
+
+// ModoHorario es el modo vigente de la sede (por defecto, «aviso»).
+func (s *Service) ModoHorario(empresaID, sedeID string) string {
+	if s.configSalon == nil {
+		return mesonero.HorarioAvisa
+	}
+	c, _ := s.configSalon.Get(empresaID, sedeID)
+	return mesonero.NormalizarModoHorario(c.HorarioModo)
 }
 
 // Asignaciones devuelve las asignaciones de la sede, ordenadas por nombre.

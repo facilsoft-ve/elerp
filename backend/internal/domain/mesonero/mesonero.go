@@ -124,6 +124,20 @@ type Turno struct {
 	// CerrandoDesde marca cuándo entró en cierre suave; vacío si nunca pasó por
 	// ahí (un turno se puede cerrar de golpe si no tenía mesas abiertas).
 	CerrandoDesde string `json:"cerrandoDesde,omitempty" bson:"cerrandodesde,omitempty"`
+	// CerrandoMotivo dice QUIÉN lo mandó a cerrar: el horario o una persona
+	// (CerrandoPorHorario | CerrandoPorSupervisor). Importa porque solo el
+	// vencimiento del horario se puede revertir aprobando tiempo extra: revertir
+	// una orden del supervisor sería deshacerla en silencio.
+	CerrandoMotivo string `json:"cerrandoMotivo,omitempty" bson:"cerrandomotivo,omitempty"`
+	// FueraDeHorario queda marcado cuando el turno se abrió fuera de los tramos
+	// declarados de esa persona. No bloquea nada —el supervisor ya autorizó— pero
+	// deja el hecho en el registro, que es de lo que sirve tener horarios.
+	FueraDeHorario bool `json:"fueraDeHorario,omitempty" bson:"fueradehorario,omitempty"`
+	// ExtensionPor es el supervisor que aprobó tiempo extra (vacío si no hubo).
+	// El nuevo fin queda en FinPrevisto; acá se guarda quién lo autorizó y cuánto,
+	// porque el tiempo extra se paga y tiene que poder responderse quién lo dio.
+	ExtensionPor     string `json:"extensionPor,omitempty" bson:"extensionpor,omitempty"`
+	ExtensionMinutos int    `json:"extensionMinutos,omitempty" bson:"extensionminutos,omitempty"`
 	Cierre        string `json:"cierre,omitempty" bson:"cierre,omitempty"`
 	// CerradoPor queda cuando lo cerró una persona (el supervisor que lo forzó).
 	// Vacío cuando el turno se cerró SOLO, al cerrarse su última cuenta: esa

@@ -147,6 +147,7 @@ func NewServer(cfg config.Config, svc *application.Service, tenancy *application
 	s.registerPromociones(data)
 	s.registerArchivos(data)
 	s.registerCajas(data)
+	s.registerPresencia(api, data)
 	s.registerTasa(data)
 	s.registerTesoreria(data)
 	s.registerContabilidad(data)

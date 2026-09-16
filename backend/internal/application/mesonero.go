@@ -73,6 +73,7 @@ func (s *Service) ListarMesoneros(empresaID, sedeID string) []MesoneroView {
 	if s.mesoneros == nil {
 		return []MesoneroView{}
 	}
+	s.aplicarVencimientos(empresaID, sedeID)
 	abiertas := s.cuentasAbiertasPorUsuario(empresaID, sedeID)
 	out := []MesoneroView{}
 	for _, m := range s.mesoneros.List(empresaID) {
@@ -246,6 +247,24 @@ func (s *Service) FijarPinMesonero(empresaID, actor, origen, mesoneroID, pin, pi
 // PIN de la persona (quién es) y el de un supervisor (que está autorizada a
 // trabajar ahora). El PIN solo nunca alcanza — esa es toda la idea.
 func (s *Service) IniciarTurno(empresaID, actor, origen, mesoneroID, pin, pinSupervisor string) (mesonero.Turno, error) {
+	return s.IniciarTurnoConPresencia(empresaID, actor, origen, mesoneroID, pin, pinSupervisor, nil, "")
+}
+
+// IniciarTurnoConPresencia es IniciarTurno más la verificación de PRESENCIA
+// ESTRICTA (ver presencia.go): si el rol mesonero está marcado en la empresa y
+// la sede tiene coordenadas, el turno solo se abre estando en el local.
+//
+// `pos` es la ubicación que reportó el navegador (nil = no se pudo obtener).
+// `excepcionMotivo`, cuando viene, es el supervisor DECLARANDO por qué se salta
+// la verificación — el GPS no responde, el teléfono no tiene señal, la persona
+// negó el permiso. No hace falta un PIN aparte: el supervisor ya está tecleando
+// el suyo para autorizar el turno. Lo que se exige es que diga el MOTIVO, porque
+// eso es lo que después se puede leer en la auditoría: si alguien necesita la
+// excepción todas las noches, se ve.
+//
+// Se verifica DESPUÉS del PIN del supervisor a propósito: así la excepción queda
+// atada a un supervisor real y con nombre, y no a quien simplemente la pidió.
+func (s *Service) IniciarTurnoConPresencia(empresaID, actor, origen, mesoneroID, pin, pinSupervisor string, pos *Posicion, excepcionMotivo string) (mesonero.Turno, error) {
 	if s.mesoneros == nil || s.turnos == nil {
 		return mesonero.Turno{}, ErrMesonerosNoDisponible
 	}
@@ -275,10 +294,25 @@ func (s *Service) IniciarTurno(empresaID, actor, origen, mesoneroID, pin, pinSup
 	if err != nil {
 		return mesonero.Turno{}, err
 	}
+	// Presencia estricta. El fallo NO se traga: o se está en la sede, o un
+	// supervisor declara por qué no se pudo comprobar.
+	if err := s.VerificarPresencia(empresaID, m.SedeID, usuario.RolMesonero, pos); err != nil {
+		motivo := strings.TrimSpace(excepcionMotivo)
+		if motivo == "" {
+			s.audit.Append(evento(empresaID, actor, origen, "salon.turno.presencia.rechazo", m.Codigo,
+				m.Nombre+" · "+err.Error()))
+			return mesonero.Turno{}, err
+		}
+		s.audit.Append(evento(empresaID, actor, origen, "salon.turno.presencia.excepcion", m.Codigo,
+			fmt.Sprintf("%s · %s · motivo: %s · autorizó %s", m.Nombre, err.Error(), motivo, supervisor)))
+	}
+	apertura := time.Now().UTC()
+	finPrevisto, dentroDeHorario := s.finPrevistoDe(empresaID, m.ID, apertura)
 	out := s.turnos.Create(mesonero.Turno{
 		EmpresaID: empresaID, SedeID: m.SedeID,
 		MesoneroID: m.ID, MesoneroCodigo: m.Codigo, MesoneroNombre: m.Nombre, UsuarioID: m.UsuarioID,
-		Estado: mesonero.EstadoAbierto, Apertura: ahora(), ValidadoPor: supervisor,
+		Estado: mesonero.EstadoAbierto, Apertura: apertura.Format(time.RFC3339), ValidadoPor: supervisor,
+		FinPrevisto: finPrevisto, FueraDeHorario: !dentroDeHorario,
 	})
 	s.audit.Append(evento(empresaID, actor, origen, "salon.turno.iniciar", out.ID, m.Codigo+" "+m.Nombre+" · validó "+supervisor))
 	return out, nil
@@ -306,6 +340,7 @@ func (s *Service) FinalizarTurno(empresaID, actor, origen, turnoID string) (meso
 	if t.Estado == mesonero.EstadoAbierto {
 		t.Estado = mesonero.EstadoCerrando
 		t.CerrandoDesde = ahora()
+		t.CerrandoMotivo = mesonero.CerrandoPorSupervisor
 		out, ok := s.turnos.Update(t)
 		if !ok {
 			return mesonero.Turno{}, ErrTurnoNoExiste
@@ -484,6 +519,7 @@ func (s *Service) TurnosVivos(empresaID, sedeID string) []mesonero.Turno {
 	if s.turnos == nil {
 		return []mesonero.Turno{}
 	}
+	s.aplicarVencimientos(empresaID, sedeID)
 	return s.turnos.Vivos(empresaID, sedeID)
 }
 
@@ -533,6 +569,13 @@ func (s *Service) exigirTurnoParaAtender(empresaID, usuarioID, rolActor string, 
 	if propia {
 		return nil
 	}
+	// Antes de dejar tomar una mesa NUEVA se aplica el vencimiento del horario: si
+	// no, un turno vencido seguiría tomando mesas mientras nadie abriera la
+	// pantalla de turnos.
+	s.aplicarVencimientos(empresaID, t.SedeID)
+	if t2, ok := s.turnos.ByID(empresaID, t.ID); ok {
+		t = t2
+	}
 	if !t.PuedeTomarMesas() {
 		return ErrTurnoCerrandoSinMesas
 	}
@@ -554,4 +597,203 @@ func (s *Service) cerrarTurnoSiSeVacio(empresaID, usuarioID, actor, origen strin
 		return
 	}
 	s.cerrarTurno(empresaID, actor, origen, t, "")
+}
+
+/* --- Horarios y tiempo extra ----------------------------------------------- */
+
+var (
+	ErrHorarioInvalido   = errors.New("el horario tiene tramos inválidos: revisa los días y las horas (HH:MM)")
+	ErrExtensionInvalida = errors.New("el tiempo extra debe ir entre 1 y 480 minutos")
+	ErrHorariosNoDisponibles = errors.New("los horarios del salón no están disponibles")
+)
+
+// maxExtension acota el tiempo extra a una jornada de 8 horas. No es burocracia:
+// un dedo de más al teclear («600» en vez de «60») dejaría un turno abierto diez
+// horas y el vencimiento no lo rescataría.
+const maxExtension = 480
+
+// ConHorarios cablea los horarios. Opcional como el resto: sin cablear, los
+// turnos no tienen fin previsto y nada vence — que es exactamente como se
+// comportaba el salón antes de esto.
+func (s *Service) ConHorarios(r mesonero.HorarioRepository) *Service {
+	s.horarios = r
+	return s
+}
+
+// HorarioDe devuelve el horario de un mesonero (vacío si no tiene).
+func (s *Service) HorarioDe(empresaID, mesoneroID string) mesonero.Horario {
+	if s.horarios == nil {
+		return mesonero.Horario{}
+	}
+	h, _ := s.horarios.ByMesonero(empresaID, mesoneroID)
+	return h
+}
+
+// Horarios lista los horarios de una sede.
+func (s *Service) Horarios(empresaID, sedeID string) []mesonero.Horario {
+	if s.horarios == nil {
+		return []mesonero.Horario{}
+	}
+	return s.horarios.List(empresaID, sedeID)
+}
+
+// GuardarHorario fija el patrón semanal de un mesonero. Sin franjas, borra el
+// horario: «sin horario» es un estado válido y no hay que poder simularlo con
+// una franja vacía que después rompa el cálculo.
+func (s *Service) GuardarHorario(empresaID, actor, origen, mesoneroID string, franjas []mesonero.Franja) (mesonero.Horario, error) {
+	if s.horarios == nil || s.mesoneros == nil {
+		return mesonero.Horario{}, ErrHorariosNoDisponibles
+	}
+	m, ok := s.mesoneros.ByID(empresaID, mesoneroID)
+	if !ok {
+		return mesonero.Horario{}, ErrMesoneroNoExiste
+	}
+	limpias := []mesonero.Franja{}
+	for _, f := range franjas {
+		if !mesonero.HoraValida(f.Desde) || !mesonero.HoraValida(f.Hasta) {
+			return mesonero.Horario{}, ErrHorarioInvalido
+		}
+		// Un tramo sin días no se aplica nunca y, peor, se ve configurado.
+		dias := []int{}
+		visto := map[int]bool{}
+		for _, d := range f.Dias {
+			if d < 0 || d > 6 {
+				return mesonero.Horario{}, ErrHorarioInvalido
+			}
+			if !visto[d] {
+				visto[d] = true
+				dias = append(dias, d)
+			}
+		}
+		if len(dias) == 0 {
+			return mesonero.Horario{}, ErrHorarioInvalido
+		}
+		// Desde == Hasta no es «24 horas», es un tramo de duración cero: se rechaza
+		// en vez de dejar un turno que vence en el instante en que se abre.
+		if mesonero.Minutos(f.Desde) == mesonero.Minutos(f.Hasta) {
+			return mesonero.Horario{}, ErrHorarioInvalido
+		}
+		sort.Ints(dias)
+		limpias = append(limpias, mesonero.Franja{Dias: dias, Desde: f.Desde, Hasta: f.Hasta})
+	}
+	if len(limpias) == 0 {
+		s.horarios.Delete(empresaID, mesoneroID)
+		s.audit.Append(evento(empresaID, actor, origen, "salon.horario.quitar", m.Codigo, m.Nombre))
+		return mesonero.Horario{EmpresaID: empresaID, SedeID: m.SedeID, MesoneroID: mesoneroID, Franjas: []mesonero.Franja{}}, nil
+	}
+	out := s.horarios.Upsert(mesonero.Horario{
+		EmpresaID: empresaID, SedeID: m.SedeID, MesoneroID: mesoneroID,
+		Franjas: limpias, Actualizado: ahora(),
+	})
+	s.audit.Append(evento(empresaID, actor, origen, "salon.horario.guardar", m.Codigo,
+		fmt.Sprintf("%s · %d tramo(s)", m.Nombre, len(limpias))))
+	return out, nil
+}
+
+// finPrevistoDe resuelve, para una apertura, la hora a la que debería terminar
+// el turno y si esa apertura cayó dentro del horario. Se calcula en hora LOCAL
+// de Venezuela (el horario es hora de pared) y se devuelve en UTC, que es como
+// se guarda todo lo demás.
+func (s *Service) finPrevistoDe(empresaID, mesoneroID string, apertura time.Time) (string, bool) {
+	if s.horarios == nil {
+		return "", true
+	}
+	h, ok := s.horarios.ByMesonero(empresaID, mesoneroID)
+	if !ok || h.SinHorario() {
+		// Sin horario declarado no hay nada que vencer, y tampoco tiene sentido
+		// marcar a alguien «fuera de horario» contra un horario que no existe.
+		return "", true
+	}
+	fin, dentro := h.FinDeTurno(apertura.In(zonaVE))
+	if fin.IsZero() {
+		return "", dentro
+	}
+	return fin.UTC().Format(time.RFC3339), dentro
+}
+
+// aplicarVencimientos manda a CERRANDO los turnos cuya hora de salida ya pasó,
+// en las sedes configuradas para cerrar solo.
+//
+// Se evalúa de forma PEREZOSA —al listar turnos y al intentar tomar una mesa— y
+// no con un trabajo programado, porque no hay uno. Lo importante es que corra en
+// el punto donde la decisión se toma: aunque nadie mire la pantalla, un turno
+// vencido no puede tomar una mesa nueva.
+func (s *Service) aplicarVencimientos(empresaID, sedeID string) {
+	if s.turnos == nil || s.horarios == nil {
+		return
+	}
+	ahoraT := time.Now().UTC()
+	for _, t := range s.turnos.Vivos(empresaID, sedeID) {
+		if t.Estado != mesonero.EstadoAbierto || t.FinPrevisto == "" {
+			continue
+		}
+		// El modo se mira POR SEDE del turno, no por la sede pedida: listar toda la
+		// empresa (sede vacía) mezclaría turnos de sedes con configuración distinta.
+		if s.ModoHorario(empresaID, t.SedeID) != mesonero.HorarioCierraSolo {
+			continue
+		}
+		fin, err := time.Parse(time.RFC3339, t.FinPrevisto)
+		if err != nil || ahoraT.Before(fin) {
+			continue
+		}
+		t.Estado = mesonero.EstadoCerrando
+		t.CerrandoDesde = ahora()
+		t.CerrandoMotivo = mesonero.CerrandoPorHorario
+		if _, ok := s.turnos.Update(t); ok {
+			s.audit.Append(evento(empresaID, "sistema", "horario", "salon.turno.vencido", t.ID,
+				t.MesoneroNombre+" · se cumplió su horario"))
+		}
+	}
+}
+
+// ExtenderTurno aprueba TIEMPO EXTRA: corre la hora de salida hacia adelante,
+// con el PIN de un supervisor. El tiempo extra se paga, así que queda registrado
+// quién lo autorizó y cuánto.
+//
+// Si el turno ya había entrado en cierre suave POR HORARIO, la extensión lo
+// devuelve a abierto: eso es justo lo que significa aprobar tiempo extra. Si en
+// cambio lo mandó a cerrar una PERSONA, no se revierte — extender no puede
+// deshacer en silencio la decisión de un supervisor.
+func (s *Service) ExtenderTurno(empresaID, actor, origen, turnoID string, minutos int, pinSupervisor string) (mesonero.Turno, error) {
+	if s.turnos == nil {
+		return mesonero.Turno{}, ErrMesonerosNoDisponible
+	}
+	if minutos <= 0 || minutos > maxExtension {
+		return mesonero.Turno{}, ErrExtensionInvalida
+	}
+	t, ok := s.turnos.ByID(empresaID, turnoID)
+	if !ok {
+		return mesonero.Turno{}, ErrTurnoNoExiste
+	}
+	if !t.Vivo() {
+		return mesonero.Turno{}, ErrTurnoNoVivo
+	}
+	supervisor, err := s.AutorizarSupervisor(empresaID, actor, origen,
+		fmt.Sprintf("salon.turno.extender:%s:%dmin", t.MesoneroCodigo, minutos), pinSupervisor)
+	if err != nil {
+		return mesonero.Turno{}, err
+	}
+	// La base es la hora de salida vigente o AHORA, la que sea mayor: extender 30
+	// minutos un turno que venció hace dos horas no puede dejarlo vencido igual.
+	base := time.Now().UTC()
+	if t.FinPrevisto != "" {
+		if fin, err := time.Parse(time.RFC3339, t.FinPrevisto); err == nil && fin.After(base) {
+			base = fin
+		}
+	}
+	t.FinPrevisto = base.Add(time.Duration(minutos) * time.Minute).Format(time.RFC3339)
+	t.ExtensionPor = supervisor
+	t.ExtensionMinutos += minutos
+	if t.Estado == mesonero.EstadoCerrando && t.CerrandoMotivo == mesonero.CerrandoPorHorario {
+		t.Estado = mesonero.EstadoAbierto
+		t.CerrandoDesde = ""
+		t.CerrandoMotivo = ""
+	}
+	out, ok := s.turnos.Update(t)
+	if !ok {
+		return mesonero.Turno{}, ErrTurnoNoExiste
+	}
+	s.audit.Append(evento(empresaID, actor, origen, "salon.turno.extender", out.ID,
+		fmt.Sprintf("%s · +%d min · autorizó %s", t.MesoneroNombre, minutos, supervisor)))
+	return out, nil
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Icon } from '../components/Icon.jsx'
-import { Button, Badge, Empty, Modal, Field, Input, Select, useToast, useConfirm } from '../components/primitives.jsx'
+import { Button, Badge, Empty, Modal, Field, Input, Select, Segmented, useToast, useConfirm } from '../components/primitives.jsx'
 import { PedirPin } from '../components/pin.jsx'
 import { useRecurso, EstadoRecurso } from '../lib/useRecurso.jsx'
 import { useUI } from '../context/UIContext.jsx'
@@ -22,6 +22,29 @@ import { fmtNum } from '../lib/format.js'
 
 const ADMIN = ['dueno', 'desarrollador']
 
+// Los instantes viajan en UTC; el salón piensa en hora de pared. Se convierte
+// con la zona del propio equipo, que en el local es la de Venezuela.
+function horaLocal(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+// vencido indica que ya pasó la hora de salida prevista. En modo «solo avisar»
+// el servidor no hace nada al vencer —por decisión de la sede—, así que esta
+// pantalla es el único lugar donde el supervisor puede enterarse. Sin esto, el
+// modo «aviso» no avisaría absolutamente nada.
+function vencido(t) {
+  if (!t?.finPrevisto) return false
+  const fin = new Date(t.finPrevisto)
+  return !Number.isNaN(fin.getTime()) && fin.getTime() <= Date.now()
+}
+
+// Días de la semana, con domingo primero (0 = domingo, como time.Weekday en Go).
+const DIAS = ['D', 'L', 'M', 'M', 'J', 'V', 'S']
+const DIAS_LARGO = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado']
+
 export function TurnosSalon() {
   const { ui } = useUI()
   const esAdmin = ADMIN.includes(ui.rol)
@@ -34,6 +57,7 @@ export function TurnosSalon() {
       <div className="space-y-6">
         <GrillaEntrada mesoneros={mesoneros} esAdmin={esAdmin} onCambio={reload} />
         {esAdmin ? <Credenciales mesoneros={mesoneros} onCambio={reload} /> : null}
+        {esAdmin ? <Horarios mesoneros={mesoneros} /> : null}
         {esAdmin ? <Historial /> : null}
       </div>
     </EstadoRecurso>
@@ -202,6 +226,7 @@ function TurnosVivos({ onCambio }) {
   const confirm = useConfirm()
   const { data, loading, error, reload } = useRecurso(() => api.turnosSalon(), [])
   const [forzando, setForzando] = useState(null)
+  const [extendiendo, setExtendiendo] = useState(null)
   const [busy, setBusy] = useState('')
   const turnos = data?.turnos || []
 
@@ -248,14 +273,29 @@ function TurnosVivos({ onCambio }) {
                 {t.estado === 'cerrando'
                   ? <Badge size="sm" color="amber" dot>Cerrando</Badge>
                   : <Badge size="sm" color="teal" dot>En turno</Badge>}
+                {t.estado === 'abierto' && vencido(t)
+                  ? <Badge size="sm" color="amber">Pasó su hora</Badge> : null}
               </div>
               <div className="text-[12px] text-slate-500 mt-0.5">
-                Desde {(t.apertura || '').slice(11, 16)} · validó {t.validadoPor}
+                Desde {horaLocal(t.apertura)} · validó {t.validadoPor}
+                {t.finPrevisto ? <> · hasta <strong>{horaLocal(t.finPrevisto)}</strong></> : null}
+                {t.extensionMinutos ? <span className="text-teal-600 dark:text-teal-400"> · +{t.extensionMinutos} min extra</span> : null}
               </div>
+              {(t.estado === 'cerrando' && t.cerrandoMotivo === 'horario') || (t.estado === 'abierto' && vencido(t)) ? (
+                <div className="text-[11.5px] text-amber-700 dark:text-amber-400 mt-0.5">
+                  Se cumplió su horario. Dale tiempo extra si tiene que quedarse, o termina su turno.
+                </div>
+              ) : null}
+              {t.fueraDeHorario ? (
+                <div className="text-[11.5px] text-slate-400 mt-0.5">Entró fuera de su horario.</div>
+              ) : null}
             </div>
             <div className="flex gap-1.5 shrink-0">
               <Button size="sm" variant="ghost" disabled={busy === t.id} onClick={() => finalizar(t)}>
                 Terminar turno
+              </Button>
+              <Button size="sm" variant="ghost" disabled={busy === t.id} onClick={() => setExtendiendo(t)}>
+                Tiempo extra
               </Button>
               <Button size="sm" variant="ghost" disabled={busy === t.id} onClick={() => setForzando(t)}>
                 Cerrar ya
@@ -267,6 +307,10 @@ function TurnosVivos({ onCambio }) {
       {forzando ? (
         <ModalForzarCierre turno={forzando} onCerrar={() => setForzando(null)}
           onListo={() => { setForzando(null); refrescar() }} />
+      ) : null}
+      {extendiendo ? (
+        <ModalTiempoExtra turno={extendiendo} onCerrar={() => setExtendiendo(null)}
+          onListo={() => { setExtendiendo(null); refrescar() }} />
       ) : null}
     </div>
   )
@@ -344,6 +388,275 @@ function ModalForzarCierre({ turno, onCerrar, onListo }) {
           </div>
         )}
       </EstadoRecurso>
+    </Modal>
+  )
+}
+
+/* ModalTiempoExtra: el supervisor corre la hora de salida. Dos pasos —cuánto y
+ * el PIN— porque el tiempo extra se paga y tiene que poder responderse quién lo
+ * autorizó. Los atajos cubren lo que se pide de verdad en un salón; el campo
+ * libre queda para el resto. */
+function ModalTiempoExtra({ turno, onCerrar, onListo }) {
+  const toast = useToast()
+  const [minutos, setMinutos] = useState(60)
+  const [pidiendoPin, setPidiendoPin] = useState(false)
+
+  if (pidiendoPin) {
+    return (
+      <div className="fixed inset-0 z-[240] flex items-center justify-center p-5 bg-slate-900/55 backdrop-blur-sm"
+        role="dialog" aria-modal="true">
+        <div className="w-full max-w-[340px] rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-modal p-6 modal-in">
+          <PedirPin tono="amber" icono={<Icon.Clock size={22} />} titulo={`+${minutos} minutos`}
+            sub={`Un supervisor autoriza el tiempo extra de ${turno.mesoneroNombre}.`}
+            onCancelar={() => setPidiendoPin(false)}
+            onEnviar={async (pinSup) => {
+              const out = await api.extenderTurno(turno.id, { minutos: Number(minutos), pinSupervisor: pinSup })
+              toast({
+                title: `Tiempo extra · ${turno.mesoneroNombre}`,
+                body: `Ahora trabaja hasta ${horaLocal(out.finPrevisto)}. Autorizó ${out.extensionPor}.`,
+              })
+              onListo()
+            }} />
+        </div>
+      </div>
+    )
+  }
+
+  const valido = Number(minutos) >= 1 && Number(minutos) <= 480
+
+  return (
+    <Modal open onClose={onCerrar} size="sm" icon={<Icon.Clock size={18} />}
+      title={`Tiempo extra para ${turno.mesoneroNombre}`}
+      sub={turno.finPrevisto ? `Su hora de salida es ${horaLocal(turno.finPrevisto)}` : 'No tiene hora de salida declarada'}
+      footer={<>
+        <Button variant="ghost" onClick={onCerrar}>Cancelar</Button>
+        <Button onClick={() => setPidiendoPin(true)} disabled={!valido}>Continuar</Button>
+      </>}>
+      <div className="space-y-3.5">
+        <div>
+          <div className="text-[12px] font-medium text-slate-500 mb-1.5">¿Cuánto se queda?</div>
+          <div className="grid grid-cols-4 gap-2">
+            {[30, 60, 90, 120].map((v) => (
+              <button key={v} type="button" onClick={() => setMinutos(v)}
+                className={`h-11 rounded-xl border text-[13px] font-semibold transition
+                  ${Number(minutos) === v
+                    ? 'border-elerp-500 bg-elerp-50/60 dark:bg-elerp-900/20 text-elerp-700 dark:text-elerp-300'
+                    : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'}`}>
+                {v} min
+              </button>
+            ))}
+          </div>
+        </div>
+        <Field label="O los minutos exactos" hint="entre 1 y 480">
+          <Input type="number" min="1" max="480" value={minutos} className="num"
+            onChange={(e) => setMinutos(e.target.value)} />
+        </Field>
+        {turno.estado === 'cerrando' && turno.cerrandoMotivo === 'horario' ? (
+          <div className="text-[12px] rounded-lg px-3 py-2.5 bg-teal-50 dark:bg-teal-900/20 text-teal-800 dark:text-teal-300">
+            Su turno estaba cerrando porque se cumplió el horario. Con el tiempo extra
+            <strong> vuelve a tomar mesas</strong>.
+          </div>
+        ) : null}
+        {turno.estado === 'cerrando' && turno.cerrandoMotivo !== 'horario' ? (
+          <div className="text-[12px] rounded-lg px-3 py-2.5 bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300">
+            Su cierre lo ordenó una persona, así que el tiempo extra <strong>no</strong> lo reabre:
+            solo corre la hora de salida.
+          </div>
+        ) : null}
+      </div>
+    </Modal>
+  )
+}
+
+/* --- Horarios -------------------------------------------------------------- */
+
+/* Los horarios NO son un candado: quien autoriza cada turno sigue siendo el
+ * supervisor. Sirven para saber a qué hora debería terminar cada quien, marcar
+ * las entradas fuera de horario y —si la sede lo elige— disparar el cierre suave
+ * al vencer. El interruptor de arriba decide entre avisar y cerrar solo. */
+function Horarios({ mesoneros }) {
+  const toast = useToast()
+  const { data, loading, error, reload } = useRecurso(() => api.horariosSalon(), [])
+  const [editando, setEditando] = useState(null)
+  const [guardandoModo, setGuardandoModo] = useState(false)
+  const horarios = data?.horarios || []
+  const modo = data?.modo || 'aviso'
+  const activos = mesoneros.filter((m) => m.activo)
+
+  const cambiarModo = async (v) => {
+    setGuardandoModo(true)
+    try {
+      await api.guardarConfigSalon({ horarioModo: v })
+      toast({
+        title: v === 'cierre_automatico' ? 'Cierre automático activado' : 'Solo aviso',
+        body: v === 'cierre_automatico'
+          ? 'Al cumplirse el horario, el turno deja de tomar mesas nuevas y termina las que tiene.'
+          : 'Al cumplirse el horario no pasa nada automático: lo decide el supervisor.',
+      })
+      reload()
+    } catch (e) {
+      toast({ title: 'No se pudo guardar', body: e?.message || 'Error', kind: 'error' })
+    } finally { setGuardandoModo(false) }
+  }
+
+  if (loading || error) {
+    return <EstadoRecurso loading={loading} error={error} onRetry={reload} rows={3} cols={3}
+      title="No se pudieron cargar los horarios" />
+  }
+
+  const franjasDe = (m) => horarios.find((h) => h.mesoneroId === m.id)?.franjas || []
+
+  return (
+    <div>
+      <div className="text-[14px] font-semibold mb-1">Horarios</div>
+      <div className="text-[12.5px] text-slate-500 mb-3">
+        A qué hora se espera a cada quien. <strong>No bloquea</strong>: el turno lo sigue autorizando
+        un supervisor. Sirve para saber cuándo debería terminar, marcar las entradas a destiempo y,
+        si lo eliges, cerrar solo al vencer.
+      </div>
+
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4 mb-3">
+        <div className="text-[12.5px] font-medium mb-2">Al cumplirse la hora de salida…</div>
+        <Segmented value={modo} onChange={guardandoModo ? () => {} : cambiarModo}
+          options={[
+            { value: 'aviso', label: 'Solo avisar' },
+            { value: 'cierre_automatico', label: 'Cerrar solo' },
+          ]} />
+        <div className="text-[11.5px] text-slate-400 mt-2">
+          {modo === 'cierre_automatico'
+            ? 'El turno entra en cierre suave: deja de tomar mesas nuevas y termina las que tiene. Nunca se apaga de golpe — eso dejaría mesas sin atender.'
+            : 'No pasa nada automático. La pantalla lo muestra y el supervisor decide.'}
+        </div>
+      </div>
+
+      {activos.length === 0 ? null : (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card divide-y divide-slate-100 dark:divide-slate-800">
+          {activos.map((m) => {
+            const fr = franjasDe(m)
+            return (
+              <div key={m.id} className="p-3.5 flex items-center gap-3 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-[13.5px]">
+                    {m.nombre} <span className="text-[11.5px] text-slate-400 num font-normal">{m.codigo}</span>
+                  </div>
+                  {fr.length === 0 ? (
+                    <div className="text-[12px] text-slate-400 mt-0.5">Sin horario declarado</div>
+                  ) : (
+                    <div className="text-[12px] text-slate-500 mt-0.5 space-y-0.5">
+                      {fr.map((f, i) => (
+                        <div key={i}>
+                          <span className="num">{f.desde}–{f.hasta}</span>
+                          <span className="text-slate-400"> · {(f.dias || []).map((d) => DIAS_LARGO[d]).join(', ')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <Button size="sm" variant="ghost" onClick={() => setEditando(m)}>
+                  {fr.length === 0 ? 'Definir' : 'Editar'}
+                </Button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {editando ? (
+        <ModalHorario mesonero={editando} franjas={franjasDe(editando)}
+          onCerrar={() => setEditando(null)}
+          onListo={() => { setEditando(null); reload() }} />
+      ) : null}
+    </div>
+  )
+}
+
+/* ModalHorario edita los tramos de una persona. Varios tramos permiten lo real
+ * («de martes a viernes en la noche, y el fin de semana también al mediodía»).
+ * Un tramo que cruza medianoche —18:00 a 01:00, lo normal en un restaurante— se
+ * marca para que quien lo configura vea que el sistema lo entendió así. */
+function ModalHorario({ mesonero: m, franjas, onCerrar, onListo }) {
+  const toast = useToast()
+  const [fr, setFr] = useState(() => (franjas.length
+    ? franjas.map((f) => ({ dias: [...(f.dias || [])], desde: f.desde, hasta: f.hasta }))
+    : [{ dias: [3, 4, 5, 6], desde: '18:00', hasta: '23:00' }]))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const set = (i, k, v) => setFr((s) => s.map((f, j) => (j === i ? { ...f, [k]: v } : f)))
+  const toggleDia = (i, d) => setFr((s) => s.map((f, j) => (j === i
+    ? { ...f, dias: f.dias.includes(d) ? f.dias.filter((x) => x !== d) : [...f.dias, d].sort() }
+    : f)))
+  const quitar = (i) => setFr((s) => s.filter((_, j) => j !== i))
+
+  const guardar = async () => {
+    setBusy(true); setError('')
+    try {
+      await api.guardarHorarioMesonero(m.id, { franjas: fr })
+      toast({ title: 'Horario guardado', body: m.nombre })
+      onListo()
+    } catch (e) {
+      setError(e?.message || 'No se pudo guardar.')
+      setBusy(false)
+    }
+  }
+
+  const cruza = (f) => f.desde && f.hasta && f.hasta <= f.desde
+
+  return (
+    <Modal open onClose={onCerrar} icon={<Icon.Clock size={18} />}
+      title={`Horario de ${m.nombre}`} sub="Sin tramos, queda sin horario declarado"
+      footer={<>
+        <Button variant="ghost" onClick={onCerrar}>Cancelar</Button>
+        <Button onClick={guardar} loading={busy} icon={<Icon.Check size={16} />}>Guardar</Button>
+      </>}>
+      <div className="space-y-3">
+        {fr.map((f, i) => (
+          <div key={i} className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[12px] font-medium text-slate-500">Tramo {i + 1}</span>
+              <button type="button" onClick={() => quitar(i)}
+                className="text-[11.5px] text-slate-400 hover:text-red-600">Quitar</button>
+            </div>
+            <div className="flex gap-1.5 flex-wrap">
+              {DIAS.map((d, idx) => {
+                const on = f.dias.includes(idx)
+                return (
+                  <button key={idx} type="button" onClick={() => toggleDia(i, idx)}
+                    aria-label={DIAS_LARGO[idx]} aria-pressed={on}
+                    className={`h-9 w-9 rounded-lg border text-[12.5px] font-semibold transition
+                      ${on ? 'border-elerp-500 bg-elerp-500 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-500'}`}>
+                    {d}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              <Field label="Entra">
+                <Input type="time" value={f.desde} className="num" onChange={(e) => set(i, 'desde', e.target.value)} />
+              </Field>
+              <Field label="Sale">
+                <Input type="time" value={f.hasta} className="num" onChange={(e) => set(i, 'hasta', e.target.value)} />
+              </Field>
+            </div>
+            {cruza(f) ? (
+              <div className="text-[11.5px] text-slate-500">
+                Este tramo <strong>cruza la medianoche</strong>: sale a las {f.hasta} del día siguiente.
+              </div>
+            ) : null}
+          </div>
+        ))}
+        <Button variant="secondary" size="sm" icon={<Icon.Plus size={15} />}
+          onClick={() => setFr((s) => [...s, { dias: [], desde: '11:00', hasta: '16:00' }])}>
+          Agregar tramo
+        </Button>
+        {fr.length === 0 ? (
+          <div className="text-[12px] text-slate-500 rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5">
+            Sin tramos queda <strong>sin horario</strong>: sus turnos no tendrán hora de salida
+            prevista y nada vencerá.
+          </div>
+        ) : null}
+        {error ? <div className="text-[12px] text-red-600 dark:text-red-400">{error}</div> : null}
+      </div>
     </Modal>
   )
 }

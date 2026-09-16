@@ -177,3 +177,64 @@ func (r *TurnoRepo) Update(t mesonero.Turno) (mesonero.Turno, bool) {
 	}
 	return mesonero.Turno{}, false
 }
+
+// --- Horarios del salón ---
+
+type HorarioRepo struct {
+	mu    sync.RWMutex
+	items []mesonero.Horario
+}
+
+func NewHorarioRepo() *HorarioRepo { return &HorarioRepo{} }
+
+func (r *HorarioRepo) List(empresaID, sedeID string) []mesonero.Horario {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := []mesonero.Horario{}
+	for _, h := range r.items {
+		if h.EmpresaID == empresaID && (sedeID == "" || h.SedeID == sedeID) {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+func (r *HorarioRepo) ByMesonero(empresaID, mesoneroID string) (mesonero.Horario, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if mesoneroID == "" {
+		return mesonero.Horario{}, false
+	}
+	for _, h := range r.items {
+		if h.EmpresaID == empresaID && h.MesoneroID == mesoneroID {
+			return h, true
+		}
+	}
+	return mesonero.Horario{}, false
+}
+
+// Upsert: uno por mesonero. Reemplaza el existente en vez de acumular.
+func (r *HorarioRepo) Upsert(h mesonero.Horario) mesonero.Horario {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, x := range r.items {
+		if x.EmpresaID == h.EmpresaID && x.MesoneroID == h.MesoneroID {
+			r.items[i] = h
+			return h
+		}
+	}
+	r.items = append(r.items, h)
+	return h
+}
+
+func (r *HorarioRepo) Delete(empresaID, mesoneroID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, x := range r.items {
+		if x.EmpresaID == empresaID && x.MesoneroID == mesoneroID {
+			r.items = append(r.items[:i], r.items[i+1:]...)
+			return true
+		}
+	}
+	return false
+}

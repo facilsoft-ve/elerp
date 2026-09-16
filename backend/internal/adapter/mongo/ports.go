@@ -70,4 +70,5 @@ var (
 	_ aplicacion.Repository        = (*ModuloRepo)(nil)
 	_ mesonero.Repository          = (*MesoneroRepo)(nil)
 	_ mesonero.TurnoRepository     = (*TurnoRepo)(nil)
+	_ mesonero.HorarioRepository   = (*HorarioRepo)(nil)
 )

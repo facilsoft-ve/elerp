@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	gomongo "go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/mornix/elerp/internal/domain/mesonero"
 )
@@ -11,6 +12,7 @@ import (
 func (st *Store) attachMesoneros(db *gomongo.Database) {
 	st.Mesoneros = &MesoneroRepo{coll[mesonero.Mesonero]{db.Collection("mesoneros")}}
 	st.Turnos = &TurnoRepo{coll[mesonero.Turno]{db.Collection("turnos_salon")}}
+	st.Horarios = &HorarioRepo{coll[mesonero.Horario]{db.Collection("horarios_salon")}}
 }
 
 // MesoneroRepo persiste las credenciales de mesonero con filtro empresaid
@@ -116,4 +118,39 @@ func (r *TurnoRepo) Update(t mesonero.Turno) (mesonero.Turno, bool) {
 	}
 	r.c.replace(t.ID, t)
 	return t, true
+}
+
+// HorarioRepo persiste los horarios del salón. Uno por mesonero.
+type HorarioRepo struct {
+	c coll[mesonero.Horario]
+}
+
+func (r *HorarioRepo) List(empresaID, sedeID string) []mesonero.Horario {
+	f := map[string]any{"empresaid": empresaID}
+	if sedeID != "" {
+		f["sedeid"] = sedeID
+	}
+	return r.c.all(f)
+}
+
+func (r *HorarioRepo) ByMesonero(empresaID, mesoneroID string) (mesonero.Horario, bool) {
+	if mesoneroID == "" {
+		return mesonero.Horario{}, false
+	}
+	return r.c.one(map[string]any{"empresaid": empresaID, "mesoneroid": mesoneroID})
+}
+
+// Upsert reemplaza el horario de ese mesonero; si no existe, lo inserta. La
+// clave es empresa+mesonero: uno por persona. Mismo patrón que AsignacionRepo.
+func (r *HorarioRepo) Upsert(h mesonero.Horario) mesonero.Horario {
+	ctx, cancel := opctx()
+	defer cancel()
+	_, _ = r.c.c.ReplaceOne(ctx,
+		map[string]any{"empresaid": h.EmpresaID, "mesoneroid": h.MesoneroID},
+		h, options.Replace().SetUpsert(true))
+	return h
+}
+
+func (r *HorarioRepo) Delete(empresaID, mesoneroID string) bool {
+	return r.c.del(map[string]any{"empresaid": empresaID, "mesoneroid": mesoneroID})
 }

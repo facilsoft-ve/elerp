@@ -9,6 +9,7 @@ import (
 	"github.com/mornix/elerp/internal/application"
 	"github.com/mornix/elerp/internal/domain/aplicacion"
 	"github.com/mornix/elerp/internal/domain/mesa"
+	"github.com/mornix/elerp/internal/domain/mesonero"
 	"github.com/mornix/elerp/internal/domain/usuario"
 )
 
@@ -435,13 +436,18 @@ func (s *Server) handleConfigSalon(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleGuardarConfigSalon(c *fiber.Ctx) error {
+	// Los DOS ajustes son punteros: lo que no venga en el cuerpo no se toca. La
+	// ficha se guarda entera, así que con un bool normal mandar solo el modo de
+	// horario apagaría la asignación estricta sin que nadie lo pidiera.
 	var in struct {
-		AsignacionEstricta bool `json:"asignacionEstricta"`
+		AsignacionEstricta *bool   `json:"asignacionEstricta"`
+		HorarioModo        *string `json:"horarioModo"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
-	out, err := s.svc.GuardarConfigSalon(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c), in.AsignacionEstricta)
+	out, err := s.svc.GuardarConfigSalonCompleta(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c),
+		in.AsignacionEstricta, in.HorarioModo)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -523,6 +529,12 @@ func (s *Server) registerTurnosSalon(r fiber.Router) {
 	g.Post("/turnos", s.handleIniciarTurno)
 	g.Post("/turnos/:id/finalizar", s.handleFinalizarTurno)
 	g.Get("/turnos/:id/relevos", admin, s.handleCandidatosRelevo)
+	// Tiempo extra: lo aprueba un supervisor con su PIN. Pasa con `ver` porque se
+	// pide desde la tablet del salón, no desde una pantalla de administración.
+	g.Post("/turnos/:id/extender", s.handleExtenderTurno)
+	// Horarios: los fija quien administra.
+	g.Get("/horarios", admin, s.handleHorarios)
+	g.Put("/mesoneros/:id/horario", admin, s.handleGuardarHorario)
 	g.Post("/turnos/:id/forzar-cierre", admin, s.handleForzarCierreTurno)
 }
 
@@ -660,6 +672,45 @@ func (s *Server) handleForzarCierreTurno(c *fiber.Ctx) error {
 	}
 	out, err := s.svc.CerrarTurnoForzado(empresaIDOf(c), principalOf(c).UserID, origen(c),
 		c.Params("id"), in.RelevoMesoneroID, in.PinSupervisor)
+	if err != nil {
+		return c.Status(estadoTurnoError(err)).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleHorarios(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
+		"horarios": s.svc.Horarios(empresaIDOf(c), sedeIDOf(c)),
+		// El modo viaja con la lista: la pantalla necesita decir si al vencer se
+		// avisa o se cierra solo, y pedirlo aparte sería una llamada de más.
+		"modo": s.svc.ModoHorario(empresaIDOf(c), sedeIDOf(c)),
+	})
+}
+
+func (s *Server) handleGuardarHorario(c *fiber.Ctx) error {
+	var in struct {
+		Franjas []mesonero.Franja `json:"franjas"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.GuardarHorario(empresaIDOf(c), principalOf(c).UserID, origen(c), c.Params("id"), in.Franjas)
+	if err != nil {
+		return c.Status(estadoTurnoError(err)).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleExtenderTurno(c *fiber.Ctx) error {
+	var in struct {
+		Minutos       int    `json:"minutos"`
+		PinSupervisor string `json:"pinSupervisor"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.ExtenderTurno(empresaIDOf(c), principalOf(c).UserID, origen(c),
+		c.Params("id"), in.Minutos, in.PinSupervisor)
 	if err != nil {
 		return c.Status(estadoTurnoError(err)).JSON(fiber.Map{"error": err.Error()})
 	}
