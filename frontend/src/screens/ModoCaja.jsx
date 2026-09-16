@@ -12,11 +12,11 @@ import { api } from '../lib/api.js'
 import { useSesionCaja, AbrirCajaModal, ArqueoModal } from './Caja.jsx'
 import { ImagenProducto, nivelStock, DisponibilidadModal } from '../components/producto.jsx'
 import { CobroModal } from './Cobro.jsx'
+import { useSolicitudesMesa, MesasPorCobrarModal, EtiquetaMesa } from './PosMesas.jsx'
 import { ImpresionFiscalModal, impresoraActivaDeSede } from './ImpresionFiscal.jsx'
 import { usePosCanal } from './PantallaCliente.jsx'
 import { resolverTema } from '../lib/tema.js'
 import { useEspera, DejarEnEsperaModal, EsperaModal } from './Espera.jsx'
-import { Comandera } from './Restaurante.jsx'
 import { precioListaEnBs, itemDeLista, monedaDe, porCodigo } from '../lib/precio.js'
 import { explotarCombo } from '../lib/combo.js'
 import { fechaCortaVE } from '../components/tasa.jsx'
@@ -54,10 +54,13 @@ const round3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000
  */
 export function ModoCaja({ onSalir }) {
   const { db, reload, tasaDe } = useData()
-  // Salón (módulo Restaurante): el puesto de cobro puede trabajar por MESAS
-  // (comandera) además del mostrador. Solo si el módulo está activo.
-  const haySalon = (db.MODULOS || []).includes('restaurante')
-  const [vistaSalon, setVistaSalon] = useState(false)
+  // Salón (módulo Restaurante). El puesto de cobro NO cambia de pantalla para las
+  // mesas: elige la mesa que pidió factura y sus renglones caen en ESTE carrito, con
+  // la etiqueta de la mesa encima. Cobrar una mesa y cobrar en el mostrador es el
+  // mismo acto; tener dos pantallas era la forma de que el cajero dudara cuál usar.
+  const solicitudesMesa = useSolicitudesMesa()
+  const [verMesas, setVerMesas] = useState(false)
+  const [mesaSel, setMesaSel] = useState(null)
   const { ui, setUi } = useUI()
   const { user } = useAuth()
   const tasa = useTasa()
@@ -84,6 +87,15 @@ export function ModoCaja({ onSalir }) {
 
   const [q, setQ] = useState('')
   const [cart, setCart] = useState([])
+  // La mesa elegida manda sus renglones al carrito; el cobro se emite por su
+  // solicitud (así la factura queda enlazada a la mesa y la mesa se cierra sola).
+  const tomarMesa = (sol) => {
+    setMesaSel(sol)
+    setCart(sol.lineas.map((l) => ({ ...l })))
+    setCliente(sol.clienteId ? { id: sol.clienteId, nombre: sol.clienteNombre || '' } : null)
+    setVerMesas(false)
+  }
+  const soltarMesa = () => { setMesaSel(null); setCart([]); setCliente(null) }
   const [cliente, setCliente] = useState(null) // null = Consumidor final
   const [identificando, setIdentificando] = useState(false)
   const [infoSku, setInfoSku] = useState('')
@@ -298,7 +310,7 @@ export function ModoCaja({ onSalir }) {
     title: '¿Vaciar el carrito?',
     body: 'Se quitarán todos los productos de esta venta en curso. No se puede deshacer.',
     confirmLabel: 'Vaciar carrito', tone: 'danger',
-  }, () => { setCart([]); setCliente(null); resetDescuento(); setVentaSenal((n) => n + 1) })
+  }, () => { setCart([]); setCliente(null); setMesaSel(null); resetDescuento(); setVentaSenal((n) => n + 1) })
   const cambiarCantidad = (sku, delta) => {
     const linea = cart.find((l) => l.sku === sku)
     if (!linea) return
@@ -476,7 +488,7 @@ export function ModoCaja({ onSalir }) {
    * una venta nueva en blanco. Nada de esto re-emite: el `Documento` ya existe. */
   if (emitida) {
     const dispositivoFiscal = impresoraActivaDeSede(db.DISPOSITIVOS, db.SEDE_ACTIVA?.id)
-    const nuevaVenta = () => { setEmitida(null); setCart([]); setCliente(null); resetDescuento(); setVentaSenal((n) => n + 1); buscarRef.current?.focus() }
+    const nuevaVenta = () => { setEmitida(null); setCart([]); setCliente(null); setMesaSel(null); resetDescuento(); setVentaSenal((n) => n + 1); buscarRef.current?.focus() }
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
         <ImpresionFiscalModal open canal="caja" doc={emitida} dispositivo={dispositivoFiscal} onCerrar={nuevaVenta} />
@@ -563,10 +575,9 @@ export function ModoCaja({ onSalir }) {
             <Icon.Lock size={16} /> Cerrar caja
           </BotonCaja>
         ) : null}
-        {haySalon ? (
-          <BotonCaja onClick={() => setVistaSalon((v) => !v)}
-            title={vistaSalon ? 'Volver al mostrador' : 'Ver las mesas del salón'}>
-            <Icon.Utensils size={16} /> {vistaSalon ? 'Mostrador' : 'Mesas'}
+        {solicitudesMesa.length ? (
+          <BotonCaja onClick={() => setVerMesas(true)} title="Mesas que pidieron factura">
+            <Icon.Utensils size={16} /> Mesas · {solicitudesMesa.length}
           </BotonCaja>
         ) : null}
         <BotonCaja tone="danger" onClick={salir} title="Volver a la vista normal">
@@ -574,11 +585,7 @@ export function ModoCaja({ onSalir }) {
         </BotonCaja>
       </header>
 
-      {/* Vista SALÓN (módulo Restaurante): mesa → cuenta → productos → factura.
-          No exige turno de caja: el cobro de la cuenta emite en forma libre. */}
-      {vistaSalon ? (
-        <div className="flex-1 p-4 sm:p-6 overflow-auto"><Comandera /></div>
-      ) : !cargando && !sesion ? (
+      {!cargando && !sesion ? (
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="max-w-sm text-center">
             <div className="h-14 w-14 rounded-full bg-elerp-50 dark:bg-elerp-900/40 text-elerp-500 inline-flex items-center justify-center mb-3">
@@ -681,6 +688,7 @@ export function ModoCaja({ onSalir }) {
                 <button onClick={vaciar} className="text-[13px] font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 px-2 py-1 rounded-lg">Vaciar</button>
               ) : null}
             </div>
+            <EtiquetaMesa solicitud={mesaSel} onQuitar={soltarMesa} />
 
             {cart.length === 0 ? (
               <div className="py-12 px-6 text-center text-slate-500">
@@ -843,13 +851,20 @@ export function ModoCaja({ onSalir }) {
 
       <AbrirCajaModal open={abrir} onClose={() => setAbrir(false)} onAbierta={recargar} />
       <DisponibilidadModal sku={infoSku} open={!!infoSku} onClose={() => setInfoSku('')} />
+      <MesasPorCobrarModal open={verMesas} solicitudes={solicitudesMesa}
+        onElegir={tomarMesa} onClose={() => setVerMesas(false)} />
       <CobroModal open={cobrando} onClose={() => setCobrando(false)}
         lineas={cart} clienteId={cliente?.id || ''} clienteNombre={cliente?.nombre || 'Consumidor final'} contingencia={false}
         cuponCodigo={cupon?.codigo || ''}
+        onCobrar={mesaSel ? async (cobro) => {
+          const res = await api.facturarCotizacion(mesaSel.id, { ...cobro, clienteId: cliente?.id || '' })
+          return res?.documento || res
+        } : undefined}
         onEmitida={async (doc) => {
           setCobrando(false)
           setEmitida(doc)
           setCliente(null)
+          setMesaSel(null)
           await reload()
         }} />
       <SelectorClienteModal open={identificando} onClose={() => setIdentificando(false)}
