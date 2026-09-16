@@ -132,7 +132,28 @@ func (s *Store) seedOperacionNicho(e especNicho) {
 				Codigo: fmt.Sprintf("MS-%03d", i+1), Nombre: nombre, UsuarioID: id,
 				PinHash: hashDemo(), Activo: true, Creado: fecha,
 			})
+			// Horario semanal: de martes a domingo, 18:00 a 01:00 (cruza
+			// medianoche, que es lo normal en un restaurante). Sin horario
+			// sembrado, el turno no tendría hora de salida y ni el cierre
+			// automático ni el tiempo extra se podrían ver funcionando.
+			s.Horarios.Upsert(mesonero.Horario{
+				EmpresaID: e.empID, SedeID: e.sedeID, MesoneroID: "msn_" + slug + "_" + sufijo,
+				Franjas: []mesonero.Franja{{
+					Dias: []int{2, 3, 4, 5, 6, 0}, Desde: "18:00", Hasta: "01:00",
+				}},
+				Actualizado: fecha,
+			})
 		}
+	}
+
+	// Horario de ATENCIÓN del salón: es contra lo que se avisa una reserva fuera
+	// de hora. Solo para el restaurante — una bodega no tiene salón.
+	if len(e.mesas) > 0 {
+		cfg, _ := s.ConfigSalon.Get(e.empID, e.sedeID)
+		cfg.EmpresaID, cfg.SedeID = e.empID, e.sedeID
+		cfg.HoraApertura, cfg.HoraCierre = "18:00", "01:00"
+		cfg.Actualizada = fecha
+		s.ConfigSalon.Upsert(cfg)
 	}
 
 	// --- Cuentas de cobro y métodos de pago ---

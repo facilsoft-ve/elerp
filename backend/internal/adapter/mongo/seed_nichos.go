@@ -224,6 +224,25 @@ func sembrarNichos(st *Store, semilla *inmem.Store) {
 			}
 		}
 
+		// Horario semanal de cada mesonero: aditivo por mesonero. Sin él el turno
+		// no tiene hora de salida y el cierre automático no se puede ver.
+		for _, h := range snap.Horarios {
+			if ms, ok := st.Mesoneros.ByCodigo(n.EmpresaID, codigoDeHorario(snap, h.MesoneroID)); ok {
+				h.MesoneroID = ms.ID // el id de la semilla cambia en cada arranque
+				if _, ya := st.Horarios.ByMesonero(n.EmpresaID, ms.ID); !ya {
+					st.Horarios.Upsert(h)
+				}
+			}
+		}
+
+		// Horario de ATENCIÓN del salón: es contra lo que se avisa una reserva
+		// fuera de hora. Solo si no estaba configurado.
+		if snap.TieneConfig {
+			if cur, ok := st.ConfigSalon.Get(n.EmpresaID, n.SedeID); !ok || cur.HoraApertura == "" {
+				st.ConfigSalon.Upsert(snap.ConfigSalon)
+			}
+		}
+
 		// Comanderas (puestos de impresión de comandas): aditivas por nombre.
 		if len(snap.Comanderas) > 0 {
 			yaComandera := map[string]bool{}
@@ -336,4 +355,18 @@ func actualizarCatalogoDemo(st *Store, empresaID string, snap inmem.SnapshotEmpr
 		log.Printf("Mongo: %s → catálogo demo al día (%d producto(s) nuevo(s), %d ajustado(s))",
 			empresaID, nuevos, ajustados)
 	}
+}
+
+// codigoDeHorario traduce el id de mesonero de la SEMILLA al código estable
+// (MS-001). Los ids de la semilla los genera un contador en memoria que cambia
+// en cada arranque, mientras los de Mongo conservan el suyo del primer sembrado:
+// insertar el horario con el id de la semilla lo dejaría huérfano. Es el mismo
+// problema —y la misma solución— que con las cuentas de mesa.
+func codigoDeHorario(snap inmem.SnapshotEmpresa, mesoneroIDSemilla string) string {
+	for _, m := range snap.Mesoneros {
+		if m.ID == mesoneroIDSemilla {
+			return m.Codigo
+		}
+	}
+	return ""
 }

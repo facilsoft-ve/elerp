@@ -330,6 +330,12 @@ type SnapshotEmpresa struct {
 	// pantalla de Turnos arranca vacía en una base con Mongo y no se entiende
 	// para qué sirve.
 	Mesoneros []mesonero.Mesonero
+	// Horarios es el patrón semanal de cada mesonero y ConfigSalon el horario de
+	// ATENCIÓN de la sede. Sin ellos, en una base con Mongo el turno no tendría
+	// hora de salida y las reservas nunca avisarían «fuera de horario».
+	Horarios    []mesonero.Horario
+	ConfigSalon mesa.ConfigSalon
+	TieneConfig bool
 	// Contadores es el estado del numerador fiscal de ESTA empresa tras sembrar
 	// ("empresa|sede|serie" → último folio). Sin ellos, la primera factura real del
 	// prospecto reiniciaría en 1 y colisionaría con un folio sembrado.
@@ -341,6 +347,7 @@ func (s *Store) SnapshotNicho(n NichoDemo) SnapshotEmpresa {
 	org, _ := s.Organizaciones.ByID(n.OrgID)
 	emp, _ := s.Empresas.ByID(n.EmpresaID)
 	plano, tiene := s.Planos.Get(n.EmpresaID, n.SedeID)
+	cfgSalon, tieneCfg := s.ConfigSalon.Get(n.EmpresaID, n.SedeID)
 
 	// Los usuarios y sus credenciales se derivan de las membresías de la empresa: el
 	// repositorio de usuarios es global (no lleva empresaID).
@@ -388,6 +395,8 @@ func (s *Store) SnapshotNicho(n NichoDemo) SnapshotEmpresa {
 		Asignaciones: s.Asignaciones.List(n.EmpresaID, n.SedeID),
 		Comanderas:   s.Impresoras.List(n.EmpresaID, n.SedeID),
 		Mesoneros:    s.Mesoneros.List(n.EmpresaID),
+		Horarios:     s.Horarios.List(n.EmpresaID, n.SedeID),
+		ConfigSalon:  cfgSalon, TieneConfig: tieneCfg,
 		Contadores:   contadores,
 	}
 }

@@ -98,13 +98,7 @@ func TestAvisosReserva_AlEditarNoSeCuentaASiMisma(t *testing.T) {
 // reserva fuera de hora por excepción no puede quedar trancado.
 func TestAvisosReserva_FueraDelHorarioDeAtencion(t *testing.T) {
 	svc, _ := servicioReservas(t)
-	modo := "aviso"
-	if _, err := svc.GuardarConfigSalonCompleta(empSalon, sedeSalon, actorA, origenTst, nil, &modo); err != nil {
-		t.Fatalf("config: %v", err)
-	}
-	// El horario se fija directo sobre el repo: la pantalla de configuración lo
-	// hará por su ruta, pero acá interesa el cálculo.
-	svc.GuardarHorarioServicioSalon(empSalon, sedeSalon, actorA, origenTst, "18:00", "01:00")
+	// El restaurante demo ya trae 18:00–01:00 sembrado; acá interesa el cálculo.
 
 	f := fechaDeManana()
 	if avisos := svc.AvisosDeReserva(entradaReserva(f, "15:00", 2, ""), ""); !tieneAviso(avisos, application.AvisoFueraDeHorario) {
@@ -119,6 +113,12 @@ func TestAvisosReserva_FueraDelHorarioDeAtencion(t *testing.T) {
 
 func TestAvisosReserva_SinHorarioDeclaradoNoAvisa(t *testing.T) {
 	svc, _ := servicioReservas(t)
+	// El restaurante demo YA trae horario de atención sembrado, así que hay que
+	// quitárselo para probar el caso: un local que no lo configuró no puede
+	// recibir advertencias por la hora todo el día.
+	if _, err := svc.GuardarHorarioServicioSalon(empSalon, sedeSalon, actorA, origenTst, "", ""); err != nil {
+		t.Fatalf("quitar horario: %v", err)
+	}
 	f := fechaDeManana()
 	if avisos := svc.AvisosDeReserva(entradaReserva(f, "04:00", 2, ""), ""); tieneAviso(avisos, application.AvisoFueraDeHorario) {
 		t.Errorf("sin horario configurado no hay nada contra qué comparar: %+v", avisos)

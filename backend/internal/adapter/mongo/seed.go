@@ -100,7 +100,10 @@ import (
 // paso principal), el catálogo lleva su clasificación de alícuota, y la limpieza
 // incluye por fin las colecciones del módulo Restaurante y los maestros nuevos:
 // sin eso, una base ya sembrada nunca veía ninguno de estos cambios.
-const versionSeedDemo = 29
+// v30: el catálogo demo lleva su CLASIFICACIÓN de alícuota explícita (general,
+// reducida y suntuaria), para que las tres tasas se vean en uso; el restaurante
+// trae horario de atención y el horario semanal de sus mesoneros.
+const versionSeedDemo = 30
 
 // Seed siembra la base con los datos demo (misma fuente que in-memory), de
 // forma idempotente: si ya hay empresas, no hace nada.

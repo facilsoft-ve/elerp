@@ -1299,3 +1299,49 @@ func TestAnular_ConservaLaDireccionDelOriginal(t *testing.T) {
 		t.Errorf("la reversa perdió la dirección: %q vs %q", rev.ClienteDireccion, doc.ClienteDireccion)
 	}
 }
+
+// Marcar un producto como exento tiene que SEGUIR teniendo efecto aunque el
+// catálogo ya lleve clasificación de alícuota. Antes no lo tenía: al facturar
+// manda el CÓDIGO, así que un producto «general» marcado exento seguía cobrando
+// IVA sin decir nada — la peor forma de fallar en algo fiscal.
+func TestActualizarProducto_MarcarExentoSincronizaLaAlicuota(t *testing.T) {
+	svc, _ := servicioConImpuestos(t)
+	productoConAlicuota(t, svc, "SYN-1", fiscal.CodGeneral, 100)
+
+	if _, err := svc.ActualizarProducto(empDemo, actorA, origenTst, "SYN-1",
+		application.CambiosProducto{ExentoIVA: bptr(true)}); err != nil {
+		t.Fatalf("actualizar: %v", err)
+	}
+	doc, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{{SKU: "SYN-1", Cantidad: 1, PrecioUnitario: 100}},
+		Pagos:  []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 100, Moneda: "VES"}},
+	})
+	if err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+	if !casi(doc.IVA, 0) || !casi(doc.BaseExenta, 100) {
+		t.Errorf("marcado exento no debe cobrar IVA: iva %v, exenta %v", doc.IVA, doc.BaseExenta)
+	}
+}
+
+// Y al revés: quitarle la marca de exento a un producto clasificado como exento
+// lo devuelve a general, o quedaría exento para siempre.
+func TestActualizarProducto_QuitarExentoVuelveAGeneral(t *testing.T) {
+	svc, _ := servicioConImpuestos(t)
+	productoConAlicuota(t, svc, "SYN-2", fiscal.CodExento, 100)
+
+	if _, err := svc.ActualizarProducto(empDemo, actorA, origenTst, "SYN-2",
+		application.CambiosProducto{ExentoIVA: bptr(false)}); err != nil {
+		t.Fatalf("actualizar: %v", err)
+	}
+	doc, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{{SKU: "SYN-2", Cantidad: 1, PrecioUnitario: 100}},
+		Pagos:  []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 116, Moneda: "VES"}},
+	})
+	if err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+	if !casi(doc.IVA, 16) {
+		t.Errorf("sin la marca de exento vuelve a gravar: iva %v", doc.IVA)
+	}
+}

@@ -207,8 +207,12 @@ func TestGuardarHorario_SinFranjasBorraElHorario(t *testing.T) {
 	if h := svc.HorarioDe(empSalon, m.ID); !h.SinHorario() {
 		t.Errorf("el horario debía quedar borrado, quedó %+v", h.Franjas)
 	}
-	if len(svc.Horarios(empSalon, sedeSalon)) != 0 {
-		t.Error("el horario borrado no debe seguir apareciendo en la lista de la sede")
+	// La lista de la sede trae los horarios sembrados de la demo, así que lo que
+	// se comprueba es que EL BORRADO no esté — no que la lista quede vacía.
+	for _, h := range svc.Horarios(empSalon, sedeSalon) {
+		if h.MesoneroID == m.ID {
+			t.Error("el horario borrado no debe seguir apareciendo en la lista de la sede")
+		}
 	}
 }
 
