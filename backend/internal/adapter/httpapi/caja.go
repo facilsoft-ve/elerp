@@ -7,6 +7,7 @@ import (
 
 	"github.com/mornix/elerp/internal/application"
 	"github.com/mornix/elerp/internal/domain/caja"
+	"github.com/mornix/elerp/internal/domain/empresa"
 	"github.com/mornix/elerp/internal/domain/usuario"
 )
 
@@ -144,14 +145,23 @@ func (s *Server) handleEstadoCaja(c *fiber.Ctx) error {
 
 func (s *Server) handleAbrirCaja(c *fiber.Ctx) error {
 	var in struct {
-		CodigoCajero string  `json:"codigoCajero"`
-		Pin          string  `json:"pin"`
+		CodigoCajero string `json:"codigoCajero"`
+		Pin          string `json:"pin"`
+		// FondoInicial es el efectivo en BOLÍVARES. Se mantiene por compatibilidad
+		// con los clientes que solo declaraban esa moneda.
 		FondoInicial float64 `json:"fondoInicial"`
+		// Fondos declara la gaveta MONEDA POR MONEDA, que es como se abre de verdad
+		// (bolívares y divisas a la vez). Cuando viene, manda sobre FondoInicial.
+		Fondos []caja.FondoCaja `json:"fondos"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
-	out, err := s.svc.AbrirCajaConFondo(empresaIDOf(c), principalOf(c).UserID, origen(c), c.Params("id"), in.CodigoCajero, in.Pin, in.FondoInicial)
+	fondos := in.Fondos
+	if len(fondos) == 0 {
+		fondos = []caja.FondoCaja{{Moneda: empresa.MonedaVES, Monto: in.FondoInicial}}
+	}
+	out, err := s.svc.AbrirCajaConFondos(empresaIDOf(c), principalOf(c).UserID, origen(c), c.Params("id"), in.CodigoCajero, in.Pin, fondos)
 	if err != nil {
 		return errorDeCaja(c, err)
 	}
@@ -165,6 +175,9 @@ func (s *Server) handleCerrarCaja(c *fiber.Ctx) error {
 		// arqueo, p. ej. forzado). Presente = el cajero contó la gaveta.
 		EfectivoContadoBs *float64            `json:"efectivoContadoBs"`
 		ContadoPorMetodo  []caja.ArqueoConteo `json:"contadoPorMetodo"`
+		// ContadoEfectivo es el conteo de la gaveta por moneda: de acá sale la
+		// diferencia de cada una, no solo la del bolívar.
+		ContadoEfectivo []caja.FondoCaja `json:"contadoEfectivo"`
 	}
 	_ = c.BodyParser(&in)
 	// Forzar el cierre de la caja de otro cajero es acción de administración.
@@ -175,6 +188,7 @@ func (s *Server) handleCerrarCaja(c *fiber.Ctx) error {
 	out, err := s.svc.CerrarCajaConArqueo(empresaIDOf(c), principalOf(c).UserID, origen(c), c.Params("id"), in.Forzado, application.CierreArqueo{
 		EfectivoContadoBs: in.EfectivoContadoBs,
 		ContadoPorMetodo:  in.ContadoPorMetodo,
+		ContadoEfectivo:   in.ContadoEfectivo,
 	})
 	if err != nil {
 		return errorDeCaja(c, err)

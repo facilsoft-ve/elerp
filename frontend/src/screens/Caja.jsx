@@ -38,6 +38,14 @@ export function useSesionCaja() {
   return { sesion, cargando, recargar, setSesion }
 }
 
+/* Monedas en las que se puede declarar el fondo de la gaveta. Coincide con lo
+ * que valida el servidor (empresa.MonedaValida): si mañana la empresa maneja
+ * otra, se agrega en los dos lados — el servidor rechaza la que no conoce. */
+const MONEDAS_CAJA = [
+  { codigo: 'VES', label: 'Bolívares (Bs)' },
+  { codigo: 'USD', label: 'Dólares (US$)' },
+]
+
 /* Modal bloqueante de apertura (03 §4.3), en dos pasos dentro de un solo modal:
  *   1. elegir caja — las ocupadas por otro cajero salen deshabilitadas con su
  *      nombre; la propia se ofrece como «tu turno abierto · retomar»;
@@ -51,13 +59,16 @@ export function AbrirCajaModal({ open, onClose, onAbierta }) {
   const [sel, setSel] = useState(null)
   const [codigo, setCodigo] = useState('')
   const [pin, setPin] = useState('')
-  const [fondo, setFondo] = useState('')
+  // Un fondo POR MONEDA: la gaveta de un local venezolano tiene bolívares y
+  // divisas a la vez. Declarar solo los bolívares hacía que los billetes en
+  // dólares salieran al cierre como un sobrante inventado.
+  const [fondos, setFondos] = useState({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
     if (!open) return
-    setSel(null); setCodigo(''); setPin(''); setFondo(''); setError(''); setCargando(true)
+    setSel(null); setCodigo(''); setPin(''); setFondos({}); setError(''); setCargando(true)
     api.cajas(activeSedeId)
       .then((cs) => setCajas(cs || []))
       .catch((e) => setError(e?.message || 'No se pudieron cargar las cajas.'))
@@ -71,8 +82,12 @@ export function AbrirCajaModal({ open, onClose, onAbierta }) {
     if (!puedeAbrir) return
     setBusy(true); setError('')
     try {
-      const fondoInicial = sel.propia ? 0 : Math.max(0, parseFloat((fondo || '').replace(',', '.')) || 0)
-      const ses = await api.abrirCaja(sel.id, { codigoCajero: codigo.trim().toUpperCase(), pin, fondoInicial })
+      // Al RETOMAR un turno propio no se vuelve a declarar el fondo: el turno
+      // abrió una sola vez y su fondo ya está fijado.
+      const lista = sel.propia ? [] : MONEDAS_CAJA
+        .map((m) => ({ moneda: m.codigo, monto: Math.max(0, parseFloat((fondos[m.codigo] || '').replace(',', '.')) || 0) }))
+        .filter((f) => f.monto > 0)
+      const ses = await api.abrirCaja(sel.id, { codigoCajero: codigo.trim().toUpperCase(), pin, fondos: lista })
       toast({ title: sel.propia ? 'Turno retomado' : 'Caja abierta', body: `Caja ${ses.cajaCodigo} · ${ses.cajeroNombre}` })
       onAbierta?.(ses)
       onClose?.()
@@ -154,17 +169,26 @@ export function AbrirCajaModal({ open, onClose, onAbierta }) {
                 onKeyDown={(e) => { if (e.key === 'Enter') abrir() }} />
             </Field>
           </div>
-          {/* Fondo inicial: el efectivo en Bs con el que abre la gaveta. Es la
-              base para dar vuelto y el punto de partida del arqueo al cerrar. No
+          {/* Fondo inicial POR MONEDA: el efectivo con el que abre la gaveta. Es
+              la base para dar vuelto y el punto de partida del arqueo. El fondo
+              en divisas NO es un detalle: sin declararlo, esos billetes salen al
+              cierre como un sobrante que no existe y tapan un faltante real. No
               se pide al RETOMAR un turno propio (ya abrió con su fondo). */}
           {sel && !sel.propia ? (
             <div className="mt-3">
-              <Field label="Fondo inicial (Bs)" hint="opcional · efectivo con el que abres la gaveta">
-                <Input inputMode="decimal" value={fondo}
-                  onChange={(e) => setFondo(e.target.value.replace(/[^\d.,]/g, ''))}
-                  placeholder="0,00" className="num" autoComplete="off"
-                  onKeyDown={(e) => { if (e.key === 'Enter') abrir() }} />
-              </Field>
+              <div className="text-[12px] font-medium text-slate-500 mb-1.5">
+                Fondo inicial <span className="font-normal text-slate-400">· opcional · efectivo con el que abres la gaveta</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                {MONEDAS_CAJA.map((m) => (
+                  <Field key={m.codigo} label={m.label}>
+                    <Input inputMode="decimal" value={fondos[m.codigo] || ''}
+                      onChange={(e) => setFondos((f) => ({ ...f, [m.codigo]: e.target.value.replace(/[^\d.,]/g, '') }))}
+                      placeholder="0,00" className="num" autoComplete="off"
+                      onKeyDown={(e) => { if (e.key === 'Enter') abrir() }} />
+                  </Field>
+                ))}
+              </div>
             </div>
           ) : null}
           {error ? (
@@ -275,10 +299,15 @@ export function ArqueoModal({ open, sesion, onClose, onCerrada, avisoCarrito = f
       const contadoPorMetodo = []
       for (const m of arqueo?.metodos || []) {
         if (!m.efectivo) continue
-        const key = `${m.metodo}|${m.moneda}`
+        const key = m.moneda === 'VES' ? 'efectivo_bs|VES' : `efectivo|${m.moneda}`
         contadoPorMetodo.push({ metodo: m.metodo, moneda: m.moneda, monto: num(conteo[key]) })
       }
-      await api.cerrarCaja(sesion.cajaId, { efectivoContadoBs: efectivoContado, contadoPorMetodo })
+      // El conteo POR MONEDA es el que produce la diferencia de cada gaveta. El
+      // bolívar viaja aparte en efectivoContadoBs, que es el conteo mínimo.
+      const contadoEfectivo = efectivosDivisa.map((m) => ({
+        moneda: m.moneda, monto: num(conteo[`efectivo|${m.moneda}`]),
+      }))
+      await api.cerrarCaja(sesion.cajaId, { efectivoContadoBs: efectivoContado, contadoPorMetodo, contadoEfectivo })
       const dif = diferencia
       toast({
         title: 'Caja cerrada',
@@ -302,7 +331,11 @@ export function ArqueoModal({ open, sesion, onClose, onCerrada, avisoCarrito = f
       ? { color: 'amber', txt: 'text-amber-700 dark:text-amber-400', label: `Sobrante de ${fmtCurrency(diferencia, 'VES')}` }
       : { color: 'red', txt: 'text-[#B3362C] dark:text-red-400', label: `Faltante de ${fmtCurrency(Math.abs(diferencia), 'VES')}` }
 
-  const efectivosDivisa = (arqueo?.metodos || []).filter((m) => m.efectivo && m.enDivisa)
+  // Las divisas se cuentan contra el CUADRE POR MONEDA que arma el servidor
+  // (`arqueo.efectivo`), no contra el bucket de métodos: aquel no incluye el
+  // fondo de apertura, así que mostraba un esperado corto y el fondo aparecía
+  // como sobrante al contar.
+  const efectivosDivisa = (arqueo?.efectivo || []).filter((f) => f.moneda !== 'VES')
   const electronicos = (arqueo?.metodos || []).filter((m) => !m.efectivo)
 
   return (
@@ -361,15 +394,16 @@ export function ArqueoModal({ open, sesion, onClose, onCerrada, avisoCarrito = f
               <div className="text-[12px] font-semibold text-slate-500 uppercase tracking-wide mb-2">Efectivo en divisas</div>
               <div className="space-y-2.5">
                 {efectivosDivisa.map((m) => {
-                  const key = `${m.metodo}|${m.moneda}`
+                  const key = `efectivo|${m.moneda}`
                   const cont = num(conteo[key])
-                  const dif = Math.round((cont - m.monto) * 100) / 100
+                  const dif = Math.round((cont - m.esperado) * 100) / 100
                   return (
                     <div key={key} className="grid grid-cols-[1fr_auto] items-end gap-3">
                       <div>
-                        <div className="text-[13px] font-medium">{metodoLabel(m.metodo)}</div>
+                        <div className="text-[13px] font-medium">Efectivo en {m.moneda}</div>
                         <div className="text-[11.5px] text-slate-500 num">
-                          Esperado {fmtNum(m.monto, 2)} {m.moneda} · {fmtCurrency(m.equivalenteBs, 'VES')}
+                          Esperado {fmtNum(m.esperado, 2)} {m.moneda}
+                          {m.fondo ? ` · incluye ${fmtNum(m.fondo, 2)} de fondo` : ''}
                         </div>
                       </div>
                       <div className="w-32">

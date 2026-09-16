@@ -425,6 +425,15 @@ func (s *Service) AbrirCaja(empresaID, actor, origen, cajaID, codigoCajero, pin 
 // sesión y es la base del efectivo esperado en el arqueo del cierre. Al RETOMAR
 // un turno propio NO se toca el fondo ya fijado: el turno abrió una sola vez.
 func (s *Service) AbrirCajaConFondo(empresaID, actor, origen, cajaID, codigoCajero, pin string, fondoInicial float64) (caja.Sesion, error) {
+	return s.AbrirCajaConFondos(empresaID, actor, origen, cajaID, codigoCajero, pin,
+		[]caja.FondoCaja{{Moneda: empresa.MonedaVES, Monto: fondoInicial}})
+}
+
+// AbrirCajaConFondos abre el turno declarando el efectivo de apertura POR MONEDA.
+// Una gaveta venezolana tiene bolívares y divisas a la vez, y el fondo en divisa
+// no es un detalle: sin declararlo, esos billetes salen al cierre como un
+// sobrante inventado y tapan cualquier faltante real en esa moneda.
+func (s *Service) AbrirCajaConFondos(empresaID, actor, origen, cajaID, codigoCajero, pin string, fondos []caja.FondoCaja) (caja.Sesion, error) {
 	c, ok := s.cajas.ByID(empresaID, cajaID)
 	if !ok {
 		return caja.Sesion{}, ErrCajaNoExiste
@@ -432,10 +441,10 @@ func (s *Service) AbrirCajaConFondo(empresaID, actor, origen, cajaID, codigoCaje
 	if !c.Habilitada() {
 		return caja.Sesion{}, ErrCajaDeshabilitada
 	}
-	if fondoInicial < 0 {
-		fondoInicial = 0
+	limpios, fondoInicial, err := normalizarFondos(fondos)
+	if err != nil {
+		return caja.Sesion{}, err
 	}
-	fondoInicial = round2(fondoInicial)
 
 	cj, ok := s.cajeros.ByCodigo(empresaID, strings.ToUpper(strings.TrimSpace(codigoCajero)))
 	if !ok || !cj.Activo {
@@ -465,10 +474,46 @@ func (s *Service) AbrirCajaConFondo(empresaID, actor, origen, cajaID, codigoCaje
 	out := s.sesiones.Create(caja.Sesion{
 		EmpresaID: empresaID, SedeID: c.SedeID, CajaID: c.ID, CajeroID: cj.ID,
 		CajeroNombre: cj.Nombre, CajaCodigo: c.Codigo, ActorID: actor, Apertura: ahora(),
-		FondoInicial: fondoInicial,
+		FondoInicial: fondoInicial, Fondos: limpios,
 	})
 	s.audit.Append(evento(empresaID, actor, origen, "caja.abrir", c.Codigo, cj.Codigo+" "+cj.Nombre))
 	return out, nil
+}
+
+// ErrMonedaFondoInvalida indica un fondo de apertura en una moneda que la
+// empresa no maneja.
+var ErrMonedaFondoInvalida = errors.New("el fondo de caja tiene una moneda que no se maneja")
+
+// normalizarFondos deja una sola fila por moneda, sin negativos, y devuelve
+// además el fondo en bolívares aparte: los arqueos ya congelados lo llevan como
+// campo propio y hay que seguir alimentándolo.
+func normalizarFondos(fondos []caja.FondoCaja) ([]caja.FondoCaja, float64, error) {
+	porMoneda := map[string]float64{}
+	orden := []string{}
+	for _, f := range fondos {
+		m := strings.ToUpper(strings.TrimSpace(f.Moneda))
+		if m == "" {
+			m = empresa.MonedaVES
+		}
+		if !empresa.MonedaValida(m) {
+			return nil, 0, ErrMonedaFondoInvalida
+		}
+		if f.Monto < 0 {
+			return nil, 0, errors.New("el fondo de caja no puede ser negativo")
+		}
+		if _, visto := porMoneda[m]; !visto {
+			orden = append(orden, m)
+		}
+		porMoneda[m] = round2(porMoneda[m] + f.Monto)
+	}
+	out := make([]caja.FondoCaja, 0, len(orden))
+	for _, m := range orden {
+		// Una moneda declarada en cero no aporta nada y ensucia el acta.
+		if porMoneda[m] > 0 {
+			out = append(out, caja.FondoCaja{Moneda: m, Monto: porMoneda[m]})
+		}
+	}
+	return out, porMoneda[empresa.MonedaVES], nil
 }
 
 // CierreArqueo es el conteo DECLARADO por el cajero al cerrar el turno. Todos
@@ -480,6 +525,10 @@ type CierreArqueo struct {
 	EfectivoContadoBs *float64
 	// ContadoPorMetodo es el conteo declarado por método (opcional, para el acta).
 	ContadoPorMetodo []caja.ArqueoConteo
+	// ContadoEfectivo es el conteo de la GAVETA por moneda. A diferencia de
+	// ContadoPorMetodo, esto NO es decorativo: de acá sale la diferencia de cada
+	// moneda. Sin él, un faltante en dólares no lo detectaba nadie.
+	ContadoEfectivo []caja.FondoCaja
 }
 
 // CerrarCaja termina el turno sin conteo declarado (congela lo esperado). Es la
@@ -493,6 +542,39 @@ func (s *Service) CerrarCaja(empresaID, actor, origen, cajaID string, forzado bo
 // CerrarCajaConArqueo termina el turno CONGELANDO el arqueo en la sesión: lo
 // esperado por método (plegado de los documentos del turno), el efectivo Bs
 // esperado (fondo + cobros − vuelto) y —si el cajero declaró un conteo— lo
+// aplicarConteoEfectivo vuelca el conteo declarado sobre cada fila de la gaveta
+// y calcula su diferencia. Solo las monedas que el cajero REALMENTE contó
+// quedan marcadas: una fila sin declarar conserva diferencia cero, que no es
+// «cuadra» sino «no se contó», y por eso lleva su propia marca Declarado.
+//
+// El bolívar sigue entrando por EfectivoContadoBs, que es el conteo mínimo del
+// arqueo y el que ya usaba el POS.
+func aplicarConteoEfectivo(arqueo *caja.Arqueo, in CierreArqueo) {
+	declarado := map[string]float64{}
+	for _, c := range in.ContadoEfectivo {
+		m := strings.ToUpper(strings.TrimSpace(c.Moneda))
+		if m == "" {
+			m = empresa.MonedaVES
+		}
+		declarado[m] = round2(declarado[m] + c.Monto)
+	}
+	if in.EfectivoContadoBs != nil {
+		declarado[empresa.MonedaVES] = round2(*in.EfectivoContadoBs)
+	}
+	for i := range arqueo.Efectivo {
+		f := &arqueo.Efectivo[i]
+		monto, ok := declarado[f.Moneda]
+		if !ok {
+			continue
+		}
+		f.Declarado = true
+		f.Contado = monto
+		// round2 trunca en negativo: la diferencia se redondea en valor absoluto
+		// y se le devuelve el signo, para que un faltante no se vuelva sobrante.
+		f.Diferencia = round2signed(monto - f.Esperado)
+	}
+}
+
 // contado y la diferencia (sobrante/faltante). La foto queda inmutable en la
 // sesión cerrada (append-only): no se reescribe después.
 func (s *Service) CerrarCajaConArqueo(empresaID, actor, origen, cajaID string, forzado bool, in CierreArqueo) (caja.Sesion, error) {
@@ -517,6 +599,7 @@ func (s *Service) CerrarCajaConArqueo(empresaID, actor, origen, cajaID string, f
 		}
 		arqueo.ContadoPorMetodo = conteo
 	}
+	aplicarConteoEfectivo(&arqueo, in)
 	ses.Cierre = ahora()
 	ses.Arqueo = &arqueo
 	out, _ := s.sesiones.Update(ses)
@@ -689,7 +772,60 @@ func (s *Service) arqueoDe(empresaID string, ses caja.Sesion) caja.Arqueo {
 	}
 
 	arqueo.EfectivoEsperadoBs = round2(ses.FondoInicial + arqueo.CobrosEfectivoBs - arqueo.VueltoEfectivoBs)
+	arqueo.Efectivo = efectivoPorMoneda(ses, arqueo)
 	return arqueo
+}
+
+// efectivoPorMoneda arma el cuadre de la gaveta MONEDA POR MONEDA: lo que había
+// al abrir más lo cobrado en efectivo menos lo entregado de vuelto.
+//
+// El efectivo se cuenta en billetes, no en equivalentes: por eso hay una fila
+// por moneda y NUNCA un total convertido. Convertir para cuadrar escondería un
+// faltante en dólares detrás de la tasa del día.
+func efectivoPorMoneda(ses caja.Sesion, arqueo caja.Arqueo) []caja.ArqueoEfectivo {
+	filas := map[string]*caja.ArqueoEfectivo{}
+	orden := []string{}
+	fila := func(moneda string) *caja.ArqueoEfectivo {
+		if f, ok := filas[moneda]; ok {
+			return f
+		}
+		f := &caja.ArqueoEfectivo{Moneda: moneda, Fondo: ses.FondoDe(moneda)}
+		filas[moneda] = f
+		orden = append(orden, moneda)
+		return f
+	}
+	// El bolívar SIEMPRE tiene fila, aunque no se haya movido: es la gaveta que
+	// se cuenta igual al cerrar.
+	fila(empresa.MonedaVES)
+	// Toda moneda con fondo declarado también, aunque no haya entrado ni salido
+	// nada: hay que poder demostrar que esos billetes siguen ahí.
+	for _, f := range ses.Fondos {
+		fila(f.Moneda)
+	}
+	// Y las que se movieron en efectivo durante el turno.
+	for _, m := range arqueo.Metodos {
+		if m.Efectivo {
+			fila(m.Moneda)
+		}
+	}
+
+	// El bolívar reusa lo ya plegado arriba; las divisas salen de su bucket, que
+	// el vuelto en esa moneda ya dejó neto (recibido − vuelto).
+	filas[empresa.MonedaVES].Cobros = arqueo.CobrosEfectivoBs
+	filas[empresa.MonedaVES].Vuelto = arqueo.VueltoEfectivoBs
+	for _, m := range arqueo.Metodos {
+		if m.Efectivo && m.Moneda != empresa.MonedaVES {
+			filas[m.Moneda].Cobros = round2(filas[m.Moneda].Cobros + m.Monto)
+		}
+	}
+
+	out := make([]caja.ArqueoEfectivo, 0, len(orden))
+	for _, m := range orden {
+		f := filas[m]
+		f.Esperado = round2(f.Fondo + f.Cobros - f.Vuelto)
+		out = append(out, *f)
+	}
+	return out
 }
 
 // SesionDeActor devuelve el turno abierto del usuario, si tiene uno. Es lo que

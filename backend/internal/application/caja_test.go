@@ -1083,3 +1083,165 @@ func TestArqueo_LaDiferenciaLlegaAlLibroDiario(t *testing.T) {
 		})
 	}
 }
+
+/* --- La gaveta en varias monedas -----------------------------------------
+ *
+ * En Venezuela el cajero abre con bolívares Y con dólares (los necesita para
+ * dar vuelto en divisa). Hasta acá el fondo era un solo número y se asumía en
+ * bolívares: los dólares de apertura no entraban a ninguna parte y al cerrar
+ * aparecían como un SOBRANTE que no existía — tapando, de paso, cualquier
+ * faltante real en esa moneda. */
+
+// efectivoDe busca la fila de una moneda en el cuadre de la gaveta.
+func efectivoDe(a caja.Arqueo, moneda string) (caja.ArqueoEfectivo, bool) {
+	for _, f := range a.Efectivo {
+		if f.Moneda == moneda {
+			return f, true
+		}
+	}
+	return caja.ArqueoEfectivo{}, false
+}
+
+func TestAbrirCaja_FondosPorMoneda(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	ses, err := svc.AbrirCajaConFondos(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo,
+		[]caja.FondoCaja{{Moneda: "VES", Monto: 50}, {Moneda: "USD", Monto: 20}})
+	if err != nil {
+		t.Fatalf("abrir: %v", err)
+	}
+	if !casi(ses.FondoDe("VES"), 50) || !casi(ses.FondoDe("USD"), 20) {
+		t.Fatalf("fondos mal guardados: %+v", ses.Fondos)
+	}
+	// FondoInicial sigue siendo el del bolívar: los arqueos ya congelados lo
+	// llevan como campo propio y no se puede romper su lectura.
+	if !casi(ses.FondoInicial, 50) {
+		t.Errorf("FondoInicial debe seguir siendo el del bolívar, es %v", ses.FondoInicial)
+	}
+}
+
+// EL bug que motivó todo esto: el fondo en dólares tiene que entrar al esperado
+// de esa moneda, o al cerrar sale como sobrante inventado.
+func TestArqueo_ElFondoEnDivisaEntraAlEsperadoDeEsaMoneda(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	if _, err := svc.CargarTasaManual(empDemo, actorA, origenTst, 100, ""); err != nil {
+		t.Fatalf("tasa: %v", err)
+	}
+	if _, err := svc.AbrirCajaConFondos(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo,
+		[]caja.FondoCaja{{Moneda: "VES", Monto: 50}, {Moneda: "USD", Monto: 20}}); err != nil {
+		t.Fatalf("abrir: %v", err)
+	}
+	// Total 116 Bs + IGTF 3% por pagar en divisas = 119,48 Bs = 1,1948 US$ a 100
+	// Bs/US$. Se paga justo, sin vuelto.
+	if _, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{{SKU: "REF-2L", Cantidad: 1, PrecioUnitario: 100}},
+		Pagos:  []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoUSD, Monto: 1.1948, Moneda: "USD"}},
+	}); err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+	ses, _ := svc.SesionDeActor(empDemo, actorA)
+	arqueo, err := svc.ArqueoDeSesion(empDemo, ses.ID)
+	if err != nil {
+		t.Fatalf("arqueo: %v", err)
+	}
+	usd, ok := efectivoDe(arqueo, "USD")
+	if !ok {
+		t.Fatal("falta la fila de la gaveta en dólares")
+	}
+	if !casi(usd.Fondo, 20) {
+		t.Errorf("el fondo en US$ debe ser 20, es %v", usd.Fondo)
+	}
+	// 20 de fondo + 1,19 cobrado = 21,19 esperado. Antes daba 1,19 y los 20
+	// billetes de apertura salían como sobrante.
+	if !casi(usd.Esperado, 21.19) {
+		t.Errorf("esperado en US$ = %v, se esperaba 21,19 (20 de fondo + 1,19 cobrado)", usd.Esperado)
+	}
+	bs, _ := efectivoDe(arqueo, "VES")
+	if !casi(bs.Fondo, 50) || !casi(bs.Esperado, 50) {
+		t.Errorf("la gaveta en Bs no se movió: fondo %v, esperado %v", bs.Fondo, bs.Esperado)
+	}
+}
+
+// Contar los dólares tiene que producir una DIFERENCIA de verdad. Antes el
+// conteo por moneda era decorativo («para el acta») y un faltante en divisas no
+// lo detectaba nadie.
+func TestCerrarCaja_DiferenciaEnDivisaSeCalcula(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	if _, err := svc.CargarTasaManual(empDemo, actorA, origenTst, 100, ""); err != nil {
+		t.Fatalf("tasa: %v", err)
+	}
+	if _, err := svc.AbrirCajaConFondos(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo,
+		[]caja.FondoCaja{{Moneda: "VES", Monto: 50}, {Moneda: "USD", Monto: 20}}); err != nil {
+		t.Fatalf("abrir: %v", err)
+	}
+	contadoBs := 50.0
+	ses, err := svc.CerrarCajaConArqueo(empDemo, actorA, origenTst, caja1, false, application.CierreArqueo{
+		EfectivoContadoBs: &contadoBs,
+		// Faltan 3 US$ de los 20 que había.
+		ContadoEfectivo: []caja.FondoCaja{{Moneda: "USD", Monto: 17}},
+	})
+	if err != nil {
+		t.Fatalf("cerrar: %v", err)
+	}
+	usd, ok := efectivoDe(*ses.Arqueo, "USD")
+	if !ok {
+		t.Fatal("falta la fila de dólares")
+	}
+	if !usd.Declarado {
+		t.Error("la moneda contada tiene que quedar marcada como declarada")
+	}
+	if !casi(usd.Diferencia, -3) {
+		t.Errorf("faltante en US$ = %v, se esperaba -3", usd.Diferencia)
+	}
+	bs, _ := efectivoDe(*ses.Arqueo, "VES")
+	if !bs.Declarado || !casi(bs.Diferencia, 0) {
+		t.Errorf("la gaveta en Bs debe cuadrar y estar declarada: %+v", bs)
+	}
+}
+
+// Una moneda NO contada no puede leerse como «cuadra»: diferencia cero sin
+// declarar es «no se contó», y por eso lleva su propia marca.
+func TestCerrarCaja_MonedaSinContarNoCuentaComoCuadrada(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	if _, err := svc.AbrirCajaConFondos(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo,
+		[]caja.FondoCaja{{Moneda: "VES", Monto: 50}, {Moneda: "USD", Monto: 20}}); err != nil {
+		t.Fatalf("abrir: %v", err)
+	}
+	contadoBs := 50.0
+	ses, err := svc.CerrarCajaConArqueo(empDemo, actorA, origenTst, caja1, false,
+		application.CierreArqueo{EfectivoContadoBs: &contadoBs})
+	if err != nil {
+		t.Fatalf("cerrar: %v", err)
+	}
+	usd, _ := efectivoDe(*ses.Arqueo, "USD")
+	if usd.Declarado {
+		t.Error("no se contaron los dólares: no puede figurar como declarado")
+	}
+	if !casi(usd.Diferencia, 0) || !casi(usd.Esperado, 20) {
+		t.Errorf("sin conteo, la diferencia queda en cero pero el esperado se conserva: %+v", usd)
+	}
+}
+
+func TestAbrirCaja_RechazaFondoInvalido(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	if _, err := svc.AbrirCajaConFondos(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo,
+		[]caja.FondoCaja{{Moneda: "EUR", Monto: 10}}); err == nil {
+		t.Error("una moneda que la empresa no maneja debe rechazarse")
+	}
+	if _, err := svc.AbrirCajaConFondos(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo,
+		[]caja.FondoCaja{{Moneda: "VES", Monto: -5}}); err == nil {
+		t.Error("un fondo negativo debe rechazarse")
+	}
+}
+
+// La firma vieja (un solo número en bolívares) tiene que seguir funcionando: la
+// usan el POS y las pruebas que ya existían.
+func TestAbrirCajaConFondo_SigueSiendoBolivares(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	ses, err := svc.AbrirCajaConFondo(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo, 75)
+	if err != nil {
+		t.Fatalf("abrir: %v", err)
+	}
+	if !casi(ses.FondoInicial, 75) || !casi(ses.FondoDe("VES"), 75) {
+		t.Errorf("el fondo debe quedar en bolívares: %v / %+v", ses.FondoInicial, ses.Fondos)
+	}
+}
