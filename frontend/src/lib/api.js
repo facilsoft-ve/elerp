@@ -155,6 +155,12 @@ export const api = {
   registrarRetencionRecibida: (docId, body) => request(`/api/fiscal/documentos/${encodeURIComponent(docId)}/retencion-recibida`, { method: 'POST', body: JSON.stringify(body) }),
   registrarRetencionEmitida: (facturaCompraId, body) => request(`/api/compras/facturas/${encodeURIComponent(facturaCompraId)}/retencion-emitida`, { method: 'POST', body: JSON.stringify(body) }),
 
+  // Documentos RELACIONADOS de un documento fiscal: su origen (la factura que
+  // corrige, si es una nota), lo que salió de él (notas y anulación) y sus
+  // comprobantes de retención. Solo lectura de vínculos que ya existen en el dato
+  // (`refDocumentoId`); permite recorrer la traza en los dos sentidos.
+  documentosRelacionados: (docId) => request(`/api/fiscal/documentos/${encodeURIComponent(docId)}/relacionados`),
+
   // Libros fiscales (Libro de Ventas / Libro de Compras): reportes DERIVADOS del
   // ledger, de solo lectura, por contribuyente (empresa) y período mensual —
   // consolidan TODAS las sedes. anio/mes default al mes actual en el servidor.

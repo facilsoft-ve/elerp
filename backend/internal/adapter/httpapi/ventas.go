@@ -25,6 +25,28 @@ func (s *Server) registerVentas(r fiber.Router) {
 	g.Post("/cotizaciones/:id/confirmar", edit, s.handleConfirmarCotizacion)
 	g.Post("/cotizaciones/:id/facturar", edit, s.handleFacturarCotizacion)
 	g.Post("/cotizaciones/:id/cancelar", edit, s.handleCancelarCotizacion)
+
+	// DOCUMENTOS RELACIONADOS de un documento fiscal: su origen (la factura que
+	// corrige, si es una nota), lo que salió de él (notas y anulación) y sus
+	// comprobantes de retención. Es solo LECTURA de vínculos que ya existen en el
+	// dato, así que abre al mismo grupo de roles que ve los documentos —incluida
+	// la Contadora, que es justo quien audita la traza de correcciones.
+	//
+	// Cuelga de /fiscal/documentos porque es donde vive el documento; no colisiona
+	// con `/fiscal/documentos/:id` (un segmento más).
+	verDocs := s.requireRoles(usuario.RolDueno, usuario.RolDesarrollador, usuario.RolVendedor,
+		usuario.RolCajero, usuario.RolContadora)
+	r.Get("/fiscal/documentos/:id/relacionados", verDocs, s.handleDocumentosRelacionados)
+}
+
+// handleDocumentosRelacionados devuelve la traza de un documento en los dos
+// sentidos: de dónde viene y qué salió de él.
+func (s *Server) handleDocumentosRelacionados(c *fiber.Ctx) error {
+	out, ok := s.svc.DocumentosRelacionados(empresaIDOf(c), c.Params("id"))
+	if !ok {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "documento no existe"})
+	}
+	return c.JSON(out)
 }
 
 func (s *Server) handleCotizaciones(c *fiber.Ctx) error {

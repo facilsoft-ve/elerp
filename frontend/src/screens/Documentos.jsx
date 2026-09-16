@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Icon } from '../components/Icon.jsx'
-import { Button, Badge, Input, Select, Segmented, VistaDetalle, Modal, Empty, useToast, Field, Toggle } from '../components/primitives.jsx'
+import { Button, Badge, Input, Select, Segmented, VistaDetalle, Modal, Empty, useToast, Field, Toggle, TableSkeleton } from '../components/primitives.jsx'
 import { TablaDatos } from '../components/TablaDatos.jsx'
 import { fmtCurrency, fmtNum, fmtDate } from '../lib/format.js'
 import { metodoLabel, IVA_TASA } from '../lib/fiscal.js'
@@ -12,6 +12,18 @@ import { ComprobanteModal, comprobanteDeFactura } from '../components/Comprobant
 // Anular (reversa total), nota de crédito (reversa parcial, resta) y nota de
 // débito (cargo adicional, suma) son acciones sensibles: solo Dueña/Desarrollador.
 const puedeAnular = (rol) => ['dueno', 'desarrollador'].includes(rol)
+
+// Registrar la retención RECIBIDA es materia de cumplimiento fiscal, no del
+// mostrador: mismo gate que ya aplica el servidor en /fiscal/documentos/:id/
+// retencion-recibida (Dueña/Desarrollador/Contadora). La UI solo oculta; el
+// backend es el que protege.
+const puedeRetener = (rol) => ['dueno', 'desarrollador', 'contadora'].includes(rol)
+
+// Porcentajes típicos de retención de IVA en Venezuela.
+const PCT_RETENCION = [75, 100]
+const IMPUESTO_LABEL = { iva: 'IVA', islr: 'ISLR' }
+const hoyISO = () => new Date().toISOString().slice(0, 10)
+const round2n = (v) => Math.round((Number(v) || 0) * 100) / 100
 
 const TIPO_META = {
   factura: { label: 'Factura', color: 'huberp' },
@@ -119,7 +131,13 @@ export function Documentos({ tipo = null }) {
     return (
       <div>
         <DetalleDocumento doc={detalle} clienteName={clienteName} onVolver={() => setDetalle(null)}
-          onPDF={() => setPdf(detalle)}
+          onPDF={() => setPdf(detalle)} ccy={ui.ccy} rol={ui.rol}
+          // Saltar a un documento relacionado: se busca en la lista ya cargada y
+          // se reemplaza el detalle, para poder recorrer la traza sin volver atrás.
+          onAbrirDoc={(id) => {
+            const otro = (documentos || []).find((x) => x.id === id)
+            if (otro) setDetalle(otro)
+          }}
           onAnular={puedeAnular(ui.rol) ? (d) => { setDetalle(null); setAnular(d) } : null}
           onNotaCredito={puedeAnular(ui.rol) ? (d) => { setDetalle(null); setNotaCredito(d) } : null}
           onNotaDebito={puedeAnular(ui.rol) ? (d) => { setDetalle(null); setNotaDebito(d) } : null} />
@@ -329,20 +347,46 @@ function SelectorFacturaModal({ facturas, clienteName, onClose, onElegir }) {
   )
 }
 
-function DetalleDocumento({ doc, clienteName, onVolver, onPDF, onAnular, onNotaCredito, onNotaDebito }) {
+function DetalleDocumento({ doc, clienteName, onVolver, onPDF, onAnular, onNotaCredito, onNotaDebito, onAbrirDoc, ccy, rol }) {
+  const toast = useToast()
   const tm = TIPO_META[doc.tipo] || { label: doc.tipo, color: 'slate' }
+  // Traza del documento: de dónde viene y qué salió de él. Se pide al servidor
+  // (no se deriva en la pantalla) porque incluye las retenciones, que no viven
+  // en el `db` de documentos.
+  const [rel, setRel] = useState(undefined)
+  const [relErr, setRelErr] = useState(null)
+  const [retener, setRetener] = useState(false)
+  const cargarRel = useCallback(() => {
+    setRel(undefined); setRelErr(null)
+    api.documentosRelacionados(doc.id)
+      .then(setRel)
+      .catch((e) => { setRel(null); setRelErr(e) })
+  }, [doc.id])
+  useEffect(() => { cargarRel() }, [cargarRel])
+
+  // Retención RECIBIDA: solo sobre una factura viva y A CRÉDITO — una venta de
+  // contado ya se cobró completa en el mostrador, no deja saldo por cobrar que la
+  // retención pueda bajar (el servidor lo rechaza con ErrRetencionSoloCredito).
+  const retenible = doc.tipo === 'factura' && !doc.anulado && !!doc.credito
+  const impuestosTomados = (rel?.retenciones || []).map((r) => r.impuesto || 'iva')
   const om = ORIGEN_META[origenDe(doc)]
   const pos = origenDe(doc) === 'pos'
   const accionable = doc.tipo === 'factura' && !doc.anulado
   const btnPDF = <Button variant="secondary" icon={<Icon.Download size={15} />} onClick={onPDF}>PDF</Button>
+  // «Generar retención» desde la propia factura: la contadora pidió no tener que
+  // salirse del documento para registrarla.
+  const btnRetencion = retenible && puedeRetener(rol) ? (
+    <Button variant="secondary" icon={<Icon.Shield size={16} />} onClick={() => setRetener(true)}>Retención</Button>
+  ) : null
   const acciones = accionable && (onAnular || onNotaCredito || onNotaDebito) ? (
     <>
       {btnPDF}
+      {btnRetencion}
       {onNotaDebito ? <Button variant="secondary" icon={<Icon.Receipt size={16} />} onClick={() => onNotaDebito(doc)}>Nota de débito</Button> : null}
       {onNotaCredito ? <Button variant="destructive" icon={<Icon.Receipt size={16} />} onClick={() => onNotaCredito(doc)}>Nota de crédito</Button> : null}
       {onAnular ? <Button variant="destructive" icon={<Icon.CircleX size={16} />} onClick={() => onAnular(doc)}>Anular</Button> : null}
     </>
-  ) : btnPDF
+  ) : <>{btnPDF}{btnRetencion}</>
   return (
     <VistaDetalle onVolver={onVolver} icon={<Icon.Receipt size={18} />}
       titulo={doc.numeroCompleto} sub={`${tm.label} · ${fmtDate(doc.fecha)}`} acciones={acciones}>
@@ -404,6 +448,8 @@ function DetalleDocumento({ doc, clienteName, onVolver, onPDF, onAnular, onNotaC
             </div>
           ) : null}
 
+          <Relacionados rel={rel} error={relErr} onReintentar={cargarRel} onAbrirDoc={onAbrirDoc} ccy={ccy} />
+
           <div className="flex items-start gap-2 text-[11.5px] text-slate-500 bg-slate-50 dark:bg-slate-800/60 rounded-lg px-3 py-2">
             <Icon.Lock size={13} className="mt-0.5 shrink-0" />
             <span>Los documentos fiscales no se editan. Para corregir, la anulación genera un documento de reversa que preserva la traza completa.</span>
@@ -445,7 +491,105 @@ function DetalleDocumento({ doc, clienteName, onVolver, onPDF, onAnular, onNotaC
           </div>
         </div>
       </div>
+
+      {retener ? (
+        <RetencionDesdeFacturaModal doc={doc} impuestosTomados={impuestosTomados} ccy={ccy}
+          onClose={() => setRetener(false)}
+          onSaved={() => { setRetener(false); cargarRel() }} toast={toast} />
+      ) : null}
     </VistaDetalle>
+  )
+}
+
+/* Relacionados — la traza del documento en los DOS sentidos: de dónde viene
+ * (origen) y qué salió de él (notas, anulación) más sus retenciones.
+ *
+ * Los vínculos ya existían en el dato; lo que no había era manera de recorrerlos.
+ * Antes, para saber si una factura tenía nota de crédito había que buscarla a
+ * mano en la lista — y por eso nadie lo revisaba. */
+function Relacionados({ rel, error, onReintentar, onAbrirDoc, ccy }) {
+  const Caja = ({ children }) => (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4">
+      <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">Documentos relacionados</div>
+      {children}
+    </div>
+  )
+  if (error) {
+    return (
+      <Caja>
+        <div className="text-[12.5px] text-slate-500">{String(error.message || error)}</div>
+        <Button size="sm" variant="ghost" className="mt-2" icon={<Icon.Refresh size={14} />} onClick={onReintentar}>Reintentar</Button>
+      </Caja>
+    )
+  }
+  if (rel === undefined) return <Caja><TableSkeleton rows={2} cols={2} /></Caja>
+  if (!rel) return null
+
+  const derivados = rel.derivados || []
+  const retenciones = rel.retenciones || []
+  const vacio = !rel.origen && !derivados.length && !retenciones.length
+  if (vacio) {
+    return (
+      <Caja>
+        <div className="text-[12.5px] text-slate-400">
+          Sin notas, anulaciones ni retenciones sobre este documento.
+        </div>
+      </Caja>
+    )
+  }
+
+  const Fila = ({ v, etiqueta }) => {
+    const meta = TIPO_META[v.tipo] || { label: v.tipo, color: 'slate' }
+    return (
+      <button type="button" onClick={() => onAbrirDoc?.(v.id)}
+        className="w-full text-left px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-elerp-400 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {etiqueta ? <span className="text-[10.5px] uppercase tracking-wide text-slate-400">{etiqueta}</span> : null}
+          <Badge size="sm" color={meta.color}>{meta.label}</Badge>
+          <span className="num text-[12.5px] font-medium">{v.numeroCompleto}</span>
+          <span className="num text-[12px] text-slate-500 ml-auto private-mask">{fmtCurrency(v.total, ccy)}</span>
+        </div>
+        <div className="text-[11px] text-slate-400 mt-0.5">
+          {fmtDate(v.fecha)}{v.motivo ? ` · ${v.motivo}` : ''}
+        </div>
+      </button>
+    )
+  }
+
+  return (
+    <Caja>
+      <div className="space-y-1.5">
+        {/* Sentido «hacia atrás»: desde una nota se vuelve a su factura. */}
+        {rel.origen ? <Fila v={rel.origen} etiqueta="Origen" /> : null}
+        {/* Sentido «hacia adelante»: lo que salió de este documento. */}
+        {derivados.map((v) => <Fila key={v.id} v={v} />)}
+
+        {/* Las retenciones van aparte: NO son documentos fiscales de venta (no
+            llevan número de control ni entran al libro como una nota), y
+            mezclarlas con las notas confundiría la lectura. */}
+        {retenciones.length ? (
+          <div className="pt-1.5">
+            <div className="text-[10.5px] uppercase tracking-wide text-slate-400 mb-1">Retenciones</div>
+            <div className="space-y-1.5">
+              {retenciones.map((r) => (
+                <div key={r.id} className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Badge size="sm" color={r.impuesto === 'islr' ? 'teal' : 'sky'}>{IMPUESTO_LABEL[r.impuesto] || 'IVA'}</Badge>
+                    <span className="num text-[12.5px] font-medium">{r.numeroComprobante}</span>
+                    <span className="num text-[12px] text-violet-700 dark:text-violet-300 ml-auto private-mask">
+                      {fmtCurrency(r.montoRetenido, ccy)}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    {fmtDate(r.fecha)} · {fmtNum(r.porcentaje, 2)}%{r.concepto ? ` · ${r.concepto}` : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </Caja>
   )
 }
 
@@ -672,6 +816,187 @@ function NotaDebitoModal({ doc, onClose, onSaved, toast, ccy }) {
             <span className="font-semibold">Total a cargar</span><span className="num font-semibold text-sky-700 dark:text-sky-300 private-mask">+{fmtCurrency(total, ccy)}</span>
           </div>
         </div>
+      </div>
+    </Modal>
+  )
+}
+
+/* RetencionDesdeFacturaModal — registrar el comprobante de retención SIN salir
+ * de la factura.
+ *
+ * Nota de la contadora: «al usuario no le gusta hacer las retenciones saliéndose
+ * de la factura». Antes había que irse a Retenciones, buscar la factura en un
+ * selector y recién ahí cargarla. Acá el documento ya está elegido: solo queda
+ * el impuesto, el número del comprobante que entregó el cliente y el porcentaje.
+ *
+ * `impuestosTomados` son los impuestos que ESTA factura ya tiene retenidos. El
+ * servidor rechaza el duplicado (único por dirección+impuesto+documento), así que
+ * la pantalla lo dice ANTES en vez de dejar intentar y fallar.
+ */
+function RetencionDesdeFacturaModal({ doc, impuestosTomados = [], ccy, onClose, onSaved, toast }) {
+  const libres = ['iva', 'islr'].filter((i) => !impuestosTomados.includes(i))
+  const [impuesto, setImpuesto] = useState(libres[0] || 'iva')
+  const [numeroComprobante, setNumeroComprobante] = useState('')
+  const [fecha, setFecha] = useState(hoyISO())
+  const [porcentaje, setPorcentaje] = useState('75')
+  const [base, setBase] = useState('')
+  const [concepto, setConcepto] = useState('')
+  const [sustraendo, setSustraendo] = useState('')
+  const [touched, setTouched] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const esISLR = impuesto === 'islr'
+  const ivaDoc = Number(doc.iva) || 0
+  const netoDoc = round2n((Number(doc.total) || 0) - ivaDoc - (Number(doc.igtf) || 0))
+
+  // Al pasar a ISLR se sugiere la base = neto del documento, que es el punto de
+  // partida habitual; sigue siendo editable porque el concepto puede acotarla.
+  useEffect(() => { if (esISLR && !base) setBase(String(netoDoc)) }, [esISLR, base, netoDoc])
+
+  const pct = Number(porcentaje)
+  const pctValido = Number.isFinite(pct) && pct > 0 && pct <= 100
+  const baseCalc = esISLR ? (Number(base) || 0) : ivaDoc
+  const sust = esISLR ? (Number(sustraendo) || 0) : 0
+  const montoRetenido = pctValido ? Math.max(0, round2n(baseCalc * (pct / 100) - sust)) : 0
+
+  const errComp = !numeroComprobante.trim() ? 'El número de comprobante es obligatorio (lo emitió el cliente).' : ''
+  const errFecha = !fecha ? 'La fecha es obligatoria.' : ''
+  const errPct = !pctValido ? 'El porcentaje debe estar entre 0 y 100.' : ''
+  const errBase = esISLR && !(baseCalc > 0) ? 'La base gravable debe ser mayor que cero.' : ''
+  const errIVA = !esISLR && !(ivaDoc > 0) ? 'Esta factura no tiene IVA sobre el cual retener.' : ''
+  const errConcepto = esISLR && !concepto.trim() ? 'Indica el concepto de la retención de ISLR.' : ''
+  const errMonto = esISLR && pctValido && baseCalc > 0 && !(montoRetenido > 0)
+    ? 'El monto a retener queda en cero (revisa el porcentaje y el sustraendo).' : ''
+  const puede = !errComp && !errFecha && !errPct && !errBase && !errIVA && !errConcepto && !errMonto && !!libres.length
+
+  const confirmar = async () => {
+    setTouched(true)
+    if (!puede) return
+    setBusy(true)
+    const body = { impuesto, numeroComprobante: numeroComprobante.trim(), fecha, porcentaje: pct }
+    if (esISLR) { body.base = Number(base) || 0; body.concepto = concepto.trim(); body.sustraendo = Number(sustraendo) || 0 }
+    try {
+      const creada = await api.registrarRetencionRecibida(doc.id, body)
+      toast({
+        title: 'Retención registrada',
+        body: `${IMPUESTO_LABEL[impuesto]} · Nº ${creada?.numeroComprobante || body.numeroComprobante} · ${fmtCurrency(montoRetenido, ccy)}.`,
+      })
+      await onSaved()
+    } catch (e) {
+      toast({ title: 'No se pudo registrar la retención', body: e?.message || 'Error', kind: 'error' })
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} size="md" icon={<Icon.Shield size={18} />}
+      title="Registrar retención" sub={`Sobre ${doc.numeroCompleto} · ${doc.clienteNombre || 'cliente'}`}
+      footer={<>
+        <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+        <Button variant="secondary" onClick={confirmar} loading={busy} disabled={!libres.length} icon={<Icon.Shield size={16} />}>
+          Registrar retención
+        </Button>
+      </>}>
+      <div className="space-y-3.5">
+        {!libres.length ? (
+          <Empty framed icon={<Icon.CircleCheck size={20} />} title="Esta factura ya tiene sus retenciones"
+            body="Hay un comprobante registrado de IVA y otro de ISLR. Solo se admite uno por impuesto y documento; para corregir, hay que revisarlo en Retenciones." />
+        ) : (
+          <>
+            {impuestosTomados.length ? (
+              <div className="flex items-start gap-2 text-[12.5px] text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-2.5">
+                <Icon.CircleAlert size={15} className="mt-0.5 shrink-0" />
+                <span>
+                  Esta factura ya tiene retención de <strong>{impuestosTomados.map((i) => IMPUESTO_LABEL[i]).join(' y ')}</strong>.
+                  Solo queda disponible {libres.map((i) => IMPUESTO_LABEL[i]).join(' y ')}.
+                </span>
+              </div>
+            ) : null}
+
+            <Field label="Impuesto">
+              <Segmented value={impuesto} onChange={setImpuesto}
+                options={libres.map((i) => ({ value: i, label: IMPUESTO_LABEL[i] }))} />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Nº de comprobante" required error={touched ? errComp : ''} hint="el que emitió el cliente">
+                <Input value={numeroComprobante} onChange={(e) => setNumeroComprobante(e.target.value)}
+                  onBlur={() => setTouched(true)} invalid={touched && !!errComp}
+                  placeholder="Ej: 20240800001234" className="num" autoFocus />
+              </Field>
+              <Field label="Fecha del comprobante" required error={touched ? errFecha : ''}>
+                <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)}
+                  onBlur={() => setTouched(true)} invalid={touched && !!errFecha} />
+              </Field>
+            </div>
+
+            {esISLR ? (
+              <>
+                <Field label="Concepto de la retención" required error={touched ? errConcepto : ''} hint="según la providencia">
+                  <Input value={concepto} onChange={(e) => setConcepto(e.target.value)}
+                    onBlur={() => setTouched(true)} invalid={touched && !!errConcepto}
+                    placeholder="Ej: Honorarios profesionales, servicios, alquiler…" />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Base gravable" required error={touched ? errBase : ''} hint="sugerida: neto del documento">
+                    <Input type="number" min={0} step="any" className="num" value={base}
+                      onChange={(e) => setBase(e.target.value)} onBlur={() => setTouched(true)}
+                      invalid={touched && !!errBase} placeholder="0,00" />
+                  </Field>
+                  <Field label="Sustraendo" hint="opcional">
+                    <Input type="number" min={0} step="any" className="num" value={sustraendo}
+                      onChange={(e) => setSustraendo(e.target.value)} placeholder="0,00" />
+                  </Field>
+                </div>
+              </>
+            ) : null}
+
+            <Field label="Porcentaje retenido" required error={touched ? (errPct || errIVA) : ''}>
+              {esISLR ? (
+                <Input type="number" min={0} max={100} step="any" className="w-32 num" value={porcentaje}
+                  onChange={(e) => setPorcentaje(e.target.value)} onBlur={() => setTouched(true)}
+                  invalid={touched && !!errPct} placeholder="%" />
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Select value={PCT_RETENCION.includes(pct) ? String(pct) : 'otro'} className="w-40"
+                    onChange={(e) => { const v = e.target.value; if (v !== 'otro') setPorcentaje(v) }}>
+                    {PCT_RETENCION.map((p) => <option key={p} value={p}>{p}%</option>)}
+                    <option value="otro">Otro…</option>
+                  </Select>
+                  {!PCT_RETENCION.includes(pct) ? (
+                    <Input type="number" min={0} max={100} step="any" className="w-28 num" value={porcentaje}
+                      onChange={(e) => setPorcentaje(e.target.value)} onBlur={() => setTouched(true)}
+                      invalid={touched && !!errPct} placeholder="%" />
+                  ) : null}
+                </div>
+              )}
+            </Field>
+
+            {/* Monto a retener EN VIVO: el servidor lo vuelve a derivar de la base
+                y el porcentaje, así que esto es un espejo, nunca la fuente. */}
+            <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3 space-y-1.5 text-[13px]">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">{esISLR ? 'Base gravable' : 'IVA de la factura'}</span>
+                <span className="num private-mask">{fmtCurrency(baseCalc, ccy)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Porcentaje</span>
+                <span className="num">{pctValido ? `${fmtNum(pct, 2)}%` : '—'}</span>
+              </div>
+              {esISLR && sust > 0 ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Sustraendo</span>
+                  <span className="num private-mask">−{fmtCurrency(sust, ccy)}</span>
+                </div>
+              ) : null}
+              {touched && errMonto ? <div className="text-[11.5px] text-red-600">{errMonto}</div> : null}
+              <div className="border-t border-slate-200 dark:border-slate-700 pt-1.5 flex items-center justify-between">
+                <span className="font-semibold">Monto a retener</span>
+                <span className="num font-semibold private-mask text-violet-700 dark:text-violet-300">{fmtCurrency(montoRetenido, ccy)}</span>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   )
