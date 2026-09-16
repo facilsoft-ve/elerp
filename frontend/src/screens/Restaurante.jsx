@@ -5,6 +5,7 @@ import { Button, Badge, Card, Select, Segmented, Toggle, Empty, Input, Field, Mo
 import { useData } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
 import { RestauranteInicio } from './RestauranteInicio.jsx'
+import { Reservaciones } from './Reservaciones.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
 import { precioEnBs, monedaDe } from '../lib/precio.js'
@@ -80,6 +81,7 @@ const pendienteCuenta = (c) => (c?.items || []).reduce(
 const TABS = [
   { id: 'inicio', label: 'Resumen del salón', icon: <Icon.Activity size={15} /> },
   { id: 'comandera', label: 'Comandera', icon: <Icon.ClipboardList size={15} />, mesonero: true },
+  { id: 'reservas', label: 'Reservaciones', icon: <Icon.Users size={15} />, mesonero: true },
   { id: 'mesas', label: 'Mapa de mesas', icon: <Icon.Utensils size={15} /> },
   { id: 'mesoneros', label: 'Mesoneros y asignación', icon: <Icon.Users size={15} /> },
   { id: 'cocina', label: 'Cocina', icon: <Icon.Activity size={15} /> },
@@ -93,6 +95,7 @@ const TABS = [
 const SUBTITULO = {
   inicio: 'Cómo está el salón ahora, qué pasa en cocina y cómo va el día. Desde acá saltas a cada sección.',
   comandera: 'Toma el pedido de cada mesa y envíalo a cocina. Cuando pidan la cuenta, prefactura y la caja cobra.',
+  reservas: 'La agenda del salón: toma reservas y, cuando llegan, verifica por nombre o cédula y siéntalos (se abre su cuenta).',
   mesas: 'Diseña el salón sobre una grilla: ubica las mesas, bloquea los espacios donde no puede haber ninguna y fija cuántas personas caben.',
   mesoneros: 'Asigna a cada mesonero las mesas o las zonas que atiende. Sin asignar, cualquiera atiende cualquier mesa.',
   cocina: 'Las comandas entrantes en vivo, con su nota y su tiempo de espera. Marca cada plato listo cuando salga.',
@@ -118,6 +121,7 @@ export function Restaurante({ route }) {
         tabs={tabs} activeTab={tab} onTab={setTab} />
       {tab === 'inicio' ? <RestauranteInicio irA={setTab} /> : null}
       {tab === 'comandera' ? <Comandera /> : null}
+      {tab === 'reservas' ? <Reservaciones /> : null}
       {tab === 'mesas' ? <MapaMesas /> : null}
       {tab === 'mesoneros' ? <MesonerosAsignacion /> : null}
       {tab === 'cocina' ? <Cocina /> : null}
@@ -596,6 +600,20 @@ export function Comandera() {
 
   const cuentaDeMesa = (mesaId) => cuentasAbiertas.find((c) => c.mesaId === mesaId)
 
+  // Mesas APARTADAS ahora por una reserva cercana. Es lo que hace que la reserva sirva:
+  // que a las 8 la mesa esté libre. Se refresca solo cada pocos minutos —una reserva no
+  // cambia de un segundo a otro— y si el módulo no responde, el tablero sigue igual.
+  const [reservadas, setReservadas] = useState({})
+  useEffect(() => {
+    let vivo = true
+    const traer = () => api.mesasReservadas()
+      .then((r) => { if (vivo) setReservadas(r || {}) })
+      .catch(() => {})
+    traer()
+    const t = setInterval(traer, 120000)
+    return () => { vivo = false; clearInterval(t) }
+  }, [])
+
   // --- Asignación de mesas ---
   // Una mesa es «de» un mesonero por id o por su zona. Sin nadie asignado, es de
   // cualquiera. Solo condiciona al mesonero: la caja y la dueña atienden todas.
@@ -708,7 +726,8 @@ export function Comandera() {
       <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {mesas.map((m) => {
           const cta = cuentaDeMesa(m.id)
-          const est = cta ? 'ocupada' : (m.estado || 'libre')
+          const reservada = !cta ? reservadas[m.id] : null
+          const est = cta ? 'ocupada' : reservada ? 'reservada' : (m.estado || 'libre')
           const col = c(est)
           // Las mesas de OTRO mesonero se atenúan: siguen siendo tocables (cubrir a un
           // compañero es normal) pero se ven distintas, así el mesero encuentra las
@@ -726,6 +745,9 @@ export function Comandera() {
               </div>
               <div className="text-[12.5px] mt-1.5 opacity-80">{m.zona || '—'}</div>
               <div className="mt-2 text-[15px] font-bold">{cta ? fmtCurrency(pendienteCuenta(cta), 'VES') : col.label}</div>
+              {reservada ? (
+                <div className="text-[11.5px] opacity-80 truncate">{reservada.hora} · {reservada.nombre}</div>
+              ) : null}
               {cta && pendienteCuenta(cta) !== totalCuenta(cta) ? (
                 <div className="text-[11px] opacity-70">de {fmtCurrency(totalCuenta(cta), 'VES')} · parte ya facturada</div>
               ) : null}

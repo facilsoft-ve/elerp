@@ -60,6 +60,117 @@ func (s *Server) registerRestaurante(r fiber.Router) {
 	emitir := s.requireRoles(usuario.RolDueno, usuario.RolDesarrollador, usuario.RolCajero, usuario.RolVendedor)
 	g.Get("/cuentas/:id/preview-cobro", s.handlePreviewCobro)
 	g.Post("/cuentas/:id/cobrar", emitir, s.handleCobrarCuenta)
+
+	// Reservaciones del salón. Las maneja el salón entero —quien recibe en la puerta
+	// suele ser un mesonero— salvo la contadora, que es consulta.
+	reservas := s.requireRoles(application.RolesReservas...)
+	g.Get("/reservas", reservas, s.handleReservas)
+	g.Post("/reservas", reservas, s.handleCrearReserva)
+	g.Patch("/reservas/:id", reservas, s.handleActualizarReserva)
+	g.Post("/reservas/:id/estado", reservas, s.handleEstadoReserva)
+	g.Post("/reservas/:id/sentar", reservas, s.handleSentarReserva)
+	// Mesas apartadas AHORA: lo que el tablero pinta como «reservada».
+	g.Get("/reservas/mesas", reservas, s.handleMesasReservadas)
+}
+
+// handleReservas devuelve la agenda. `fecha` (YYYY-MM-DD) elige el día —vacío = hoy—,
+// `q` filtra por nombre o cédula (la búsqueda de la puerta) y `proximas=1` trae de hoy
+// en adelante, que es la agenda con la que trabaja el salón.
+func (s *Server) handleReservas(c *fiber.Ctx) error {
+	emp, sede := empresaIDOf(c), sedeIDOf(c)
+	if c.Query("proximas") == "1" {
+		return c.JSON(s.svc.ReservasProximas(emp, sede))
+	}
+	return c.JSON(s.svc.BuscarReservas(emp, sede, c.Query("fecha"), c.Query("q")))
+}
+
+func (s *Server) handleMesasReservadas(c *fiber.Ctx) error {
+	return c.JSON(s.svc.MesasReservadasAhora(empresaIDOf(c), sedeIDOf(c)))
+}
+
+// reservaBody es el cuerpo de creación/edición de una reserva.
+type reservaBody struct {
+	Fecha     string `json:"fecha"`
+	Hora      string `json:"hora"`
+	Personas  int    `json:"personas"`
+	Nombre    string `json:"nombre"`
+	Documento string `json:"documento"`
+	Telefono  string `json:"telefono"`
+	MesaID    string `json:"mesaId"`
+	Zona      string `json:"zona"`
+	Nota      string `json:"nota"`
+}
+
+func (b reservaBody) entrada(c *fiber.Ctx) application.EntradaReserva {
+	return application.EntradaReserva{
+		EmpresaID: empresaIDOf(c), SedeID: sedeIDOf(c),
+		Fecha: b.Fecha, Hora: b.Hora, Personas: b.Personas,
+		Nombre: b.Nombre, Documento: b.Documento, Telefono: b.Telefono,
+		MesaID: b.MesaID, Zona: b.Zona, Nota: b.Nota,
+		Actor: principalOf(c).UserID, Origen: origen(c),
+	}
+}
+
+func (s *Server) handleCrearReserva(c *fiber.Ctx) error {
+	var in reservaBody
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.CrearReserva(in.entrada(c))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+func (s *Server) handleActualizarReserva(c *fiber.Ctx) error {
+	var in reservaBody
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.ActualizarReserva(c.Params("id"), in.entrada(c))
+	if err != nil {
+		return reservaErr(c, err)
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleEstadoReserva(c *fiber.Ctx) error {
+	var in struct {
+		Estado string `json:"estado"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.CambiarEstadoReserva(empresaIDOf(c), c.Params("id"), in.Estado,
+		principalOf(c).UserID, origen(c))
+	if err != nil {
+		return reservaErr(c, err)
+	}
+	return c.JSON(out)
+}
+
+// handleSentarReserva recibe al cliente: abre su cuenta de mesa y devuelve las dos
+// cosas juntas, para que la pantalla pueda saltar directo a tomar el pedido.
+func (s *Server) handleSentarReserva(c *fiber.Ctx) error {
+	var in struct {
+		MesaID string `json:"mesaId"`
+	}
+	_ = c.BodyParser(&in) // cuerpo opcional: la reserva puede traer ya su mesa
+	r, cta, err := s.svc.SentarReserva(empresaIDOf(c), c.Params("id"), in.MesaID,
+		principalOf(c).UserID, rolOf(c), origen(c))
+	if err != nil {
+		return reservaErr(c, err)
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"reserva": r, "cuenta": cta})
+}
+
+// reservaErr traduce los errores de reservas: 404 lo que no existe, 400 lo demás.
+func reservaErr(c *fiber.Ctx, err error) error {
+	if errors.Is(err, application.ErrReservaNoExiste) {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 }
 
 func (s *Server) handlePreviewCobro(c *fiber.Ctx) error {

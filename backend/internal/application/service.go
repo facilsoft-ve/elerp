@@ -23,6 +23,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/plantilla"
 	"github.com/mornix/elerp/internal/domain/promocion"
 	"github.com/mornix/elerp/internal/domain/proveedor"
+	"github.com/mornix/elerp/internal/domain/reserva"
 	"github.com/mornix/elerp/internal/domain/tasa"
 	"github.com/mornix/elerp/internal/domain/tesoreria"
 	"github.com/mornix/elerp/internal/domain/unidadmedida"
@@ -149,6 +150,9 @@ type Service struct {
 	// cuentasMesa son las cuentas de mesa (pedido abierto por mesa) del módulo
 	// Restaurante. Operativo, no ledger. Se cablea con ConCuentas; ver cuenta.go.
 	cuentasMesa cuenta.Repository
+	// reservas son las RESERVACIONES del salón (módulo Restaurante). Opcional: sin
+	// cablear, las pantallas de reservas quedan apagadas y el resto funciona igual.
+	reservas reserva.Repository
 }
 
 // New construye el Service con sus puertos (el orden debe coincidir con cmd/api).

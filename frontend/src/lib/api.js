@@ -459,6 +459,21 @@ export const api = {
   marcarItemCuenta: (id, itemId, estado) => request(`/api/restaurante/cuentas/${encodeURIComponent(id)}/items/${encodeURIComponent(itemId)}/estado`, { method: 'POST', body: JSON.stringify({ estado }) }),
   cerrarCuenta: (id) => request(`/api/restaurante/cuentas/${encodeURIComponent(id)}/cerrar`, { method: 'POST' }),
   previewCobroCuenta: (id) => request(`/api/restaurante/cuentas/${encodeURIComponent(id)}/preview-cobro`),
+  // Reservaciones del salón. `fecha` elige el día (vacío = hoy) y `q` busca por
+  // nombre o cédula, que es como se verifica a quien llega a la puerta.
+  reservas: ({ fecha = '', q = '', proximas = false } = {}) => {
+    const p = new URLSearchParams()
+    if (fecha) p.set('fecha', fecha)
+    if (q) p.set('q', q)
+    if (proximas) p.set('proximas', '1')
+    const qs = p.toString()
+    return request('/api/restaurante/reservas' + (qs ? `?${qs}` : ''))
+  },
+  mesasReservadas: () => request('/api/restaurante/reservas/mesas'),
+  crearReserva: (body) => request('/api/restaurante/reservas', { method: 'POST', body: JSON.stringify(body) }),
+  actualizarReserva: (id, body) => request(`/api/restaurante/reservas/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  estadoReserva: (id, estado) => request(`/api/restaurante/reservas/${encodeURIComponent(id)}/estado`, { method: 'POST', body: JSON.stringify({ estado }) }),
+  sentarReserva: (id, mesaId = '') => request(`/api/restaurante/reservas/${encodeURIComponent(id)}/sentar`, { method: 'POST', body: JSON.stringify({ mesaId }) }),
   cobrarCuenta: (id, body) => request(`/api/restaurante/cuentas/${encodeURIComponent(id)}/cobrar`, { method: 'POST', body: JSON.stringify(body) }),
 
   // ---- Configuración › Almacenes (por sede) ----
