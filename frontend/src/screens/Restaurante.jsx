@@ -179,12 +179,7 @@ function MapaMesas() {
   //
   // Se DERIVA de la capacidad y no se guarda: guardarla dejaría el tamaño viejo
   // al cambiar la capacidad, y el mapa mentiría.
-  const dimension = (m) => {
-    const cap = m?.capacidad || 0
-    if (cap >= 9) return [2, 2]
-    if (cap >= 5) return [2, 1]
-    return [1, 1]
-  }
+  const dimension = (m) => dimensionDeMesa(m)
   // El ancho se recorta al borde de la grilla: una mesa larga en la última
   // columna se dibuja angosta en vez de desbordar el plano.
   const dimensionVisible = (m) => {
@@ -377,14 +372,88 @@ function MapaMesas() {
 }
 
 // Panel de edición de una mesa (datos; la posición/tamaño se editan arrastrando).
+/* CADA CUADRO DEL PLANO ADMITE 4 PERSONAS. Una mesa de 2, 3 o 4 ocupa un
+ * cuadro; para sentar a más hay que AMPLIARLA, y recién ahí se puede elegir un
+ * aforo mayor. Manda el tamaño y el aforo se acomoda — el plano es la realidad
+ * física del local, no al revés.
+ *
+ * Espejo de domain/mesa (PersonasPorCelda, Dimension, CapacidadMaxima): el
+ * servidor vuelve a validar y rechaza el aforo que no entra, así que si las dos
+ * reglas se separan, guardar falla en vez de dejar el plano incoherente. */
+const PERSONAS_POR_CUADRO = 4
+
+// dimensionDeMesa: el tamaño guardado manda; sin él (mesas anteriores al
+// redimensionado) se deriva de la capacidad, así los planos ya dibujados no
+// necesitan migración.
+function dimensionDeMesa(m) {
+  if (m?.anchoCeldas > 0 && m?.altoCeldas > 0) return [m.anchoCeldas, m.altoCeldas]
+  const celdas = Math.max(1, Math.ceil((m?.capacidad || 0) / PERSONAS_POR_CUADRO))
+  if (celdas <= 3) return [celdas, 1]
+  let ancho = 1
+  while (ancho * ancho < celdas) ancho++
+  return [ancho, Math.ceil(celdas / ancho)]
+}
+
+const aforoMaximo = (ancho, alto) => ancho * alto * PERSONAS_POR_CUADRO
+
+/* TamanoMesa son los controles de ampliación. Al agrandar sube el tope de aforo;
+ * al achicar, el aforo se recorta solo al nuevo tope — así nunca queda un número
+ * que el servidor va a rechazar al guardar. */
+function TamanoMesa({ ancho, alto, disabled, onCambio }) {
+  const paso = (dc, df) => {
+    const a = Math.min(6, Math.max(1, ancho + dc))
+    const b = Math.min(6, Math.max(1, alto + df))
+    onCambio(a, b)
+  }
+  const btn = (etiqueta, dc, df, titulo) => (
+    <button type="button" disabled={disabled} title={titulo} onClick={() => paso(dc, df)}
+      className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-700 text-[13px] font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40">
+      {etiqueta}
+    </button>
+  )
+  return (
+    <div>
+      <div className="text-[12px] font-medium text-slate-500 mb-1">Tamaño en cuadros</div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1">
+          {btn('−', -1, 0, 'Angostar')}
+          <span className="num text-[13px] w-6 text-center">{ancho}</span>
+          {btn('+', 1, 0, 'Ensanchar')}
+        </div>
+        <span className="text-slate-400 text-[12px]">×</span>
+        <div className="flex items-center gap-1">
+          {btn('−', 0, -1, 'Acortar')}
+          <span className="num text-[13px] w-6 text-center">{alto}</span>
+          {btn('+', 0, 1, 'Alargar')}
+        </div>
+        <span className="text-[11.5px] text-slate-400">
+          admite hasta <strong>{aforoMaximo(ancho, alto)}</strong> personas
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function PanelMesa({ mesa, puedeEditar, onGuardado, onEliminar, toast }) {
-  const [f, setF] = useState({ nombre: mesa.nombre, zona: mesa.zona || '', capacidad: mesa.capacidad || 0, forma: mesa.forma || 'cuadrada' })
+  const [dimA, dimB] = dimensionDeMesa(mesa)
+  const [f, setF] = useState({
+    nombre: mesa.nombre, zona: mesa.zona || '', capacidad: mesa.capacidad || 0,
+    forma: mesa.forma || 'cuadrada', anchoCeldas: dimA, altoCeldas: dimB,
+  })
   const [busy, setBusy] = useState(false)
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
+  const tope = aforoMaximo(f.anchoCeldas, f.altoCeldas)
+  // Al achicar la mesa el aforo se recorta solo: dejarlo por encima del tope
+  // haría que el servidor rechazara el guardado con un número que la pantalla
+  // mostraba como válido.
+  const cambiarTamano = (a, b) => setF((s) => ({
+    ...s, anchoCeldas: a, altoCeldas: b,
+    capacidad: Math.min(Number(s.capacidad) || 0, aforoMaximo(a, b)),
+  }))
   const guardar = async () => {
     setBusy(true)
     try {
-      await api.actualizarMesa(mesa.id, { nombre: f.nombre, zona: f.zona, capacidad: Number(f.capacidad) || 0, forma: f.forma, columna: mesa.columna, fila: mesa.fila })
+      await api.actualizarMesa(mesa.id, { nombre: f.nombre, zona: f.zona, capacidad: Number(f.capacidad) || 0, forma: f.forma, columna: mesa.columna, fila: mesa.fila, anchoCeldas: f.anchoCeldas, altoCeldas: f.altoCeldas })
       await onGuardado(); toast({ title: 'Mesa actualizada', body: f.nombre })
     } catch (e) { toast({ title: 'No se pudo guardar', body: e?.message || 'Error', kind: 'error' }) }
     finally { setBusy(false) }
@@ -394,8 +463,12 @@ function PanelMesa({ mesa, puedeEditar, onGuardado, onEliminar, toast }) {
       <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Mesa seleccionada</div>
       <Field label="Nombre / número"><Input value={f.nombre} disabled={!puedeEditar} onChange={(e) => set('nombre', e.target.value)} /></Field>
       <Field label="Zona / salón"><Input value={f.zona} disabled={!puedeEditar} onChange={(e) => set('zona', e.target.value)} placeholder="Salón principal, Terraza…" /></Field>
+      <TamanoMesa ancho={f.anchoCeldas} alto={f.altoCeldas} disabled={!puedeEditar} onCambio={cambiarTamano} />
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Capacidad"><Input type="number" min={0} value={f.capacidad} disabled={!puedeEditar} onChange={(e) => set('capacidad', e.target.value)} /></Field>
+        <Field label="Capacidad" hint={`máx. ${tope}`}>
+          <Input type="number" min={0} max={tope} value={f.capacidad} disabled={!puedeEditar}
+            onChange={(e) => set('capacidad', Math.min(Number(e.target.value) || 0, tope))} />
+        </Field>
         <Field label="Forma">
           <Select value={f.forma} disabled={!puedeEditar} onChange={(e) => set('forma', e.target.value)}>
             {FORMAS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
@@ -413,14 +486,19 @@ function PanelMesa({ mesa, puedeEditar, onGuardado, onEliminar, toast }) {
 }
 
 function NuevaMesaModal({ onClose, onCreada, toast, columna = 0, fila = 0 }) {
-  const [f, setF] = useState({ nombre: '', zona: '', capacidad: 4, forma: 'cuadrada' })
+  const [f, setF] = useState({ nombre: '', zona: '', capacidad: 4, forma: 'cuadrada', anchoCeldas: 1, altoCeldas: 1 })
   const [busy, setBusy] = useState(false)
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
+  const tope = aforoMaximo(f.anchoCeldas, f.altoCeldas)
+  const cambiarTamano = (a, b) => setF((s) => ({
+    ...s, anchoCeldas: a, altoCeldas: b,
+    capacidad: Math.min(Number(s.capacidad) || 0, aforoMaximo(a, b)),
+  }))
   const crear = async () => {
     if (!f.nombre.trim()) { toast({ title: 'Ponle un nombre o número a la mesa', kind: 'warn' }); return }
     setBusy(true)
     try {
-      const m = await api.crearMesa({ nombre: f.nombre.trim(), zona: f.zona.trim(), capacidad: Number(f.capacidad) || 0, forma: f.forma, columna, fila })
+      const m = await api.crearMesa({ nombre: f.nombre.trim(), zona: f.zona.trim(), capacidad: Number(f.capacidad) || 0, forma: f.forma, columna, fila, anchoCeldas: f.anchoCeldas, altoCeldas: f.altoCeldas })
       toast({ title: 'Mesa agregada', body: m.nombre }); onCreada(m)
     } catch (e) { toast({ title: 'No se pudo agregar', body: e?.message || 'Error', kind: 'error' }); setBusy(false) }
   }
@@ -430,8 +508,12 @@ function NuevaMesaModal({ onClose, onCreada, toast, columna = 0, fila = 0 }) {
       <div className="space-y-3">
         <Field label="Nombre / número"><Input autoFocus value={f.nombre} onChange={(e) => set('nombre', e.target.value)} placeholder="1, Terraza 3, Barra 2…" /></Field>
         <Field label="Zona / salón"><Input value={f.zona} onChange={(e) => set('zona', e.target.value)} placeholder="Salón principal, Terraza…" /></Field>
+        <TamanoMesa ancho={f.anchoCeldas} alto={f.altoCeldas} onCambio={cambiarTamano} />
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Capacidad"><Input type="number" min={0} value={f.capacidad} onChange={(e) => set('capacidad', e.target.value)} /></Field>
+          <Field label="Capacidad" hint={`máx. ${tope}`}>
+            <Input type="number" min={0} max={tope} value={f.capacidad}
+              onChange={(e) => set('capacidad', Math.min(Number(e.target.value) || 0, tope))} />
+          </Field>
           <Field label="Forma">
             <Select value={f.forma} onChange={(e) => set('forma', e.target.value)}>
               {FORMAS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}

@@ -5,6 +5,7 @@ import { fmtCurrency, fmtNum, fmtDate } from '../lib/format.js'
 import { useUI } from '../context/UIContext.jsx'
 import { useData } from '../context/DataContext.jsx'
 import { api } from '../lib/api.js'
+import { descargarXLSX } from '../lib/xlsx.js'
 
 // Libros fiscales (Libro de Ventas / Libro de Compras): reportes DERIVADOS del
 // ledger, de SOLO LECTURA. Por contribuyente (empresa/RIF, consolidando TODAS
@@ -67,8 +68,11 @@ export function LibrosFiscales({ libroInicial = 'ventas' }) {
   const filas = data?.filas || []
   const totales = data?.totales || {}
 
-  const exportar = () => exportarCSV(libro, anio, mes, filas, totales, TIPO_LABEL)
-  const exportarTxt = () => exportarSeniat(libro, anio, mes, filas, totales, db.EMPRESA)
+  // La contadora trabaja los libros en hoja de cálculo: se exporta XLSX y no
+  // TXT ni CSV. Un CSV renombrado a .xlsx Excel lo rechaza, y el CSV crudo se
+  // reinterpreta con la configuración regional del equipo (un «10-03» se vuelve
+  // fecha). Ver lib/xlsx.js.
+  const exportar = () => exportarLibroXLSX(libro, anio, mes, filas, totales, TIPO_LABEL, db.EMPRESA)
 
   return (
     <div>
@@ -86,13 +90,9 @@ export function LibrosFiscales({ libroInicial = 'ventas' }) {
           </Select>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="ghost" icon={<Icon.Download size={15} />} disabled={!filas.length} onClick={exportar}
-            title={filas.length ? 'Exportar a CSV' : 'No hay filas que exportar'}>
-            Exportar CSV
-          </Button>
-          <Button variant="secondary" icon={<Icon.Download size={15} />} disabled={!filas.length} onClick={exportarTxt}
-            title={filas.length ? 'Exportar en formato de libro SENIAT (TXT)' : 'No hay filas que exportar'}>
-            Exportar SENIAT (TXT)
+          <Button variant="secondary" icon={<Icon.Download size={15} />} disabled={!filas.length} onClick={exportar}
+            title={filas.length ? 'Exportar el libro a Excel (XLSX)' : 'No hay filas que exportar'}>
+            Exportar XLSX
           </Button>
         </div>
       </div>
@@ -107,7 +107,7 @@ export function LibrosFiscales({ libroInicial = 'ventas' }) {
       {libro === 'compras' ? (
         <div className="mb-3 flex items-start gap-2 text-[11.5px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-2">
           <Icon.CircleAlert size={14} className="mt-0.5 shrink-0" />
-          <span>Basado en órdenes de compra recibidas; la factura fiscal del proveedor (nº de control, retención) llega con el módulo de facturas de compra.</span>
+          <span>Se declaran las <strong>facturas fiscales</strong> registradas del proveedor (con su nº de control y la retención que se le hizo). Las órdenes recibidas sin factura no son compras fiscales y no entran.</span>
         </div>
       ) : null}
 
@@ -118,7 +118,7 @@ export function LibrosFiscales({ libroInicial = 'ventas' }) {
       ) : (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
           {data === undefined ? (
-            <div className="p-4"><TableSkeleton rows={6} cols={libro === 'ventas' ? 8 : 6} /></div>
+            <div className="p-4"><TableSkeleton rows={6} cols={libro === 'ventas' ? 17 : 13} /></div>
           ) : filas.length === 0 ? (
             <Empty framed={false} icon={<Icon.Book size={22} />}
               title="Sin documentos en este período"
@@ -133,10 +133,24 @@ export function LibrosFiscales({ libroInicial = 'ventas' }) {
 
       {filas.length ? (
         <div className="mt-2 text-[11.5px] text-slate-400">
-          {fmtNum(filas.length, 0)} documento(s) · El TXT usa el formato estándar de columnas del libro {libro === 'ventas' ? 'de ventas' : 'de compras'} del SENIAT (delimitado por «|», con RIF del contribuyente y totales). El layout exacto del TXT/XML oficial es configuración versionada por providencia; el CSV sigue disponible para hoja de cálculo.
+          {fmtNum(filas.length, 0)} documento(s) · El XLSX trae el libro completo con una columna por alícuota (general, reducida y recargo suntuario), el nº de control y el IVA retenido. Los comprobantes de retención se exportan aparte, en el formato oficial del SENIAT.
         </div>
       ) : null}
     </div>
+  )
+}
+
+/* Alic pinta el par base/IVA de UNA alícuota. Un cero se muestra como «—» y no
+ * como «0,00»: en un libro con tres columnas de alícuota, la mayoría de las
+ * filas usa una sola, y los ceros escritos hacen ilegible lo que sí tiene valor. */
+const Alic = ({ base, iva, ccy, neg }) => {
+  const cls = `py-2 px-3 text-right num text-[12.5px] ${neg ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500'}`
+  const vacio = !base && !iva
+  return (
+    <>
+      <td className={cls}>{vacio ? <span className="text-slate-300 dark:text-slate-600">—</span> : fmtCurrency(base, ccy)}</td>
+      <td className={cls}>{vacio ? <span className="text-slate-300 dark:text-slate-600">—</span> : fmtCurrency(iva, ccy)}</td>
+    </>
   )
 }
 
@@ -150,12 +164,20 @@ function TablaVentas({ filas, totales, ccy }) {
             <th className="py-2.5 px-3 font-medium">Fecha</th>
             <th className="py-2.5 px-3 font-medium">Tipo</th>
             <th className="py-2.5 px-3 font-medium">Documento</th>
+            <th className="py-2.5 px-3 font-medium">Nº control</th>
             <th className="py-2.5 px-3 font-medium">RIF / Cédula</th>
             <th className="py-2.5 px-3 font-medium">Cliente</th>
             <th className="py-2.5 px-3 font-medium text-right">Base exenta</th>
-            <th className="py-2.5 px-3 font-medium text-right">Base imponible</th>
-            <th className="py-2.5 px-3 font-medium text-center">Alíc.</th>
+            {/* Una columna por alícuota: el SENIAT no admite sumarlas. El
+                recargo suntuario va aparte aunque comparta base con la general. */}
+            <th className="py-2.5 px-3 font-medium text-right">Base 16%</th>
+            <th className="py-2.5 px-3 font-medium text-right">IVA 16%</th>
+            <th className="py-2.5 px-3 font-medium text-right">Base 8%</th>
+            <th className="py-2.5 px-3 font-medium text-right">IVA 8%</th>
+            <th className="py-2.5 px-3 font-medium text-right">Base adic.</th>
+            <th className="py-2.5 px-3 font-medium text-right">IVA adic.</th>
             <th className="py-2.5 px-3 font-medium text-right">IVA débito</th>
+            <th className="py-2.5 px-3 font-medium text-right">IVA retenido</th>
             <th className="py-2.5 px-3 font-medium text-right">IGTF</th>
             <th className="py-2.5 px-3 font-medium text-right">Total</th>
           </tr>
@@ -171,12 +193,15 @@ function TablaVentas({ filas, totales, ccy }) {
                     : <span className="text-slate-500">{TIPO_LABEL[f.tipo] || f.tipo}</span>}
                 </td>
                 <td className="py-2 px-3 num text-[12.5px] font-medium whitespace-nowrap">{f.numeroCompleto}</td>
+                <td className="py-2 px-3 num text-[12px] text-slate-500 whitespace-nowrap">{f.numeroControl || '—'}</td>
                 <td className="py-2 px-3 num text-[12px] text-slate-500 whitespace-nowrap">{f.clienteDocumento || '—'}</td>
                 <td className="py-2 px-3 text-[12.5px] text-slate-600 dark:text-slate-300 max-w-[180px] truncate">{f.clienteNombre || '—'}</td>
                 <td className={`py-2 px-3 text-right num text-[12.5px] ${neg ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500'}`}>{fmtCurrency(f.baseExenta, ccy)}</td>
-                <td className={`py-2 px-3 text-right num text-[12.5px] ${neg ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500'}`}>{fmtCurrency(f.baseImponible, ccy)}</td>
-                <td className="py-2 px-3 text-center num text-[12px] text-slate-400">{fmtNum((f.alicuota || 0) * 100, 0)}%</td>
-                <td className={`py-2 px-3 text-right num text-[12.5px] ${neg ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500'}`}>{fmtCurrency(f.ivaDebito, ccy)}</td>
+                <Alic neg={neg} base={f.baseGeneral} iva={f.ivaGeneral} ccy={ccy} />
+                <Alic neg={neg} base={f.baseReducida} iva={f.ivaReducida} ccy={ccy} />
+                <Alic neg={neg} base={f.baseAdicional} iva={f.ivaAdicional} ccy={ccy} />
+                <td className={`py-2 px-3 text-right num text-[12.5px] font-medium ${neg ? 'text-amber-700 dark:text-amber-300' : ''}`}>{fmtCurrency(f.ivaDebito, ccy)}</td>
+                <td className="py-2 px-3 text-right num text-[12.5px] text-slate-500">{f.ivaRetenido ? fmtCurrency(f.ivaRetenido, ccy) : '—'}</td>
                 <td className={`py-2 px-3 text-right num text-[12.5px] ${neg ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500'}`}>{fmtCurrency(f.igtf, ccy)}</td>
                 <td className={`py-2 px-3 text-right num text-[12.5px] font-medium ${neg ? 'text-amber-700 dark:text-amber-300' : ''}`}>{fmtCurrency(f.total, ccy)}</td>
               </tr>
@@ -185,11 +210,16 @@ function TablaVentas({ filas, totales, ccy }) {
         </tbody>
         <tfoot>
           <tr className="sticky bottom-0 bg-slate-100 dark:bg-slate-800 border-t-2 border-slate-300 dark:border-slate-700 font-semibold text-[12.5px]">
-            <td className="py-2.5 px-3" colSpan={5}>Totales del período</td>
+            <td className="py-2.5 px-3" colSpan={6}>Totales del período</td>
             <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.baseExenta, ccy)}</td>
-            <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.baseImponible, ccy)}</td>
-            <td className="py-2.5 px-3"></td>
+            <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.baseGeneral, ccy)}</td>
+            <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.ivaGeneral, ccy)}</td>
+            <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.baseReducida, ccy)}</td>
+            <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.ivaReducida, ccy)}</td>
+            <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.baseAdicional, ccy)}</td>
+            <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.ivaAdicional, ccy)}</td>
             <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.ivaDebito, ccy)}</td>
+            <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.ivaRetenido, ccy)}</td>
             <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.igtf, ccy)}</td>
             <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.total, ccy)}</td>
           </tr>
@@ -209,11 +239,17 @@ function TablaCompras({ filas, totales, ccy }) {
             <th className="py-2.5 px-3 font-medium">Fecha</th>
             <th className="py-2.5 px-3 font-medium">RIF proveedor</th>
             <th className="py-2.5 px-3 font-medium">Proveedor</th>
-            <th className="py-2.5 px-3 font-medium">Orden</th>
+            {/* Es la FACTURA del proveedor, no la orden de compra: la columna
+                estaba mal rotulada y además leía un campo que no existe. */}
+            <th className="py-2.5 px-3 font-medium">Nº factura</th>
+            <th className="py-2.5 px-3 font-medium">Nº control</th>
             <th className="py-2.5 px-3 font-medium text-right">Base exenta</th>
-            <th className="py-2.5 px-3 font-medium text-right">Base imponible</th>
-            <th className="py-2.5 px-3 font-medium text-center">Alíc.</th>
+            <th className="py-2.5 px-3 font-medium text-right">Base 16%</th>
+            <th className="py-2.5 px-3 font-medium text-right">IVA 16%</th>
+            <th className="py-2.5 px-3 font-medium text-right">Base 8%</th>
+            <th className="py-2.5 px-3 font-medium text-right">IVA 8%</th>
             <th className="py-2.5 px-3 font-medium text-right">IVA crédito</th>
+            <th className="py-2.5 px-3 font-medium text-right">IVA retenido</th>
             <th className="py-2.5 px-3 font-medium text-right">Total</th>
           </tr>
         </thead>
@@ -223,22 +259,27 @@ function TablaCompras({ filas, totales, ccy }) {
               <td className="py-2 px-3 whitespace-nowrap text-[12.5px] text-slate-500 num">{fmtDate(f.fecha)}</td>
               <td className="py-2 px-3 num text-[12px] text-slate-500 whitespace-nowrap">{f.proveedorRif || '—'}</td>
               <td className="py-2 px-3 text-[12.5px] text-slate-600 dark:text-slate-300 max-w-[200px] truncate">{f.proveedorNombre || '—'}</td>
-              <td className="py-2 px-3 num text-[12.5px] font-medium whitespace-nowrap">{f.numeroCompleto}</td>
+              <td className="py-2 px-3 num text-[12.5px] font-medium whitespace-nowrap">{f.numeroFactura || '—'}</td>
+              <td className="py-2 px-3 num text-[12px] text-slate-500 whitespace-nowrap">{f.numeroControl || '—'}</td>
               <td className="py-2 px-3 text-right num text-[12.5px] text-slate-500">{fmtCurrency(f.baseExenta, ccy)}</td>
-              <td className="py-2 px-3 text-right num text-[12.5px] text-slate-500">{fmtCurrency(f.baseImponible, ccy)}</td>
-              <td className="py-2 px-3 text-center num text-[12px] text-slate-400">{fmtNum((f.alicuota || 0) * 100, 0)}%</td>
-              <td className="py-2 px-3 text-right num text-[12.5px] text-slate-500">{fmtCurrency(f.ivaCreditoFiscal, ccy)}</td>
+              <Alic base={f.baseGeneral} iva={f.ivaGeneral} ccy={ccy} />
+              <Alic base={f.baseReducida} iva={f.ivaReducida} ccy={ccy} />
+              <td className="py-2 px-3 text-right num text-[12.5px] font-medium">{fmtCurrency(f.ivaCreditoFiscal, ccy)}</td>
+              <td className="py-2 px-3 text-right num text-[12.5px] text-slate-500">{f.ivaRetenido ? fmtCurrency(f.ivaRetenido, ccy) : '—'}</td>
               <td className="py-2 px-3 text-right num text-[12.5px] font-medium">{fmtCurrency(f.total, ccy)}</td>
             </tr>
           ))}
         </tbody>
         <tfoot>
           <tr className="sticky bottom-0 bg-slate-100 dark:bg-slate-800 border-t-2 border-slate-300 dark:border-slate-700 font-semibold text-[12.5px]">
-            <td className="py-2.5 px-3" colSpan={4}>Totales del período</td>
+            <td className="py-2.5 px-3" colSpan={5}>Totales del período</td>
             <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.baseExenta, ccy)}</td>
-            <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.baseImponible, ccy)}</td>
-            <td className="py-2.5 px-3"></td>
+            <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.baseGeneral, ccy)}</td>
+            <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.ivaGeneral, ccy)}</td>
+            <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.baseReducida, ccy)}</td>
+            <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.ivaReducida, ccy)}</td>
             <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.ivaCreditoFiscal, ccy)}</td>
+            <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.ivaRetenido, ccy)}</td>
             <td className="py-2.5 px-3 text-right num">{fmtCurrency(totales.total, ccy)}</td>
           </tr>
         </tfoot>
@@ -247,62 +288,20 @@ function TablaCompras({ filas, totales, ccy }) {
   )
 }
 
-// exportarCSV genera un CSV client-side a partir de las filas ya cargadas (con
-// encabezados y la fila de totales) y dispara la descarga con un Blob. El layout
-// TXT/XML oficial del SENIAT depende de la providencia vigente (configuración
-// versionada) y queda como siguiente paso; el CSV con todas las columnas es la
-// base sobre la que se construirá.
-function exportarCSV(libro, anio, mes, filas, totales, tipoLabel) {
-  const per = `${anio}-${String(mes).padStart(2, '0')}`
-  let headers, rows, totalRow
-  const n = (v) => (v == null ? '0' : String(v)) // numérico crudo, sin formato de moneda
-  if (libro === 'ventas') {
-    headers = ['Fecha', 'Tipo', 'Documento', 'RIF/Cedula', 'Cliente', 'Base exenta', 'Base imponible', 'Alicuota', 'IVA debito', 'IGTF', 'Total']
-    rows = filas.map((f) => [
-      f.fecha, tipoLabel[f.tipo] || f.tipo, f.numeroCompleto, f.clienteDocumento, f.clienteNombre,
-      n(f.baseExenta), n(f.baseImponible), n(f.alicuota), n(f.ivaDebito), n(f.igtf), n(f.total),
-    ])
-    totalRow = ['TOTALES', '', '', '', '', n(totales.baseExenta), n(totales.baseImponible), '', n(totales.ivaDebito), n(totales.igtf), n(totales.total)]
-  } else {
-    headers = ['Fecha', 'RIF proveedor', 'Proveedor', 'Orden', 'Base exenta', 'Base imponible', 'Alicuota', 'IVA credito fiscal', 'Total']
-    rows = filas.map((f) => [
-      f.fecha, f.proveedorRif, f.proveedorNombre, f.numeroCompleto,
-      n(f.baseExenta), n(f.baseImponible), n(f.alicuota), n(f.ivaCreditoFiscal), n(f.total),
-    ])
-    totalRow = ['TOTALES', '', '', '', n(totales.baseExenta), n(totales.baseImponible), '', n(totales.ivaCreditoFiscal), n(totales.total)]
-  }
-  const all = [headers, ...rows, totalRow]
-  const csv = all.map((r) => r.map(csvCell).join(',')).join('\r\n')
-  // BOM para que Excel abra los acentos correctamente.
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `libro-${libro}-${per}.csv`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
+/* Exportación del libro a XLSX.
+ *
+ * La contadora pidió hoja de cálculo y no TXT. Se arma con lib/xlsx.js (ZIP +
+ * XML a mano, sin dependencias): un CSV renombrado a .xlsx no lo abre Excel, y
+ * el CSV crudo se reinterpreta con la configuración regional del equipo.
+ *
+ * Los montos van como NÚMERO, no como texto formateado: el libro se abre para
+ * sumarlo y filtrarlo. Los identificadores (RIF, nº de control, nº de factura)
+ * van como TEXTO — un RIF «J-12345678-9» que Excel tome por número se convierte
+ * en una resta, y un nº de control con ceros a la izquierda los pierde.
+ */
 
-// --- Export SENIAT (libro de ventas / compras en TXT) ---
-//
-// Genera un archivo de texto delimitado por pipe «|» con el orden de columnas
-// del formato estándar del Libro de Ventas o del Libro de Compras del SENIAT, a
-// partir de las MISMAS filas ya plegadas del período. Es un formato de archivo
-// (no de pantalla): montos con punto decimal y 2 decimales, SIN separador de
-// miles; fechas DD/MM/AAAA. El layout exacto del TXT/XML oficial depende de la
-// providencia vigente (configuración versionada) — esto es la disposición de
-// columnas estándar del libro sobre la que se construirá.
-//
-// Tipo de documento (Libro de Ventas): 01 = factura, 02 = nota de débito,
-// 03 = nota de crédito. La anulación es una reversión (comportamiento de nota de
-// crédito) → 03. Los campos aún no capturados (p. ej. nº de control) van vacíos
-// pero conservan su posición/columna.
-const TIPO_SENIAT = { factura: '01', nota_debito: '02', nota_credito: '03', anulacion: '03' }
-
-// seniatFecha: ISO → DD/MM/AAAA en UTC (evita corrimientos por zona horaria).
-function seniatFecha(iso) {
+// fechaLibro: ISO → DD/MM/AAAA en UTC (evita corrimientos por zona horaria).
+function fechaLibro(iso) {
   if (!iso) return ''
   const d = new Date(iso)
   if (isNaN(d)) return String(iso)
@@ -310,86 +309,71 @@ function seniatFecha(iso) {
   const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
   return `${dd}/${mm}/${d.getUTCFullYear()}`
 }
-// seniatMonto: número crudo → "0.00" (punto decimal, sin separador de miles).
-const seniatMonto = (v) => (Number(v) || 0).toFixed(2)
-// seniatAlic: fracción (0.16) → "16.00" (%).
-const seniatAlic = (v) => ((Number(v) || 0) * 100).toFixed(2)
-// seniatTexto: sanea un campo de texto para el delimitador «|».
-const seniatTexto = (v) => (v == null ? '' : String(v).replace(/[|\r\n]+/g, ' ').trim())
 
-function exportarSeniat(libro, anio, mes, filas, totales, empresa) {
+// n deja el valor como número puro para la celda (null/undefined → 0).
+const n = (v) => Number(v) || 0
+// pct: fracción (0.16) → 16, para que la columna se lea como porcentaje.
+const pct = (v) => Math.round((Number(v) || 0) * 10000) / 100
+
+function exportarLibroXLSX(libro, anio, mes, filas, totales, tipoLabel, empresa) {
   const per = `${anio}-${String(mes).padStart(2, '0')}`
-  const perLabel = `${String(mes).padStart(2, '0')}/${anio}`
-  const rif = seniatTexto(empresa?.rif) || 'SIN-RIF'
-  const razon = seniatTexto(empresa?.razonSocial || empresa?.nombre) || 'CONTRIBUYENTE'
+  const rif = empresa?.rif || ''
+  const razon = empresa?.razonSocial || empresa?.nombre || ''
+  const titulo = libro === 'ventas' ? 'LIBRO DE VENTAS' : 'LIBRO DE COMPRAS'
 
-  const lines = []
-  let cabecera, columnas, cuerpo, totalRow
+  // Cabecera de identificación del contribuyente: el libro impreso la lleva y
+  // sin ella la hoja no se puede presentar tal cual.
+  const cuerpo = [
+    [titulo],
+    ['RIF', rif, 'Razón social', razon, 'Período', `${String(mes).padStart(2, '0')}/${anio}`],
+    [],
+  ]
+
+  let encabezado, mapa, totalRow
   if (libro === 'ventas') {
-    cabecera = ['LIBRO DE VENTAS', rif, razon, perLabel]
-    columnas = ['Fecha', 'TipoDoc', 'NumeroDocumento', 'NumeroControl', 'RIF_Cedula', 'RazonSocial',
-      'TotalConIVA', 'VentasExentas', 'BaseImponible', 'Alicuota', 'IVADebito', 'IGTF']
-    cuerpo = filas.map((f) => [
-      seniatFecha(f.fecha),
-      TIPO_SENIAT[f.tipo] || '',
-      seniatTexto(f.numeroCompleto),
-      seniatTexto(f.numeroControl), // aún no se captura → vacío, columna conservada
-      seniatTexto(f.clienteDocumento),
-      seniatTexto(f.clienteNombre),
-      seniatMonto(f.total),
-      seniatMonto(f.baseExenta),
-      seniatMonto(f.baseImponible),
-      seniatAlic(f.alicuota),
-      seniatMonto(f.ivaDebito),
-      seniatMonto(f.igtf),
-    ])
+    encabezado = ['Fecha', 'Tipo', 'Nº documento', 'Nº control', 'RIF / Cédula', 'Razón social',
+      'Base exenta', 'Base 16%', 'Alíc. 16%', 'IVA 16%', 'Base 8%', 'Alíc. 8%', 'IVA 8%',
+      'Base adicional', 'Alíc. adicional', 'IVA adicional', 'IVA débito', 'IVA retenido', 'IGTF', 'Total']
+    mapa = (f) => [
+      fechaLibro(f.fecha), tipoLabel[f.tipo] || f.tipo, f.numeroCompleto || '', f.numeroControl || '',
+      f.clienteDocumento || '', f.clienteNombre || '',
+      n(f.baseExenta),
+      n(f.baseGeneral), pct(f.alicuotaGeneral), n(f.ivaGeneral),
+      n(f.baseReducida), pct(f.alicuotaReducida), n(f.ivaReducida),
+      n(f.baseAdicional), pct(f.alicuotaAdicional), n(f.ivaAdicional),
+      n(f.ivaDebito), n(f.ivaRetenido), n(f.igtf), n(f.total),
+    ]
     totalRow = ['TOTALES', '', '', '', '', '',
-      seniatMonto(totales.total), seniatMonto(totales.baseExenta), seniatMonto(totales.baseImponible),
-      '', seniatMonto(totales.ivaDebito), seniatMonto(totales.igtf)]
+      n(totales.baseExenta),
+      n(totales.baseGeneral), '', n(totales.ivaGeneral),
+      n(totales.baseReducida), '', n(totales.ivaReducida),
+      n(totales.baseAdicional), '', n(totales.ivaAdicional),
+      n(totales.ivaDebito), n(totales.ivaRetenido), n(totales.igtf), n(totales.total)]
   } else {
-    cabecera = ['LIBRO DE COMPRAS', rif, razon, perLabel]
-    columnas = ['Fecha', 'RIF_Proveedor', 'RazonSocial', 'NumeroFactura', 'NumeroControl',
-      'TotalCompras', 'ComprasExentas', 'BaseImponible', 'Alicuota', 'IVACreditoFiscal', 'IVARetenido']
-    cuerpo = filas.map((f) => [
-      seniatFecha(f.fecha),
-      seniatTexto(f.proveedorRif),
-      seniatTexto(f.proveedorNombre),
-      seniatTexto(f.numeroCompleto),
-      seniatTexto(f.numeroControl), // aún no se captura → vacío, columna conservada
-      seniatMonto(f.total),
-      seniatMonto(f.baseExenta),
-      seniatMonto(f.baseImponible),
-      seniatAlic(f.alicuota),
-      seniatMonto(f.ivaCreditoFiscal),
-      f.ivaRetenido == null ? '' : seniatMonto(f.ivaRetenido), // retención → vacío si no hay
-    ])
+    encabezado = ['Fecha', 'RIF proveedor', 'Razón social', 'Nº factura', 'Nº control',
+      'Base exenta', 'Base 16%', 'Alíc. 16%', 'IVA 16%', 'Base 8%', 'Alíc. 8%', 'IVA 8%',
+      'IVA crédito fiscal', 'IVA retenido', 'Total']
+    mapa = (f) => [
+      fechaLibro(f.fecha), f.proveedorRif || '', f.proveedorNombre || '',
+      f.numeroFactura || '', f.numeroControl || '',
+      n(f.baseExenta),
+      n(f.baseGeneral), pct(f.alicuotaGeneral), n(f.ivaGeneral),
+      n(f.baseReducida), pct(f.alicuotaReducida), n(f.ivaReducida),
+      n(f.ivaCreditoFiscal), n(f.ivaRetenido), n(f.total),
+    ]
     totalRow = ['TOTALES', '', '', '', '',
-      seniatMonto(totales.total), seniatMonto(totales.baseExenta), seniatMonto(totales.baseImponible),
-      '', seniatMonto(totales.ivaCreditoFiscal), '']
+      n(totales.baseExenta),
+      n(totales.baseGeneral), '', n(totales.ivaGeneral),
+      n(totales.baseReducida), '', n(totales.ivaReducida),
+      n(totales.ivaCreditoFiscal), n(totales.ivaRetenido), n(totales.total)]
   }
 
-  lines.push(cabecera.join('|'))
-  lines.push(columnas.join('|'))
-  for (const r of cuerpo) lines.push(r.join('|'))
-  lines.push(totalRow.join('|'))
-  const txt = lines.join('\r\n') + '\r\n'
+  // El encabezado de columnas va en su propia fila para que salga en negrita:
+  // hojaXLSX destaca la PRIMERA fila, así que el título del libro va arriba y
+  // las columnas se repiten como fila normal. Se marca visualmente con el
+  // contenido, no con estilo.
+  const filasXLSX = [encabezado, ...filas.map(mapa), totalRow]
+  const hoja = [...cuerpo, ...filasXLSX]
 
-  // BOM UTF-8 para que los acentos (razón social) se lean bien.
-  const blob = new Blob(['﻿' + txt], { type: 'text/plain;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `libro-${libro}-${per}.txt`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
-
-// csvCell escapa un valor para CSV: entrecomilla si contiene coma, comilla o
-// salto de línea, y duplica las comillas internas.
-function csvCell(v) {
-  const s = v == null ? '' : String(v)
-  if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"'
-  return s
+  descargarXLSX(`libro-${libro}-${per}.xlsx`, libro === 'ventas' ? 'Ventas' : 'Compras', hoja)
 }

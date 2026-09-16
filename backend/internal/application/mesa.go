@@ -9,12 +9,21 @@ import (
 	"github.com/mornix/elerp/internal/domain/mesa"
 )
 
+// maxCeldasMesa acota el lado de una mesa en cuadros.
+const maxCeldasMesa = 6
+
 // Errores de negocio de las mesas (módulo Restaurante).
 var (
 	// ErrMesasSolapadas: dos mesas comparten celdas. Una mesa de más capacidad
 	// ocupa varias (ver mesa.Dimension), así que el choque puede no ser evidente
 	// mirando solo las esquinas.
 	ErrMesasSolapadas = errors.New("hay mesas encimadas en el plano")
+	// ErrAforoExcedeTamano: se pidió más gente de la que caben en los cuadros
+	// que ocupa la mesa (4 por cuadro).
+	ErrAforoExcedeTamano = errors.New("el aforo no cabe en el tamaño de la mesa")
+	// ErrTamanoMesaInvalido acota el tamaño: una mesa más grande que esto no es
+	// una mesa, es un error de tecleo que desarma el plano.
+	ErrTamanoMesaInvalido = errors.New("el tamaño de la mesa es inválido")
 	ErrMesasNoDisponible = errors.New("el módulo de mesas no está disponible")
 	ErrMesaNoExiste      = errors.New("la mesa no existe")
 	ErrMesaSinNombre     = errors.New("la mesa necesita un nombre o número")
@@ -126,6 +135,22 @@ func (s *Service) saneaMesa(m mesa.Mesa) (mesa.Mesa, error) {
 	}
 	if m.Capacidad < 0 {
 		m.Capacidad = 0
+	}
+	// Tamaño en cuadros. Sin tamaño explícito se usa el mínimo que hace falta
+	// para el aforo pedido: dar de alta «mesa de 8» no debería obligar a
+	// dimensionarla a mano antes de poder guardarla.
+	if m.AnchoCeldas <= 0 || m.AltoCeldas <= 0 {
+		m.AnchoCeldas, m.AltoCeldas = mesa.DimensionSugerida(m.Capacidad)
+	}
+	if m.AnchoCeldas > maxCeldasMesa || m.AltoCeldas > maxCeldasMesa {
+		return mesa.Mesa{}, ErrTamanoMesaInvalido
+	}
+	// EL TOPE: cada cuadro admite 4 personas. Para sentar a más hay que ampliar
+	// la mesa. Se valida acá y no solo en la pantalla porque es la regla que
+	// mantiene coherente el plano con el aforo declarado.
+	if m.Capacidad > m.CapacidadMaxima() {
+		return mesa.Mesa{}, fmt.Errorf("%w: una mesa de %d×%d cuadros admite hasta %d personas",
+			ErrAforoExcedeTamano, m.AnchoCeldas, m.AltoCeldas, m.CapacidadMaxima())
 	}
 	if m.Ancho <= 0 || m.Alto <= 0 {
 		m.Ancho, m.Alto = dimsPorForma(m.Forma)

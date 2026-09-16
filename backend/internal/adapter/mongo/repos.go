@@ -62,6 +62,7 @@ type Store struct {
 	Reservas         *ReservaRepo
 	Mesoneros        *MesoneroRepo
 	Turnos           *TurnoRepo
+	Alicuotas        *AlicuotaRepo
 	Horarios         *HorarioRepo
 }
 
@@ -97,6 +98,7 @@ func New(db *gomongo.Database) *Store {
 	st.attachImpresoras(db)   // definido en cocina.go
 	st.attachCuentas(db)      // definido en cuenta.go
 	st.attachReservas(db)     // definido en reserva.go
+	st.attachAlicuotas(db)    // definido en impuesto.go (maestro de impuestos)
 	st.attachMesoneros(db)    // definido en mesonero.go (credenciales + turnos)
 	return st
 }

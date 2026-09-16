@@ -94,6 +94,14 @@ type Producto struct {
 	// maíz, el arroz y buena parte de la cesta básica están exentos; facturar
 	// IVA sobre ellos es un error fiscal, no un redondeo.
 	ExentoIVA bool `json:"exentoIva" bson:"exentoiva"`
+	// AlicuotaCodigo apunta al MAESTRO DE IMPUESTOS (fiscal.Alicuota): "general",
+	// "reducida", "suntuario", "exento"… Se guarda el CÓDIGO y no el porcentaje,
+	// para que una providencia que cambie la tasa no obligue a tocar el catálogo
+	// entero.
+	//
+	// VACÍO es válido y significa «como siempre»: exento si ExentoIVA, general si
+	// no. Así los catálogos ya cargados siguen facturando igual sin migración.
+	AlicuotaCodigo string `json:"alicuotaCodigo,omitempty" bson:"alicuotacodigo,omitempty"`
 	Activo    bool `json:"activo" bson:"activo"`
 	// ImagenURL apunta al archivo en el bucket de la empresa. Vacío significa
 	// «sin imagen asignada» y la interfaz muestra su marcador explícito, nunca

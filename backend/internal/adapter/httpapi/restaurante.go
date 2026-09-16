@@ -302,13 +302,19 @@ type mesaBody struct {
 	Forma     string `json:"forma"`
 	Columna   int    `json:"columna"`
 	Fila      int    `json:"fila"`
-	Activa    *bool  `json:"activa"`
+	// AnchoCeldas y AltoCeldas son el tamaño de la mesa en cuadros del plano.
+	// Cada cuadro admite 4 personas, así que ampliar la mesa es lo que habilita
+	// un aforo mayor. 0 = que el servidor le ponga el mínimo que haga falta.
+	AnchoCeldas int   `json:"anchoCeldas"`
+	AltoCeldas  int   `json:"altoCeldas"`
+	Activa      *bool `json:"activa"`
 }
 
 func (b mesaBody) modelo() mesa.Mesa {
 	return mesa.Mesa{
 		Nombre: b.Nombre, Zona: b.Zona, Capacidad: b.Capacidad, Forma: b.Forma,
 		Columna: b.Columna, Fila: b.Fila,
+		AnchoCeldas: b.AnchoCeldas, AltoCeldas: b.AltoCeldas,
 	}
 }
 

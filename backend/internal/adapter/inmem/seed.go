@@ -87,6 +87,7 @@ type Store struct {
 	Reservas         *ReservaRepo
 	Mesoneros        *MesoneroRepo
 	Turnos           *TurnoRepo
+	Alicuotas        *AlicuotaRepo
 	Horarios         *HorarioRepo
 }
 
@@ -134,6 +135,7 @@ func New() *Store {
 		Reservas:     NewReservaRepo(),
 		Mesoneros:    NewMesoneroRepo(),
 		Turnos:       NewTurnoRepo(),
+		Alicuotas:    NewAlicuotaRepo(),
 		Horarios:     NewHorarioRepo(),
 	}
 	s.seedDemo()

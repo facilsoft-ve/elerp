@@ -5,6 +5,7 @@ import { fmtCurrency, fmtNum } from '../lib/format.js'
 import { useData, useTasa } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
+import { SelectorAlicuota, codigoEfectivo, useAlicuotas, etiquetaAlicuota } from '../components/alicuota.jsx'
 import { PrecioDual, fechaCortaVE } from '../components/tasa.jsx'
 import { ImagenProducto } from '../components/producto.jsx'
 import { monedaDe, precioEnMoneda, precioEnBs } from '../lib/precio.js'
@@ -451,7 +452,7 @@ function NuevoProducto({ rubros, onClose, onSaved, toast, monedaEmpresa = 'VES',
   // homólogo se calcula al lado: nunca se guardan los dos.
   const [f, setF] = useState({
     sku: '', nombre: '', rubro: rubros[0]?.nombre || '', unidadBase: 'unidad', precio: '',
-    moneda: monedaEmpresa, codigoBarras: '', exentoIva: false,
+    moneda: monedaEmpresa, codigoBarras: '', exentoIva: false, alicuotaCodigo: 'general',
     esCombo: false, componentes: [], esInsumo: false,
   })
   const esPeso = esUnidadDePeso(unidades, f.unidadBase)
@@ -482,13 +483,14 @@ function NuevoProducto({ rubros, onClose, onSaved, toast, monedaEmpresa = 'VES',
         ? {
             sku: f.sku.trim(), nombre: f.nombre.trim(), rubro: f.rubro, unidadBase: 'unidad', esInsumo: false,
             precio: Number(f.precio) || 0, moneda: 'VES', codigoBarras: f.codigoBarras.trim(),
-            exentoIva: f.exentoIva, tipoVenta: 'unidad', esCombo: true,
+            exentoIva: f.exentoIva, alicuotaCodigo: f.alicuotaCodigo, tipoVenta: 'unidad', esCombo: true,
             componentes: f.componentes.map((c) => ({ sku: c.sku, cantidad: Number(c.cantidad) || 0 })),
           }
         : {
             sku: f.sku.trim(), nombre: f.nombre.trim(), rubro: f.rubro,
             unidadBase: f.unidadBase || 'unidad', precio: Number(f.precio) || 0, moneda: f.moneda,
-            codigoBarras: f.codigoBarras.trim(), exentoIva: f.exentoIva, tipoVenta: esPeso ? 'peso' : 'unidad',
+            codigoBarras: f.codigoBarras.trim(), exentoIva: f.exentoIva, alicuotaCodigo: f.alicuotaCodigo,
+            tipoVenta: esPeso ? 'peso' : 'unidad',
             // Un insumo no se vende: el servidor le fuerza el precio a cero.
             esInsumo: f.esInsumo,
           }
@@ -573,10 +575,11 @@ function NuevoProducto({ rubros, onClose, onSaved, toast, monedaEmpresa = 'VES',
           <Input value={f.codigoBarras} onChange={set('codigoBarras')} placeholder="7591234000104" className="mono" />
         </Field>
 
-        {/* Condición de IVA: en Venezuela buena parte de la cesta básica está
-            exenta, y facturarle 16% es un error fiscal, no un redondeo. */}
-        <Toggle checked={f.exentoIva} onChange={(v) => setF((s) => ({ ...s, exentoIva: v }))}
-          label="Exento de IVA" sub="Harina de maíz, arroz y demás cesta básica. La factura separa base imponible de base exenta." />
+        {/* Condición de IVA. Ya no es un sí/no: en Venezuela conviven la general
+            (16%), una reducida (8%) y el recargo suntuario del lujo, y facturar
+            con la que no toca es un error fiscal, no un redondeo. */}
+        <SelectorAlicuota valor={f.alicuotaCodigo} producto={f}
+          onChange={(cod) => setF((s) => ({ ...s, alicuotaCodigo: cod, exentoIva: cod === 'exento' }))} />
       </div>
     </VistaDetalle>
   )
@@ -717,7 +720,7 @@ function DetalleProducto({ producto, editable, onClose, onSaved, onKardex, toast
               <div className="text-[11px] uppercase tracking-wide text-slate-400">Estado e IVA</div>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {producto.activo !== false ? <Badge color="emerald" dot>Activo</Badge> : <Badge color="slate">Inactivo</Badge>}
-                {producto.exentoIva ? <Badge color="slate">Exento de IVA</Badge> : <Badge color="huberp">IVA 16%</Badge>}
+                <BadgeAlicuota producto={producto} />
                 <Badge color="sky">{esPeso ? 'Por peso (kg)' : 'Por unidad'}</Badge>
               </div>
             </div>
@@ -785,7 +788,7 @@ function EditarProducto({ producto, monedaEmpresa, monedas = ['VES'], unidades =
     precio: producto.precio ?? '',
     moneda: monedaDe(producto, monedaEmpresa),
     codigoBarras: producto.codigoBarras || '',
-    exentoIva: !!producto.exentoIva,
+    exentoIva: !!producto.exentoIva, alicuotaCodigo: codigoEfectivo(producto),
     activo: producto.activo !== false,
     unidadBase: producto.unidadBase || 'unidad',
     esCombo: !!producto.esCombo,
@@ -806,13 +809,13 @@ function EditarProducto({ producto, monedaEmpresa, monedas = ['VES'], unidades =
       const payload = esCombo
         ? {
             nombre: f.nombre.trim(), precio: Number(f.precio) || 0, moneda: 'VES',
-            codigoBarras: f.codigoBarras.trim(), exentoIva: f.exentoIva, activo: f.activo,
+            codigoBarras: f.codigoBarras.trim(), exentoIva: f.exentoIva, alicuotaCodigo: f.alicuotaCodigo, activo: f.activo,
             tipoVenta: 'unidad', unidadBase: 'unidad', esCombo: true,
             componentes: f.componentes.map((c) => ({ sku: c.sku, cantidad: Number(c.cantidad) || 0 })),
           }
         : {
             nombre: f.nombre.trim(), precio: Number(f.precio), moneda: f.moneda,
-            codigoBarras: f.codigoBarras.trim(), exentoIva: f.exentoIva, activo: f.activo,
+            codigoBarras: f.codigoBarras.trim(), exentoIva: f.exentoIva, alicuotaCodigo: f.alicuotaCodigo, activo: f.activo,
             tipoVenta: esPeso ? 'peso' : 'unidad', unidadBase: f.unidadBase || 'unidad',
           }
       await api.actualizarProducto(producto.sku, payload)
@@ -863,8 +866,10 @@ function EditarProducto({ producto, monedaEmpresa, monedas = ['VES'], unidades =
           <Input value={f.codigoBarras} onChange={(e) => setF((s) => ({ ...s, codigoBarras: e.target.value }))}
             placeholder="7591234000104" className="mono" />
         </Field>
-        <Toggle checked={f.exentoIva} onChange={(v) => setF((s) => ({ ...s, exentoIva: v }))}
-          label="Exento de IVA" sub="Cambia la próxima factura: el IVA sale solo de la base imponible." />
+        {/* Cambia la próxima factura, no las ya emitidas: cada documento sella su
+            alícuota al emitir. */}
+        <SelectorAlicuota valor={f.alicuotaCodigo} producto={producto}
+          onChange={(cod) => setF((s) => ({ ...s, alicuotaCodigo: cod, exentoIva: cod === 'exento' }))} />
         <Toggle checked={f.activo} onChange={(v) => setF((s) => ({ ...s, activo: v }))}
           label="Activo" sub="Un producto inactivo conserva su histórico pero no se puede vender." />
         {error ? (
@@ -1126,4 +1131,19 @@ function ModalCargaMasiva({ unidades, onClose, onSaved, toast }) {
       </div>
     </Modal>
   )
+}
+
+/* BadgeAlicuota muestra la clasificación EFECTIVA del producto: su alícuota del
+ * maestro, o la heredada si la ficha es anterior. Antes acá había un «IVA 16%»
+ * escrito a mano, que mentía en cuanto existió más de una tasa. */
+function BadgeAlicuota({ producto }) {
+  const alicuotas = useAlicuotas()
+  const cod = codigoEfectivo(producto)
+  const a = alicuotas.find((x) => x.codigo === cod)
+  if (!a) {
+    // Sin maestro cargado: se dice lo único que se sabe con certeza.
+    return producto.exentoIva ? <Badge color="slate">Exento de IVA</Badge> : <Badge color="huberp">Gravado</Badge>
+  }
+  if (a.tipo === 'exento') return <Badge color="slate">{a.nombre}</Badge>
+  return <Badge color={a.adicional > 0 ? 'amber' : 'huberp'}>{etiquetaAlicuota(a)}</Badge>
 }

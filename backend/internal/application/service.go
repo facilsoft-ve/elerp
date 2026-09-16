@@ -164,6 +164,10 @@ type Service struct {
 	// horarios es el patrón semanal de cada mesonero. Se cablea con ConHorarios;
 	// sin él los turnos no tienen hora de salida prevista y nada vence.
 	horarios mesonero.HorarioRepository
+	// alicuotas es el MAESTRO DE IMPUESTOS por empresa (fiscal.Alicuota), con
+	// vigencia por fecha. Se cablea con ConAlicuotas; sin él, el motor cae a la
+	// tasa configurada de la empresa y se comporta como antes del maestro.
+	alicuotas fiscal.AlicuotaRepo
 	// sedes da acceso a las COORDENADAS del local, para la presencia estricta
 	// (ver presencia.go). Se cablea con ConSedes; sin él la verificación de
 	// presencia no aplica y todo se comporta como antes.

@@ -412,6 +412,14 @@ export const api = {
   // fiscales, balanzas y comanderas). Dato de referencia, igual para todos los
   // tenants: se pide una vez por carga (ver components/dispositivo.jsx).
   catalogoDispositivos: () => request('/api/config/dispositivos/catalogo'),
+
+  // ---- Configuración › Maestro de impuestos ----
+  // Las alícuotas de IVA con su VIGENCIA. Las tasas viajan en fracción (0.16),
+  // igual que se guardan: convertir a porcentaje es cosa de la pantalla, no del
+  // transporte — si no, el mismo número significa dos cosas según por dónde entre.
+  alicuotas: () => request('/api/config/alicuotas'),
+  crearAlicuota: (body) => request('/api/config/alicuotas', { method: 'POST', body: JSON.stringify(body) }),
+  actualizarAlicuota: (id, body) => request(`/api/config/alicuotas/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   crearDispositivo: (body) => request('/api/config/dispositivos', { method: 'POST', body: JSON.stringify(body) }),
   actualizarDispositivo: (id, body) => request(`/api/config/dispositivos/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   desactivarDispositivo: (id) => request(`/api/config/dispositivos/${encodeURIComponent(id)}/desactivar`, { method: 'POST' }),

@@ -290,6 +290,11 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 	}
 
 	// Líneas desde el catálogo.
+	// Desglose por alícuota: una fila por tasa aplicada. Es lo que el libro de
+	// ventas declara en columnas separadas y lo que la suma `IVA` ya no permite
+	// descomponer.
+	desglose := map[string]*fiscal.DocumentoImpuesto{}
+	ordenDesglose := []string{}
 	for _, l := range in.Lineas {
 		p, ok := s.productos.BySKU(empresaID, l.SKU)
 		if !ok {
@@ -319,22 +324,27 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 			}
 		}
 		total := precio * l.Cantidad
+		// Clasificación fiscal del renglón, resuelta contra el maestro con la
+		// vigencia del DÍA de emisión y SELLADA en la línea.
+		al := s.alicuotaDeProducto(empresaID, p, doc.Fecha)
 		doc.Lineas = append(doc.Lineas, fiscal.Linea{
 			ProductoID: p.ID, SKU: p.SKU, Nombre: p.Nombre,
 			Cantidad: l.Cantidad, PrecioUnitario: precio, Total: total,
-			Exento: p.ExentoIVA,
+			Exento:         !al.Grava(),
+			AlicuotaCodigo: al.Codigo, Alicuota: al.Porcentaje, AlicuotaAdicional: al.Adicional,
 			// Snapshot de la receta si es un plato: el inventario descontará sus
 			// insumos, no el plato. Vacío para un producto normal.
 			Insumos: s.recetaSnapshot(empresaID, p),
 		})
 		doc.Subtotal += total
 		// El IVA sale solo de lo gravado: la cesta básica venezolana está exenta
-		// y la factura tiene que separar las dos bases.
-		if p.ExentoIVA {
+		// y la factura tiene que separar las bases.
+		if !al.Grava() {
 			doc.BaseExenta += total
 		} else {
 			doc.BaseImponible += total
 		}
+		acumularImpuesto(desglose, &ordenDesglose, al, total)
 	}
 	doc.BaseImponible = round2(doc.BaseImponible)
 	doc.BaseExenta = round2(doc.BaseExenta)
@@ -348,7 +358,10 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 	// (nota de crédito, base de IGTF) las leen de aquí, no de la config de mañana.
 	doc.AlicuotaIVA = s.alicuotaIVA(empresaID)
 	doc.AlicuotaIGTF = s.alicuotaIGTF(empresaID)
-	doc.IVA = round2(doc.BaseImponible * doc.AlicuotaIVA)
+	// El IVA es la SUMA del desglose, no una base por una tasa: con varias
+	// alícuotas conviviendo (16%, 8% y el recargo suntuario) multiplicar la base
+	// total por una sola tasa daría cualquier cosa.
+	doc.Impuestos, doc.IVA = cerrarDesglose(desglose, ordenDesglose)
 
 	// Pagos + IGTF sobre la porción en divisas (cobrado en Bs, impuesto separado).
 	// Multimoneda: cada pago se convierte con la tasa de SU divisa (USD, EUR, …),
@@ -1036,4 +1049,95 @@ func partesDeVuelto(d fiscal.Documento) []fiscal.VueltoParte {
 		Moneda: moneda, Metodo: metodo, Monto: d.Vuelto, MontoBs: montoBs,
 		Banco: d.VueltoBanco, Cedula: d.VueltoCedula, Telefono: d.VueltoTelefono,
 	}}
+}
+
+/* --- Maestro de impuestos: resolución y desglose --------------------------- */
+
+// alicuotaDeProducto resuelve qué alícuota le toca a un producto EN UNA FECHA.
+//
+// Cae con gracia, en este orden: el código del producto contra el maestro
+// vigente ese día; si el producto no tiene código (catálogo anterior al
+// maestro), su viejo booleano `ExentoIVA`; y si tampoco hay maestro cargado, la
+// tasa configurada de la empresa. Ninguna empresa puede quedarse sin poder
+// facturar porque el maestro no esté sembrado.
+func (s *Service) alicuotaDeProducto(empresaID string, p inventario.Producto, fecha string) fiscal.Alicuota {
+	codigo := strings.TrimSpace(p.AlicuotaCodigo)
+	if codigo == "" {
+		// Catálogo viejo: el booleano sigue mandando.
+		if p.ExentoIVA {
+			codigo = fiscal.CodExento
+		} else {
+			codigo = fiscal.CodGeneral
+		}
+	}
+	if s.alicuotas != nil {
+		if a, ok := fiscal.VigenteEn(s.alicuotas.List(empresaID), codigo, fecha); ok && a.Activa {
+			return a
+		}
+	}
+	// Sin maestro: se reconstruye la clasificación mínima con la tasa de la
+	// empresa, que es exactamente como se comportaba antes de todo esto.
+	if codigo == fiscal.CodExento {
+		return fiscal.Alicuota{Codigo: fiscal.CodExento, Nombre: "Exento", Tipo: fiscal.TipoExento, Activa: true}
+	}
+	return fiscal.Alicuota{
+		Codigo: fiscal.CodGeneral, Nombre: "General", Tipo: fiscal.TipoGeneral,
+		Porcentaje: s.alicuotaIVA(empresaID), Activa: true,
+	}
+}
+
+// acumularImpuesto suma una base al desglose. Una alícuota suntuaria produce DOS
+// filas sobre la MISMA base —la general y su recargo—, porque el libro de ventas
+// las declara en columnas separadas y guardarlas juntas como un 31% haría
+// imposible llenarlo.
+func acumularImpuesto(desglose map[string]*fiscal.DocumentoImpuesto, orden *[]string, al fiscal.Alicuota, base float64) {
+	sumar := func(clave, nombre, tipo string, pct float64) {
+		f, ok := desglose[clave]
+		if !ok {
+			f = &fiscal.DocumentoImpuesto{Codigo: al.Codigo, Nombre: nombre, Tipo: tipo, Porcentaje: pct}
+			desglose[clave] = f
+			*orden = append(*orden, clave)
+		}
+		f.Base += base
+	}
+	if !al.Grava() {
+		sumar(al.Codigo+"|exento", al.Nombre, fiscal.TipoExento, 0)
+		return
+	}
+	sumar(al.Codigo+"|base", al.Nombre, al.Tipo, al.Porcentaje)
+	if al.Adicional > 0 {
+		sumar(al.Codigo+"|adicional", al.Nombre+" · adicional", fiscal.TipoAdicional, al.Adicional)
+	}
+}
+
+// cerrarDesglose redondea cada fila y devuelve el total de impuesto. El monto se
+// calcula POR FILA y después se suma: redondear al final sobre una base mezclada
+// daría un céntimo distinto del que declara el libro, y el asiento de venta —que
+// arma el Haber con estas cifras— descuadraría.
+func cerrarDesglose(desglose map[string]*fiscal.DocumentoImpuesto, orden []string) ([]fiscal.DocumentoImpuesto, float64) {
+	out := make([]fiscal.DocumentoImpuesto, 0, len(orden))
+	var total float64
+	for _, k := range orden {
+		f := desglose[k]
+		f.Base = round2(f.Base)
+		f.Monto = round2(f.Base * f.Porcentaje)
+		total = round2(total + f.Monto)
+		out = append(out, *f)
+	}
+	return out, total
+}
+
+// ConAlicuotas cablea el maestro de impuestos. Opcional: sin él el motor usa la
+// tasa única configurada en la empresa, que es como funcionaba antes.
+func (s *Service) ConAlicuotas(r fiscal.AlicuotaRepo) *Service {
+	s.alicuotas = r
+	return s
+}
+
+// Alicuotas devuelve el maestro de impuestos de la empresa.
+func (s *Service) Alicuotas(empresaID string) []fiscal.Alicuota {
+	if s.alicuotas == nil {
+		return []fiscal.Alicuota{}
+	}
+	return s.alicuotas.List(empresaID)
 }

@@ -61,6 +61,16 @@ type Mesa struct {
 	// (Columna, Fila). El plano define cuántas filas y columnas hay (ver Plano).
 	Columna int `json:"columna" bson:"columna"`
 	Fila    int `json:"fila" bson:"fila"`
+	// AnchoCeldas y AltoCeldas son el TAMAÑO de la mesa en cuadros del plano.
+	// Quien dibuja el salón amplía la mesa y eso habilita más aforo — no al
+	// revés: el plano es la realidad física del local y el aforo se acomoda a
+	// ella, no la mesa al número que alguien tecleó.
+	//
+	// 0 significa «mesa anterior al redimensionado»: se le calcula un tamaño a
+	// partir de su capacidad (ver DimensionSugerida) para que los planos ya
+	// dibujados sigan viéndose bien sin migrar nada.
+	AnchoCeldas int `json:"anchoCeldas,omitempty" bson:"anchoceldas,omitempty"`
+	AltoCeldas  int `json:"altoCeldas,omitempty" bson:"altoceldas,omitempty"`
 	// Posición/tamaño libres en px (modelo anterior, previo a la grilla). Se
 	// conservan por retrocompatibilidad pero el editor de grilla usa Columna/Fila.
 	X     float64 `json:"x" bson:"x"`
@@ -86,40 +96,65 @@ type Repository interface {
 	Delete(empresaID, id string) bool
 }
 
-/* --- Tamaño de la mesa en la grilla ---------------------------------------
+/* --- Tamaño de la mesa y aforo ---------------------------------------------
  *
- * Nota de la jornada con la contadora: «que las mesas de más personas ocupen
- * mayor dimensión en las cuadrículas». En un plano de salón el tamaño es
- * información: quien mira el mapa tiene que ver de un vistazo dónde caben ocho
- * personas y dónde dos, sin leer el número de cada mesa.
+ * Regla del constructor de planos: CADA CUADRO ADMITE HASTA 4 PERSONAS. Una
+ * mesa de 2, 3 o 4 ocupa un cuadro; para sentar a más hay que AMPLIAR la mesa,
+ * y recién entonces se puede elegir un aforo mayor.
  *
- * La dimensión se DERIVA de la capacidad y no se guarda: si se guardara,
- * cambiar la capacidad dejaría el tamaño viejo y el mapa mentiría. Es la misma
- * regla que el resto del sistema — lo derivable se deriva.
- *
- * El corte está en 4 a propósito: la mesa de hasta cuatro es la estándar y sigue
- * ocupando UNA celda. Si la estándar creciera, todos los planos ya dibujados se
- * desarmarían de golpe. */
+ * El sentido de la dependencia importa: manda el TAMAÑO y el aforo se acomoda.
+ * El plano es la realidad física del local — si el aforo mandara sobre el
+ * tamaño, teclear «20» en una mesa la haría crecer sola y pisar a las vecinas.
+ */
 
-// Dimension devuelve cuántas columnas y filas de la grilla ocupa una mesa según
-// su capacidad.
+// PersonasPorCelda es cuánta gente cabe en un cuadro del plano.
+const PersonasPorCelda = 4
+
+// DimensionSugerida es el tamaño MÍNIMO que hace falta para sentar a esa
+// cantidad. Se usa en dos sitios: al dar de alta una mesa y para las mesas
+// anteriores al redimensionado, que no tienen tamaño guardado.
 //
-//	hasta 4 comensales → 1 × 1 (la mesa estándar)
-//	de 5 a 8           → 2 × 1 (mesa larga)
-//	9 o más            → 2 × 2 (mesón)
-func Dimension(capacidad int) (columnas, filas int) {
-	switch {
-	case capacidad >= 9:
-		return 2, 2
-	case capacidad >= 5:
-		return 2, 1
-	default:
-		return 1, 1
+// Crece primero a lo ancho y después en bloque, que es como se junta una mesa
+// larga en un salón real.
+func DimensionSugerida(capacidad int) (columnas, filas int) {
+	// Cuadros que hacen falta, redondeando hacia arriba: 5 personas no caben en
+	// un cuadro de 4, necesitan dos.
+	celdas := (capacidad + PersonasPorCelda - 1) / PersonasPorCelda
+	if celdas < 1 {
+		celdas = 1
 	}
+	// Hasta tres cuadros se arma a lo LARGO, que es como se junta una mesa en un
+	// salón real (tres mesas en fila, no un bloque).
+	if celdas <= 3 {
+		return celdas, 1
+	}
+	// De ahí en adelante, el bloque más compacto que alcance. Tiene que
+	// ALCANZAR siempre: si sugiriera de menos, el alta fallaría contra su propio
+	// valor por defecto (lo destapó una prueba con aforo 17).
+	columnas = 1
+	for columnas*columnas < celdas {
+		columnas++
+	}
+	filas = (celdas + columnas - 1) / columnas
+	return columnas, filas
 }
 
-// Dimension de esta mesa.
-func (m Mesa) Dimension() (int, int) { return Dimension(m.Capacidad) }
+// Dimension es el tamaño EFECTIVO de la mesa en cuadros. Sin tamaño guardado
+// (mesas anteriores) se deriva de la capacidad, así los planos ya dibujados no
+// necesitan migración.
+func (m Mesa) Dimension() (columnas, filas int) {
+	if m.AnchoCeldas > 0 && m.AltoCeldas > 0 {
+		return m.AnchoCeldas, m.AltoCeldas
+	}
+	return DimensionSugerida(m.Capacidad)
+}
+
+// CapacidadMaxima es cuánta gente admite la mesa por su tamaño: 4 por cuadro.
+// Es el tope que la interfaz ofrece y que el servidor hace cumplir.
+func (m Mesa) CapacidadMaxima() int {
+	c, f := m.Dimension()
+	return c * f * PersonasPorCelda
+}
 
 // Ocupa indica si la mesa cubre la celda (c, r) contando toda su superficie, no
 // solo su esquina. Es lo que impide poner otra mesa «encima» de la mitad de un

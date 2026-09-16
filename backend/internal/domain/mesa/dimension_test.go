@@ -2,34 +2,69 @@ package mesa
 
 import "testing"
 
-// El corte en 4 es deliberado: la mesa estándar de hasta cuatro sigue ocupando
-// una celda. Si creciera, todos los planos ya dibujados se desarmarían.
-func TestDimension_LaMesaEstandarNoCrece(t *testing.T) {
+/* La regla del constructor de planos: CADA CUADRO ADMITE 4 PERSONAS. Manda el
+ * TAMAÑO y el aforo se acomoda — no al revés. Si el aforo mandara, teclear «20»
+ * en una mesa la haría crecer sola y pisar a las vecinas. */
+
+func TestDimensionSugerida_UnCuadroHastaCuatro(t *testing.T) {
 	for _, cap := range []int{0, 1, 2, 3, 4} {
-		if c, f := Dimension(cap); c != 1 || f != 1 {
-			t.Errorf("capacidad %d debería ocupar 1×1, ocupa %d×%d", cap, c, f)
+		if c, f := DimensionSugerida(cap); c != 1 || f != 1 {
+			t.Errorf("capacidad %d debería caber en 1×1, sugiere %d×%d", cap, c, f)
 		}
 	}
 }
 
-func TestDimension_LasGrandesCrecen(t *testing.T) {
-	for _, cap := range []int{5, 6, 8} {
-		if c, f := Dimension(cap); c != 2 || f != 1 {
-			t.Errorf("capacidad %d debería ocupar 2×1, ocupa %d×%d", cap, c, f)
+// El tamaño sugerido tiene que ALCANZAR para la gente pedida: si sugiriera de
+// menos, el alta fallaría contra su propio valor por defecto.
+func TestDimensionSugerida_SiempreAlcanza(t *testing.T) {
+	for cap := 0; cap <= 24; cap++ {
+		c, f := DimensionSugerida(cap)
+		if c*f*PersonasPorCelda < cap {
+			t.Errorf("capacidad %d: sugiere %d×%d, que solo admite %d", cap, c, f, c*f*PersonasPorCelda)
 		}
 	}
-	for _, cap := range []int{9, 12, 20} {
-		if c, f := Dimension(cap); c != 2 || f != 2 {
-			t.Errorf("capacidad %d debería ocupar 2×2, ocupa %d×%d", cap, c, f)
+}
+
+// El tamaño GUARDADO manda sobre el sugerido: una mesa de 4 que alguien amplió a
+// dos cuadros se queda de dos cuadros.
+func TestDimension_ElTamanoGuardadoManda(t *testing.T) {
+	m := Mesa{Capacidad: 4, AnchoCeldas: 3, AltoCeldas: 1}
+	if c, f := m.Dimension(); c != 3 || f != 1 {
+		t.Errorf("debería respetar el tamaño guardado 3×1, dio %d×%d", c, f)
+	}
+	// Y ese tamaño habilita más aforo, que es el punto de ampliar.
+	if m.CapacidadMaxima() != 12 {
+		t.Errorf("3 cuadros admiten 12 personas, dice %d", m.CapacidadMaxima())
+	}
+}
+
+// Sin tamaño guardado (mesas anteriores al redimensionado) se deriva de la
+// capacidad: los planos ya dibujados no necesitan migración.
+func TestDimension_SinTamanoGuardadoSeDeriva(t *testing.T) {
+	if c, f := (Mesa{Capacidad: 8}).Dimension(); c != 2 || f != 1 {
+		t.Errorf("una mesa vieja de 8 debería derivar 2×1, dio %d×%d", c, f)
+	}
+	if c, f := (Mesa{Capacidad: 2}).Dimension(); c != 1 || f != 1 {
+		t.Errorf("una mesa vieja de 2 debería derivar 1×1, dio %d×%d", c, f)
+	}
+}
+
+func TestCapacidadMaxima_CuatroPorCuadro(t *testing.T) {
+	casos := []struct{ ancho, alto, max int }{
+		{1, 1, 4}, {2, 1, 8}, {3, 1, 12}, {2, 2, 16},
+	}
+	for _, c := range casos {
+		m := Mesa{AnchoCeldas: c.ancho, AltoCeldas: c.alto}
+		if got := m.CapacidadMaxima(); got != c.max {
+			t.Errorf("%d×%d debería admitir %d, admite %d", c.ancho, c.alto, c.max, got)
 		}
 	}
 }
 
 // Ocupa tiene que cubrir TODA la superficie: si solo mirara la esquina, se
-// podría colocar otra mesa sobre la mitad de un mesón y el mapa quedaría con dos
-// mesas encimadas.
+// podría colocar otra mesa sobre la mitad de un mesón y quedarían encimadas.
 func TestOcupa_CubreTodaLaSuperficie(t *testing.T) {
-	meson := Mesa{Columna: 2, Fila: 3, Capacidad: 10} // 2×2
+	meson := Mesa{Columna: 2, Fila: 3, AnchoCeldas: 2, AltoCeldas: 2}
 	for _, celda := range [][2]int{{2, 3}, {3, 3}, {2, 4}, {3, 4}} {
 		if !meson.Ocupa(celda[0], celda[1]) {
 			t.Errorf("el mesón debería ocupar (%d,%d)", celda[0], celda[1])
@@ -43,23 +78,18 @@ func TestOcupa_CubreTodaLaSuperficie(t *testing.T) {
 }
 
 func TestSeSolapaCon(t *testing.T) {
-	meson := Mesa{Columna: 2, Fila: 3, Capacidad: 10} // 2×2 → (2,3)…(3,4)
-	// Una mesa chica en la esquina inferior derecha del mesón: se pisa.
-	if !meson.SeSolapaCon(Mesa{Columna: 3, Fila: 4, Capacidad: 2}) {
+	meson := Mesa{Columna: 2, Fila: 3, AnchoCeldas: 2, AltoCeldas: 2} // (2,3)…(3,4)
+	if !meson.SeSolapaCon(Mesa{Columna: 3, Fila: 4, AnchoCeldas: 1, AltoCeldas: 1}) {
 		t.Error("una mesa dentro de la superficie del mesón se solapa")
 	}
-	// Pegada pero afuera: no se pisa.
-	if meson.SeSolapaCon(Mesa{Columna: 4, Fila: 3, Capacidad: 2}) {
+	if meson.SeSolapaCon(Mesa{Columna: 4, Fila: 3, AnchoCeldas: 1, AltoCeldas: 1}) {
 		t.Error("una mesa adyacente no se solapa")
 	}
-	// Dos mesas largas contiguas (2×1 cada una) caben lado a lado.
-	a := Mesa{Columna: 0, Fila: 0, Capacidad: 6}
-	b := Mesa{Columna: 2, Fila: 0, Capacidad: 6}
-	if a.SeSolapaCon(b) {
+	a := Mesa{Columna: 0, Fila: 0, AnchoCeldas: 2, AltoCeldas: 1}
+	if a.SeSolapaCon(Mesa{Columna: 2, Fila: 0, AnchoCeldas: 2, AltoCeldas: 1}) {
 		t.Error("dos mesas largas contiguas no se solapan")
 	}
-	// Pero una a una sola celda de distancia sí.
-	if !a.SeSolapaCon(Mesa{Columna: 1, Fila: 0, Capacidad: 6}) {
+	if !a.SeSolapaCon(Mesa{Columna: 1, Fila: 0, AnchoCeldas: 2, AltoCeldas: 1}) {
 		t.Error("una mesa larga a una celda de otra sí se solapa")
 	}
 }

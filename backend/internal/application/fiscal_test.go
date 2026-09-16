@@ -5,10 +5,12 @@ import (
 	"math"
 	"testing"
 
+	"github.com/mornix/elerp/internal/adapter/inmem"
 	"github.com/mornix/elerp/internal/application"
 	"github.com/mornix/elerp/internal/domain/cliente"
 	"github.com/mornix/elerp/internal/domain/empresa"
 	"github.com/mornix/elerp/internal/domain/fiscal"
+	"github.com/mornix/elerp/internal/domain/inventario"
 )
 
 // casi compara importes con tolerancia de medio céntimo: los totales fiscales se
@@ -1010,5 +1012,177 @@ func TestEmitirFactura_ExigeReceptorValido(t *testing.T) {
 		ClienteID: "cli_fantasma", Lineas: linea,
 	}); !errors.Is(err, application.ErrClienteNoExiste) {
 		t.Fatalf("facturar con un clienteId inexistente debe dar ErrClienteNoExiste, se obtuvo: %v", err)
+	}
+}
+
+/* --- Alícuotas múltiples (maestro de impuestos) ---------------------------
+ *
+ * Nota de la contadora: en Venezuela conviven tres tasas — general 16%,
+ * reducida 8% para ciertos alimentos, y el RECARGO suntuario de 15% que se
+ * SUMA a la general (lujo = 31%). El SENIAT las declara en columnas separadas,
+ * así que el documento tiene que llevarlas desglosadas, no colapsadas. */
+
+// servicioConImpuestos cablea el maestro y lo siembra con las tasas venezolanas.
+func servicioConImpuestos(t *testing.T) (*application.Service, *inmem.Store) {
+	t.Helper()
+	svc, st := nuevoServicio(t)
+	svc.ConAlicuotas(st.Alicuotas)
+	for _, a := range fiscal.AlicuotasPorDefecto(empDemo, "2020-01-01") {
+		st.Alicuotas.Create(a)
+	}
+	abrirTurno(t, svc, actorA) // emitir exige caja abierta
+	return svc, st
+}
+
+// productoConAlicuota da de alta un producto clasificado en una alícuota.
+func productoConAlicuota(t *testing.T, svc *application.Service, sku, codigo string, precio float64) {
+	t.Helper()
+	if _, err := svc.CrearProducto(empDemo, actorA, origenTst, inventario.Producto{
+		SKU: sku, Nombre: sku, Precio: precio, AlicuotaCodigo: codigo, Activo: true,
+	}); err != nil {
+		t.Fatalf("crear %s: %v", sku, err)
+	}
+}
+
+// impuestoDe busca una fila del desglose por tipo.
+func impuestoDe(doc fiscal.Documento, tipo string) (fiscal.DocumentoImpuesto, bool) {
+	for _, i := range doc.Impuestos {
+		if i.Tipo == tipo {
+			return i, true
+		}
+	}
+	return fiscal.DocumentoImpuesto{}, false
+}
+
+// La factura mezcla las tres tasas: cada una tiene que salir con SU base y SU
+// monto. Antes esto era imposible: el IVA era base × una sola tasa.
+func TestEmitir_TresAlicuotasEnLaMismaFactura(t *testing.T) {
+	svc, _ := servicioConImpuestos(t)
+	productoConAlicuota(t, svc, "GEN-1", fiscal.CodGeneral, 100)
+	productoConAlicuota(t, svc, "RED-1", fiscal.CodReducida, 200)
+	productoConAlicuota(t, svc, "EXE-1", fiscal.CodExento, 50)
+
+	doc, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{
+			{SKU: "GEN-1", Cantidad: 1, PrecioUnitario: 100},
+			{SKU: "RED-1", Cantidad: 1, PrecioUnitario: 200},
+			{SKU: "EXE-1", Cantidad: 1, PrecioUnitario: 50},
+		},
+		Pagos: []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 400, Moneda: "VES"}},
+	})
+	if err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+	// 100 al 16% = 16 · 200 al 8% = 16 · 50 exento = 0 ⇒ IVA total 32.
+	if !casi(doc.IVA, 32) {
+		t.Errorf("IVA = %v, se esperaban 32 (16 del 16%% + 16 del 8%%)", doc.IVA)
+	}
+	if !casi(doc.BaseImponible, 300) || !casi(doc.BaseExenta, 50) {
+		t.Errorf("bases mal: imponible %v, exenta %v", doc.BaseImponible, doc.BaseExenta)
+	}
+	gen, ok := impuestoDe(doc, fiscal.TipoGeneral)
+	if !ok || !casi(gen.Base, 100) || !casi(gen.Monto, 16) {
+		t.Errorf("fila general mal: %+v", gen)
+	}
+	red, ok := impuestoDe(doc, fiscal.TipoReducida)
+	if !ok || !casi(red.Base, 200) || !casi(red.Monto, 16) {
+		t.Errorf("fila reducida mal: %+v", red)
+	}
+}
+
+// El lujo NO es una tasa de 31%: son DOS filas sobre la misma base. Si alguien
+// las colapsa, el libro de ventas deja de poder llenarse.
+func TestEmitir_SuntuariaProduceDosFilasSobreLaMismaBase(t *testing.T) {
+	svc, _ := servicioConImpuestos(t)
+	productoConAlicuota(t, svc, "LUJO-1", fiscal.CodSuntuario, 1000)
+
+	doc, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{{SKU: "LUJO-1", Cantidad: 1, PrecioUnitario: 1000}},
+		Pagos:  []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 1310, Moneda: "VES"}},
+	})
+	if err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+	gen, okG := impuestoDe(doc, fiscal.TipoGeneral)
+	adi, okA := impuestoDe(doc, fiscal.TipoAdicional)
+	if !okG || !okA {
+		t.Fatalf("faltan filas del desglose: %+v", doc.Impuestos)
+	}
+	if !casi(gen.Base, 1000) || !casi(gen.Monto, 160) {
+		t.Errorf("porción general mal: %+v", gen)
+	}
+	if !casi(adi.Base, 1000) || !casi(adi.Monto, 150) {
+		t.Errorf("recargo adicional mal (misma base, 15%%): %+v", adi)
+	}
+	// El total sí es el 31%, pero declarado en dos partes.
+	if !casi(doc.IVA, 310) {
+		t.Errorf("IVA total = %v, se esperaban 310 (160 + 150)", doc.IVA)
+	}
+	if !casi(doc.Total, 1310) {
+		t.Errorf("total = %v, se esperaban 1310", doc.Total)
+	}
+}
+
+// La clasificación se SELLA en el renglón: reclasificar el producto mañana no
+// puede cambiar lo que dice una factura de ayer.
+func TestEmitir_LaLineaSellaSuAlicuota(t *testing.T) {
+	svc, _ := servicioConImpuestos(t)
+	productoConAlicuota(t, svc, "RED-2", fiscal.CodReducida, 100)
+
+	doc, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{{SKU: "RED-2", Cantidad: 1, PrecioUnitario: 100}},
+		Pagos:  []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 108, Moneda: "VES"}},
+	})
+	if err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+	l := doc.Lineas[0]
+	if l.AlicuotaCodigo != fiscal.CodReducida || !casi(l.Alicuota, 0.08) {
+		t.Errorf("el renglón no selló su alícuota: %+v", l)
+	}
+	if l.Exento {
+		t.Error("una alícuota reducida NO es exenta")
+	}
+}
+
+// Compatibilidad: un catálogo sin AlicuotaCodigo (el que ya existe) tiene que
+// seguir facturando exactamente igual. Si esto se rompe, se rompe todo lo
+// sembrado y todo lo que los clientes ya cargaron.
+func TestEmitir_CatalogoSinCodigoSigueComoAntes(t *testing.T) {
+	svc, _ := servicioConImpuestos(t)
+	// HAR-001 del seed es exento y no tiene AlicuotaCodigo.
+	doc, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{
+			{SKU: "HAR-001", Cantidad: 1, PrecioUnitario: 100}, // exento por el booleano
+			{SKU: "REF-2L", Cantidad: 1, PrecioUnitario: 100},  // gravado
+		},
+		Pagos: []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 216, Moneda: "VES"}},
+	})
+	if err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+	if !casi(doc.BaseExenta, 100) || !casi(doc.BaseImponible, 100) {
+		t.Errorf("el booleano viejo debe seguir separando las bases: exenta %v, imponible %v",
+			doc.BaseExenta, doc.BaseImponible)
+	}
+	if !casi(doc.IVA, 16) {
+		t.Errorf("IVA = %v, se esperaban 16", doc.IVA)
+	}
+}
+
+// Sin maestro cableado el motor cae a la tasa de la empresa: una empresa sin
+// alícuotas sembradas no puede quedarse sin poder facturar.
+func TestEmitir_SinMaestroUsaLaTasaDeLaEmpresa(t *testing.T) {
+	svc, _ := nuevoServicio(t) // deliberadamente SIN ConAlicuotas
+	abrirTurno(t, svc, actorA)
+	doc, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{{SKU: "REF-2L", Cantidad: 1, PrecioUnitario: 100}},
+		Pagos:  []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 116, Moneda: "VES"}},
+	})
+	if err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+	if !casi(doc.IVA, 16) {
+		t.Errorf("IVA = %v, se esperaban 16 con la tasa de la empresa", doc.IVA)
 	}
 }

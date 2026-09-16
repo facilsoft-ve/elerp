@@ -65,6 +65,18 @@ type Linea struct {
 	// primera. Se copia del producto al emitir, para que el documento no dependa
 	// de que el catálogo siga clasificado igual mañana.
 	Exento bool `json:"exento" bson:"exento"`
+	// AlicuotaCodigo, Alicuota y AlicuotaAdicional sellan la clasificación fiscal
+	// del renglón AL EMITIR: qué alícuota se le aplicó y con qué porcentajes. Se
+	// copian igual que `Exento` y por la misma razón — una nota de crédito de
+	// dentro de un año tiene que poder recalcularse con la tasa de ESE día, no
+	// con la de hoy (Art. 177). Vacío/0 en documentos anteriores al maestro de
+	// impuestos: ahí manda `Exento` y la tasa del documento.
+	AlicuotaCodigo string `json:"alicuotaCodigo,omitempty" bson:"alicuotacodigo,omitempty"`
+	// Alicuota es la tasa general o reducida aplicada; AlicuotaAdicional el
+	// recargo suntuario, que va APARTE porque el libro lo declara en su propia
+	// columna.
+	Alicuota          float64 `json:"alicuota,omitempty" bson:"alicuota,omitempty"`
+	AlicuotaAdicional float64 `json:"alicuotaAdicional,omitempty" bson:"alicuotaadicional,omitempty"`
 	// Insumos es el SNAPSHOT de la receta (escandallo) del plato AL MOMENTO de
 	// facturar: qué insumos consume UNA unidad. Vacío ⇒ producto normal (el stock
 	// que se descuenta es el propio SKU). Cuando trae insumos, el inventario
@@ -119,6 +131,22 @@ type VueltoParte struct {
 }
 
 // Documento es un documento fiscal inmutable.
+// DocumentoImpuesto es una fila del desglose de impuestos del documento: cuánta
+// base se gravó a una tasa y cuánto impuesto causó.
+//
+// El recargo suntuario viaja como SU PROPIA fila (Tipo "adicional") sobre la
+// misma base que la general. Sumarlos en una sola fila del 31% haría imposible
+// llenar el libro de ventas, que los pide por separado.
+type DocumentoImpuesto struct {
+	Codigo string `json:"codigo" bson:"codigo"` // general | reducida | suntuario…
+	Nombre string `json:"nombre" bson:"nombre"`
+	Tipo   string `json:"tipo" bson:"tipo"` // general | reducida | adicional | exento
+	// Porcentaje en fracción (0.16). 0 en la fila exenta.
+	Porcentaje float64 `json:"porcentaje" bson:"porcentaje"`
+	Base       float64 `json:"base" bson:"base"`
+	Monto      float64 `json:"monto" bson:"monto"`
+}
+
 type Documento struct {
 	ID             string `json:"id" bson:"id"`
 	EmpresaID      string `json:"empresaId" bson:"empresaid"`
@@ -155,6 +183,13 @@ type Documento struct {
 	// vigente al emitir (documentos previos a esta configuración).
 	AlicuotaIVA  float64 `json:"alicuotaIVA" bson:"alicuotaiva"`
 	AlicuotaIGTF float64 `json:"alicuotaIGTF" bson:"alicuotaigtf"`
+	// Impuestos es el DESGLOSE por alícuota: una fila por tasa efectivamente
+	// aplicada, con su base y su monto. Es lo que el libro de ventas declara en
+	// columnas separadas (general, reducida, adicional) y lo que `IVA` —que es la
+	// suma— ya no permite descomponer. Vacío en documentos anteriores al maestro
+	// de impuestos: para esos, `BaseImponible` + `AlicuotaIVA` siguen siendo la
+	// única verdad y hay que leerlos así.
+	Impuestos []DocumentoImpuesto `json:"impuestos,omitempty" bson:"impuestos,omitempty"`
 
 	Moneda     string  `json:"moneda" bson:"moneda"`
 	TasaCambio float64 `json:"tasaCambio" bson:"tasacambio"` // memoria histórica (Art. 177)
