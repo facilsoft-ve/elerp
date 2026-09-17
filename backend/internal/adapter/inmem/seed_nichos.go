@@ -121,6 +121,8 @@ type especNicho struct {
 	filas, columnas int
 	bloqueadas      []mesa.Celda
 	mesas           []mesaNicho
+	areas           []mesa.Area
+	mostradores     []mesa.Mostrador
 }
 
 // comanderaNicho es un puesto de impresión de comandas.
@@ -264,7 +266,8 @@ func (s *Store) seedEmpresaNicho(e especNicho) {
 	if len(e.mesas) > 0 {
 		s.Planos.Upsert(mesa.Plano{
 			EmpresaID: e.empID, SedeID: e.sedeID, Filas: e.filas, Columnas: e.columnas,
-			Bloqueadas: e.bloqueadas, Actualizada: fecha,
+			Bloqueadas: e.bloqueadas, Areas: e.areas, Mostradores: e.mostradores,
+			Actualizada: fecha,
 		})
 		for _, m := range e.mesas {
 			s.Mesas.Create(mesa.Mesa{

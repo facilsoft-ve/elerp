@@ -28,6 +28,9 @@ func (s *Server) registerRestaurante(r fiber.Router) {
 	g.Delete("/mesas/:id", edit, s.handleEliminarMesa)
 	g.Post("/mapa", edit, s.handleGuardarMapa)
 	g.Get("/plano", s.handlePlano)
+	// Catálogo de tipos de mostrador: la pantalla no puede llevar la lista
+	// escrita a mano o se desincroniza del servidor, que es quien valida.
+	g.Get("/tipos-mostrador", s.handleTiposMostrador)
 	g.Put("/plano", edit, s.handleGuardarPlano)
 
 	// Asignación de mesas/zonas a mesoneros y configuración del módulo. Ver es para todo
@@ -359,16 +362,40 @@ func (s *Server) handlePlano(c *fiber.Ctx) error {
 	return c.JSON(s.svc.PlanoSalon(empresaIDOf(c), sedeIDOf(c)))
 }
 
+// handleTiposMostrador expone el catálogo de muebles de servicio.
+func (s *Server) handleTiposMostrador(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"tipos": mesa.TiposMostrador(), "colores": mesa.ColoresArea()})
+}
+
 func (s *Server) handleGuardarPlano(c *fiber.Ctx) error {
 	var in struct {
 		Filas      int          `json:"filas"`
 		Columnas   int          `json:"columnas"`
 		Bloqueadas []mesa.Celda `json:"bloqueadas"`
+		// Areas y Mostradores llegan SIEMPRE que el editor guarde: mandar la lista
+		// vacía es cómo se borra la última. Un cliente viejo que no las conoce se
+		// detecta porque ninguna de las dos claves viene, y entonces se conservan.
+		Areas       *[]mesa.Area      `json:"areas"`
+		Mostradores *[]mesa.Mostrador `json:"mostradores"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
-	out, err := s.svc.GuardarPlanoSalon(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c), in.Filas, in.Columnas, in.Bloqueadas)
+	if in.Areas == nil && in.Mostradores == nil {
+		out, err := s.svc.GuardarPlanoSalon(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c), in.Filas, in.Columnas, in.Bloqueadas)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(out)
+	}
+	entrada := application.PlanoEntrada{Filas: in.Filas, Columnas: in.Columnas, Bloqueadas: in.Bloqueadas}
+	if in.Areas != nil {
+		entrada.Areas = *in.Areas
+	}
+	if in.Mostradores != nil {
+		entrada.Mostradores = *in.Mostradores
+	}
+	out, err := s.svc.GuardarPlanoCompleto(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c), entrada)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}

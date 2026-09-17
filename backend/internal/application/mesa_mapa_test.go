@@ -8,6 +8,9 @@ import (
 
 /* GUARDAR EL PLANO: posición Y TAMAÑO.
  *
+ * La fila 0 del salón demo está libre entre la caja (0,0) y el paso de postres
+ * (7,0): es donde se prueba sin chocar con la distribución sembrada.
+ *
  * En el editor la mesa se mueve arrastrándola y se agranda arrastrando sus
  * bordes: para quien dibuja el salón es el mismo gesto. Si el tamaño viajara por
  * otra ruta, un plano se guardaría a medias cuando una de las dos llamadas
@@ -18,7 +21,7 @@ func TestGuardarMapa_GuardaElTamano(t *testing.T) {
 	m := mesaPorNombre(t, st, "2")
 
 	if err := svc.GuardarMapa(empSalon, actorA, origenTst, []application.PosicionMesa{
-		{ID: m.ID, Columna: 0, Fila: 0, AnchoCeldas: 2, AltoCeldas: 2},
+		{ID: m.ID, Columna: 3, Fila: 0, AnchoCeldas: 2, AltoCeldas: 2},
 	}); err != nil {
 		t.Fatalf("guardar mapa: %v", err)
 	}
@@ -33,15 +36,13 @@ func TestGuardarMapa_GuardaElTamano(t *testing.T) {
 func TestGuardarMapa_SinTamanoNoLoToca(t *testing.T) {
 	svc, st := servicioSalon(t)
 	m := mesaPorNombre(t, st, "2")
-	// Lejos del resto del salón demo: lo que se prueba es el tamaño, no el
-	// solape (que tiene su propia prueba).
 	if err := svc.GuardarMapa(empSalon, actorA, origenTst, []application.PosicionMesa{
-		{ID: m.ID, Columna: 10, Fila: 8, AnchoCeldas: 3, AltoCeldas: 1},
+		{ID: m.ID, Columna: 1, Fila: 0, AnchoCeldas: 3, AltoCeldas: 1},
 	}); err != nil {
 		t.Fatalf("guardar tamaño: %v", err)
 	}
 	if err := svc.GuardarMapa(empSalon, actorA, origenTst, []application.PosicionMesa{
-		{ID: m.ID, Columna: 12, Fila: 9},
+		{ID: m.ID, Columna: 3, Fila: 0},
 	}); err != nil {
 		t.Fatalf("guardar solo posición: %v", err)
 	}
@@ -64,7 +65,7 @@ func TestGuardarMapa_AlAchicarRecortaElAforo(t *testing.T) {
 	}
 
 	if err := svc.GuardarMapa(empSalon, actorA, origenTst, []application.PosicionMesa{
-		{ID: m.ID, Columna: 0, Fila: 0, AnchoCeldas: 1, AltoCeldas: 1},
+		{ID: m.ID, Columna: 1, Fila: 0, AnchoCeldas: 1, AltoCeldas: 1},
 	}); err != nil {
 		t.Fatalf("achicar: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestGuardarMapa_RechazaTamanoImposible(t *testing.T) {
 	svc, st := servicioSalon(t)
 	m := mesaPorNombre(t, st, "2")
 	if err := svc.GuardarMapa(empSalon, actorA, origenTst, []application.PosicionMesa{
-		{ID: m.ID, Columna: 0, Fila: 0, AnchoCeldas: 99, AltoCeldas: 1},
+		{ID: m.ID, Columna: 1, Fila: 0, AnchoCeldas: 99, AltoCeldas: 1},
 	}); err == nil {
 		t.Fatal("una mesa de 99 cuadros de lado debería rechazarse")
 	}
@@ -94,13 +95,13 @@ func TestGuardarMapa_AgrandarSobreOtraFalla(t *testing.T) {
 	b := mesaPorNombre(t, st, "2")
 
 	if err := svc.GuardarMapa(empSalon, actorA, origenTst, []application.PosicionMesa{
-		{ID: a.ID, Columna: 0, Fila: 0, AnchoCeldas: 1, AltoCeldas: 1},
-		{ID: b.ID, Columna: 1, Fila: 0, AnchoCeldas: 1, AltoCeldas: 1},
+		{ID: a.ID, Columna: 1, Fila: 0, AnchoCeldas: 1, AltoCeldas: 1},
+		{ID: b.ID, Columna: 2, Fila: 0, AnchoCeldas: 1, AltoCeldas: 1},
 	}); err != nil {
 		t.Fatalf("colocar las dos: %v", err)
 	}
 	if err := svc.GuardarMapa(empSalon, actorA, origenTst, []application.PosicionMesa{
-		{ID: a.ID, Columna: 0, Fila: 0, AnchoCeldas: 3, AltoCeldas: 1},
+		{ID: a.ID, Columna: 1, Fila: 0, AnchoCeldas: 3, AltoCeldas: 1},
 	}); err == nil {
 		t.Fatal("agrandar una mesa sobre su vecina debería rechazarse")
 	}

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   dimensionDeMesa, aforoMaximo, ocupaCelda, cabeEn, tamanoAlArrastrar, aforoAjustado,
+  cabeArea, cabeMostrador, rectDeArrastre, zonaDeCelda, siguienteNombreMesa,
   MAX_CELDAS_MESA,
 } from '../plano.js'
 
@@ -119,5 +120,97 @@ describe('aforoAjustado', () => {
 
   it('no toca un aforo que ya entra', () => {
     expect(aforoAjustado(6, 2, 1)).toBe(6)
+  })
+})
+
+
+/* ÁREAS Y MOSTRADORES.
+ *
+ * La diferencia que manda: un MOSTRADOR ocupa piso (es un mueble real, ahí no
+ * entra una mesa) y un ÁREA no (es una etiqueta de superficie, y las mesas viven
+ * adentro). Confundirlas haría que dibujar la terraza expulsara sus mesas. */
+
+const barra = { id: 'b1', nombre: 'Barra', tipo: 'barra', columna: 0, fila: 3, ancho: 3, alto: 1 }
+const terraza = { id: 'a1', nombre: 'Terraza', columna: 0, fila: 0, ancho: 3, alto: 2 }
+const conMuebles = {
+  mesas: [meson, chica],
+  plano: { ...plano, mostradores: [barra], areas: [terraza] },
+}
+
+describe('mostradores', () => {
+  it('una mesa no puede ponerse encima de la barra', () => {
+    expect(cabeEn(conMuebles, 'nueva', 0, 3, 1, 1)).toBe(false)
+    expect(cabeEn(conMuebles, 'nueva', 3, 3, 1, 1)).toBe(true)
+  })
+
+  it('un mostrador no puede pisar una mesa ni otro mostrador', () => {
+    expect(cabeMostrador(conMuebles, 'nuevo', 1, 1, 1, 1)).toBe(false) // sobre el mesón
+    expect(cabeMostrador(conMuebles, 'nuevo', 2, 3, 1, 1)).toBe(false) // sobre la barra
+    expect(cabeMostrador(conMuebles, 'b1', 0, 3, 4, 1)).toBe(true)     // alargarse a sí misma
+  })
+
+  // Una barra puede recorrer la pared entera: el tope de 6 cuadros es de las
+  // mesas (por el aforo), no de los muebles.
+  it('no tiene el tope de tamaño de una mesa', () => {
+    const largo = { mesas: [], plano: { filas: 5, columnas: 10, bloqueadas: [], mostradores: [], areas: [] } }
+    expect(cabeMostrador(largo, 'x', 0, 0, 10, 1)).toBe(true)
+    expect(cabeEn(largo, 'x', 0, 0, 10, 1)).toBe(false)
+  })
+})
+
+describe('áreas', () => {
+  // Para esto están: contienen las mesas.
+  it('se superpone a mesas y muebles sin problema', () => {
+    // Un área sobre la barra y libre de otras áreas: para eso está, los contiene.
+    expect(cabeArea(conMuebles, 'nueva', 0, 3, 3, 2)).toBe(true)
+  })
+
+  it('no se superpone a otra área: la zona quedaría ambigua', () => {
+    expect(cabeArea(conMuebles, 'nueva', 2, 1, 2, 2)).toBe(false)
+    expect(cabeArea(conMuebles, 'a1', 0, 0, 4, 3)).toBe(true) // agrandarse a sí misma
+  })
+
+  it('no se sale del plano', () => {
+    expect(cabeArea(conMuebles, 'nueva', 5, 4, 2, 2)).toBe(false)
+  })
+})
+
+describe('zonaDeCelda', () => {
+  // La zona se DEDUCE de dónde está la mesa. Escrita a mano en cada ficha
+  // terminaba con «Terraza», «terraza» y «Terrraza» conviviendo, y cualquier
+  // agrupación por zona salía mal.
+  it('devuelve el nombre del área que contiene la celda', () => {
+    expect(zonaDeCelda([terraza], 1, 1)).toBe('Terraza')
+    expect(zonaDeCelda([terraza], 1, 3)).toBe('')
+    expect(zonaDeCelda([], 0, 0)).toBe('')
+  })
+})
+
+describe('rectDeArrastre', () => {
+  // Arrastrar hacia arriba y a la izquierda tiene que dibujar igual que hacia
+  // abajo y a la derecha.
+  it('normaliza el rectángulo venga de donde venga', () => {
+    expect(rectDeArrastre(1, 1, 3, 2)).toEqual({ c: 1, r: 1, dc: 3, df: 2 })
+    expect(rectDeArrastre(3, 2, 1, 1)).toEqual({ c: 1, r: 1, dc: 3, df: 2 })
+  })
+
+  it('un toque sin desplazamiento es un cuadro', () => {
+    expect(rectDeArrastre(2, 2, 2, 2)).toEqual({ c: 2, r: 2, dc: 1, df: 1 })
+  })
+})
+
+describe('siguienteNombreMesa', () => {
+  // Las mesas de un salón se llaman por número: crear una no debería obligar a
+  // pensar el nombre.
+  it('propone el número que sigue', () => {
+    expect(siguienteNombreMesa([{ nombre: '1' }, { nombre: '7' }, { nombre: '3' }])).toBe('8')
+  })
+
+  it('ignora los nombres que no son números', () => {
+    expect(siguienteNombreMesa([{ nombre: 'Barra 1' }, { nombre: '2' }])).toBe('3')
+  })
+
+  it('empieza en 1 con el salón vacío', () => {
+    expect(siguienteNombreMesa([])).toBe('1')
   })
 })

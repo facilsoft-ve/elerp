@@ -106,7 +106,7 @@ import (
 // v31: las sedes demo llevan UBICACIÓN (coordenadas + radio) y dirección
 // completa, para que el mapa de la sede y la presencia estricta se vean
 // funcionando y no vacíos.
-const versionSeedDemo = 31
+const versionSeedDemo = 32
 
 // Seed siembra la base con los datos demo (misma fuente que in-memory), de
 // forma idempotente: si ya hay empresas, no hace nada.

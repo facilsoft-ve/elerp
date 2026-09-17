@@ -164,13 +164,27 @@ func restauranteDemo() especNicho {
 			{nombre: "Luis Bermúdez", tipoDoc: "V", doc: "14875690", telefono: "0414-3216549"},
 		},
 
-		// Salón 8×6. Bloqueadas: la cocina (esquina superior derecha) y la barra
-		// (columna izquierda abajo) — ahí no puede ir ninguna mesa.
+		// Salón 8×6. Bloqueada, la cocina (esquina superior derecha): ahí no puede
+		// ir ninguna mesa.
 		columnas: 8, filas: 6,
 		bloqueadas: []mesa.Celda{
-			{Columna: 7, Fila: 1}, {Columna: 8, Fila: 1},
-			{Columna: 7, Fila: 2}, {Columna: 8, Fila: 2},
-			{Columna: 1, Fila: 5}, {Columna: 1, Fila: 6},
+			{Columna: 7, Fila: 1},
+			{Columna: 7, Fila: 2},
+		},
+		// Las ZONAS del local, dibujadas. La zona de cada mesa se deduce de acá,
+		// que es como funciona en la realidad: nadie escribe «Terraza» en cada
+		// mesa, la mesa está en la terraza.
+		areas: []mesa.Area{
+			{ID: "area_salon", Nombre: "Salón", Columna: 0, Fila: 0, Ancho: 8, Alto: 5, Color: "violeta"},
+			{ID: "area_terraza", Nombre: "Terraza", Columna: 0, Fila: 5, Ancho: 8, Alto: 1, Color: "teal"},
+		},
+		// Los MUEBLES de servicio. La barra y la caja antes eran celdas
+		// bloqueadas —lo único que había para representarlas—, así que el plano
+		// decía «acá no va nada» donde en realidad hay una barra con su nombre.
+		mostradores: []mesa.Mostrador{
+			{ID: "most_caja", Nombre: "Caja", Tipo: mesa.MostradorCaja, Columna: 0, Fila: 0, Ancho: 1, Alto: 1},
+			{ID: "most_barra", Nombre: "Barra", Tipo: mesa.MostradorBarra, Columna: 0, Fila: 2, Ancho: 1, Alto: 3},
+			{ID: "most_postres", Nombre: "Postres", Tipo: mesa.MostradorPostres, Columna: 7, Fila: 0, Ancho: 1, Alto: 1},
 		},
 		mesas: []mesaNicho{
 			{nombre: "1", zona: "Salón", forma: mesa.FormaCuadrada, capacidad: 4, columna: 2, fila: 1},

@@ -482,6 +482,9 @@ export const api = {
   eliminarMesa: (id) => request(`/api/restaurante/mesas/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   guardarMapaMesas: (posiciones) => request('/api/restaurante/mapa', { method: 'POST', body: JSON.stringify({ posiciones }) }),
   planoSalon: () => request('/api/restaurante/plano'),
+  // Catálogo de tipos de mostrador (barra, caja, postres…) y tintes de área. Del
+  // servidor y no escrito en la pantalla: es quien valida el tipo al guardar.
+  tiposMostrador: () => request('/api/restaurante/tipos-mostrador'),
   guardarPlanoSalon: (body) => request('/api/restaurante/plano', { method: 'PUT', body: JSON.stringify(body) }),
   asignacionesMesas: () => request('/api/restaurante/asignaciones'),
   guardarAsignacionMesas: (body) => request('/api/restaurante/asignaciones', { method: 'PUT', body: JSON.stringify(body) }),

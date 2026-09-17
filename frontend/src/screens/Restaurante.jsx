@@ -9,8 +9,8 @@ import { Reservaciones } from './Reservaciones.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
 import {
-  dimensionDeMesa, aforoMaximo, ocupaCelda, cabeEn, tamanoAlArrastrar, aforoAjustado,
-  MAX_CELDAS_MESA,
+  dimensionDeMesa, aforoMaximo, ocupaCelda, cabeEn, cabeArea, cabeMostrador, cubreCelda,
+  aforoAjustado, rectDeArrastre, zonaDeCelda, siguienteNombreMesa, MAX_CELDAS_MESA,
 } from '../lib/plano.js'
 import { TurnosSalon } from './TurnosSalon.jsx'
 import { SelectorModelo, NotaCatalogo } from '../components/dispositivo.jsx'
@@ -142,6 +142,25 @@ export function Restaurante({ route }) {
 }
 
 // ======================= MAPA DE MESAS =======================
+/* EDITOR DEL PLANO DEL SALÓN.
+ *
+ * Cuatro herramientas y un solo gesto: se arrastra sobre la grilla y se dibuja
+ * lo que la herramienta diga. Antes agregar una mesa era tocar una celda, llenar
+ * un modal con nombre, aforo, forma y dos pares de botones «− +» de tamaño, y
+ * recién ahí verla aparecer — cinco decisiones antes de ver nada. Dibujar el
+ * rectángulo YA dice dónde va y de qué tamaño es; el nombre se propone solo (el
+ * número que sigue) y el resto se ajusta en el panel, con la mesa a la vista.
+ *
+ * Las tres cosas que se dibujan, y por qué son distintas:
+ *   - MESA: ocupa piso, tiene aforo y se le abre cuenta.
+ *   - MOSTRADOR: mueble de servicio (barra, caja, barra de postres). Ocupa piso
+ *     igual que una mesa —ahí no se puede poner otra cosa— pero no tiene aforo
+ *     ni cuenta.
+ *   - ÁREA: una zona nombrada (Terraza, Salón principal, Pórtico). NO ocupa: es
+ *     una etiqueta de superficie y las mesas viven adentro. Además RESUELVE la
+ *     zona de las mesas que contiene, que hasta ahora se escribía a mano en cada
+ *     ficha y terminaba con «Terraza», «terraza» y «Terrraza» conviviendo.
+ */
 function MapaMesas() {
   const { db, reload } = useData()
   const { ui } = useUI()
@@ -150,23 +169,36 @@ function MapaMesas() {
   const puedeEditar = PUEDE_EDITAR.includes(ui.rol)
 
   const [mesas, setMesas] = useState(null)  // null = cargando
-  const [plano, setPlano] = useState({ filas: 6, columnas: 8, bloqueadas: [] })
+  const [plano, setPlano] = useState({ filas: 6, columnas: 8, bloqueadas: [], areas: [], mostradores: [] })
   const [err, setErr] = useState(null)
-  const [sel, setSel] = useState(null)
-  const [modo, setModo] = useState('mesas') // 'mesas' | 'bloquear'
+  const [sel, setSel] = useState(null)      // {tipo:'mesa'|'mostrador'|'area', id}
+  const [herramienta, setHerramienta] = useState('mesa')
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [nueva, setNueva] = useState(null)  // {columna,fila} de la celda a poblar
+  const [tipos, setTipos] = useState([])
 
   const cargar = useCallback(async () => {
     setErr(null)
     try {
       const [ms, pl] = await Promise.all([api.mesas(), api.planoSalon()])
       setMesas(ms)
-      setPlano({ filas: pl?.filas || 6, columnas: pl?.columnas || 8, bloqueadas: pl?.bloqueadas || [] })
+      setPlano({
+        filas: pl?.filas || 6, columnas: pl?.columnas || 8,
+        bloqueadas: pl?.bloqueadas || [], areas: pl?.areas || [], mostradores: pl?.mostradores || [],
+      })
     } catch (e) { setErr(e); setMesas([]) }
   }, [])
   useEffect(() => { cargar() }, [cargar])
+
+  // El catálogo de tipos de mostrador viene del servidor, que es quien valida:
+  // tenerlo escrito acá se desincroniza. Si no llega, se cae a «Barra».
+  useEffect(() => {
+    let vivo = true
+    api.tiposMostrador()
+      .then((r) => { if (vivo) setTipos(r?.tipos || []) })
+      .catch(() => { if (vivo) setTipos([]) })
+    return () => { vivo = false }
+  }, [])
 
   const wrapRef = useRef(null)
   const [ancho, setAncho] = useState(720)
@@ -177,13 +209,7 @@ function MapaMesas() {
   }, [mesas])
   const cel = Math.max(46, Math.min(96, Math.floor(ancho / (plano.columnas || 8)))) // lado de celda en px
 
-  // Una mesa de más capacidad ocupa más celdas. La regla es ESPEJO de
-  // `mesa.Dimension` en el backend (mismo patrón que el dígito verificador del
-  // RIF): el servidor la vuelve a aplicar y rechaza los planos encimados, así
-  // que si las dos se separan, guardar falla.
-  //
-  // Se DERIVA de la capacidad y no se guarda: guardarla dejaría el tamaño viejo
-  // al cambiar la capacidad, y el mapa mentiría.
+  const salon = { mesas: mesas || [], plano }
   const dimension = (m) => dimensionDeMesa(m)
   // El ancho se recorta al borde de la grilla: una mesa larga en la última
   // columna se dibuja angosta en vez de desbordar el plano.
@@ -194,136 +220,210 @@ function MapaMesas() {
       Math.max(1, Math.min(df, plano.filas - (m.fila || 0))),
     ]
   }
-  // Ocupa mira TODA la superficie, no solo la esquina: sin esto se podría soltar
-  // una mesa sobre la mitad de un mesón, que a simple vista parece celda libre.
   const mesaEn = (c, r) => (mesas || []).find((m) => ocupaCelda(m, c, r))
-  // La esquina (donde se dibuja la mesa) frente a una celda cubierta por ella.
   const anclaEn = (c, r) => (mesas || []).find((m) => (m.columna || 0) === c && (m.fila || 0) === r)
   const bloqueada = (c, r) => (plano.bloqueadas || []).some((b) => b.columna === c && b.fila === r)
-  const celdaLibre = (c, r) => c >= 0 && c < plano.columnas && r >= 0 && r < plano.filas && !mesaEn(c, r) && !bloqueada(c, r)
+
   const setFilas = (n) => { const v = clamp(n, 1, 20); setPlano((p) => ({ ...p, filas: v, bloqueadas: (p.bloqueadas || []).filter((b) => b.fila < v) })); setDirty(true) }
   const setColumnas = (n) => { const v = clamp(n, 1, 20); setPlano((p) => ({ ...p, columnas: v, bloqueadas: (p.bloqueadas || []).filter((b) => b.columna < v) })); setDirty(true) }
 
-  const toggleBloqueo = (c, r) => {
-    if (mesaEn(c, r)) { toast({ title: 'Ahí hay una mesa', body: 'Mueve o elimina la mesa antes de bloquear la celda.', kind: 'warn' }); return }
-    setPlano((p) => {
-      const existe = (p.bloqueadas || []).some((b) => b.columna === c && b.fila === r)
-      return { ...p, bloqueadas: existe ? p.bloqueadas.filter((b) => !(b.columna === c && b.fila === r)) : [...(p.bloqueadas || []), { columna: c, fila: r }] }
-    })
-    setDirty(true)
-  }
-
-  const clicCelda = (c, r) => {
-    if (!puedeEditar) return
-    if (modo === 'bloquear') { toggleBloqueo(c, r); return }
-    if (mesaEn(c, r)) { setSel(mesaEn(c, r).id); return }
-    if (bloqueada(c, r)) return
-    setNueva({ columna: c, fila: r })
-  }
-
-  /* ARRASTRE Y REDIMENSIONADO, en vivo.
+  /* --- GESTO ÚNICO: crear, mover y redimensionar -------------------------
    *
-   * Antes el arrastre no mostraba nada hasta soltar: la mesa saltaba al final y
-   * un destino inválido simplemente no hacía nada, sin decir por qué. Dibujar el
-   * gesto MIENTRAS ocurre es lo que lo vuelve fluido — se ve a dónde va y si
-   * cabe, antes de soltar.
+   * Todo pasa por el mismo par de manejadores. El estado vivo va en un ref (el
+   * puntero dispara decenas de eventos por segundo) y lo que se PINTA va en
+   * `vista`, que solo cambia al cambiar de celda: un setState por píxel haría
+   * justo lo contrario de fluido.
    *
-   * El estado vivo va en `gesto` (React) y el puntero en un ref: el ref evita
-   * releer el estado en cada `pointermove`, y el estado es lo que pinta.
-   *
-   * `setPointerCapture` es lo que hace que el gesto NO se pierda al salir de la
-   * mesa —que es justo lo que pasa al agrandarla— sin tener que escuchar en
-   * window y limpiar a mano.
-   */
+   * `setPointerCapture` es lo que impide que el gesto se pierda al salir del
+   * elemento —que es exactamente lo que pasa al agrandarlo— sin escuchar en
+   * window y limpiar a mano. */
   const gesto = useRef(null)
-  const [vista, setVista] = useState(null) // {id, tipo, c, r, dc, df, valido}
+  const [vista, setVista] = useState(null)
   const gridRef = useRef(null)
 
-  // celdaDe traduce un punto de la pantalla a celda de la grilla.
   const celdaDe = (e) => {
     const rect = gridRef.current.getBoundingClientRect()
     return {
-      c: Math.floor((e.clientX - rect.left) / cel),
-      r: Math.floor((e.clientY - rect.top) / cel),
+      c: clamp(Math.floor((e.clientX - rect.left) / cel), 0, plano.columnas - 1),
+      r: clamp(Math.floor((e.clientY - rect.top) / cel), 0, plano.filas - 1),
     }
   }
 
-  // cabe: ¿esta superficie está libre, ignorando la propia mesa? Es la misma
-  // regla que el servidor aplica al guardar (rechaza planos encimados), así que
-  // sin ella el gesto parecería funcionar y fallaría al guardar.
-  const cabe = (id, c, r, dc, df) => cabeEn({ mesas: mesas || [], plano }, id, c, r, dc, df)
+  // valido responde si lo dibujado se puede soltar ahí. Cada cosa tiene su
+  // regla, y son distintas a propósito (ver la cabecera del archivo).
+  const valido = (v) => {
+    if (v.clase === 'area') return cabeArea(salon, v.id, v.c, v.r, v.dc, v.df)
+    if (v.clase === 'mostrador') return cabeMostrador(salon, v.id, v.c, v.r, v.dc, v.df)
+    if (v.clase === 'bloqueo') return true // bloquear solo pinta celdas libres
+    return cabeEn(salon, v.id, v.c, v.r, v.dc, v.df)
+  }
 
-  const onMesaDown = (e, m, tipo = 'mover') => {
-    if (!puedeEditar || modo !== 'mesas') { setSel(m.id); return }
+  const nuevaVista = (v) => setVista((prev) => {
+    if (prev && prev.c === v.c && prev.r === v.r && prev.dc === v.dc && prev.df === v.df) return prev
+    if (gesto.current) gesto.current.movido = true
+    const sig = { ...v, valido: valido(v) }
+    if (gesto.current) gesto.current.v = sig
+    return sig
+  })
+
+  // Empezar a DIBUJAR sobre la grilla vacía.
+  const onGridDown = (e) => {
+    if (!puedeEditar || gesto.current) return
+    const { c, r } = celdaDe(e)
+    e.preventDefault()
+    setSel(null)
+    const clase = herramienta === 'bloquear' ? 'bloqueo' : herramienta
+    gesto.current = { accion: 'crear', clase, c0: c, r0: r, movido: false }
+    try { gridRef.current.setPointerCapture(e.pointerId) } catch { /* sin captura igual funciona */ }
+    const v = { clase, id: '', c, r, dc: 1, df: 1 }
+    gesto.current.v = { ...v, valido: valido(v) }
+    setVista(gesto.current.v)
+  }
+
+  // Empezar a MOVER o REDIMENSIONAR algo que ya existe.
+  const onElementoDown = (e, clase, el, tipo = 'mover') => {
+    if (!puedeEditar) { setSel({ tipo: clase, id: el.id }); return }
     e.preventDefault(); e.stopPropagation()
-    setSel(m.id)
-    const [dc, df] = dimension(m)
-    const origen = celdaDe(e)
+    setSel({ tipo: clase, id: el.id })
+    const [dc, df] = clase === 'mesa' ? dimension(el) : [el.ancho || 1, el.alto || 1]
+    const col = el.columna || 0
+    const fil = el.fila || 0
+    const o = celdaDe(e)
     gesto.current = {
-      id: m.id, tipo, dc, df,
-      // Desfase entre la esquina de la mesa y la celda donde se agarró: sin esto
-      // la mesa salta bajo el cursor al empezar a moverla, que es exactamente lo
-      // que se sentía tosco.
-      offC: origen.c - (m.columna || 0), offR: origen.r - (m.fila || 0),
-      col: m.columna || 0, fil: m.fila || 0,
-      movido: false,
+      accion: tipo === 'mover' ? 'mover' : 'redimensionar', clase, tipo, id: el.id, dc, df, col, fil,
+      // Desfase entre la esquina y la celda donde se agarró: sin esto el
+      // elemento salta bajo el cursor al empezar a moverlo, que es exactamente
+      // lo que se sentía tosco.
+      offC: o.c - col, offR: o.r - fil, movido: false,
     }
-    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* sin captura, el gesto igual funciona */ }
-    const inicial = { id: m.id, tipo, c: m.columna || 0, r: m.fila || 0, dc, df, valido: true }
-    gesto.current.v = inicial
-    setVista(inicial)
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* idem */ }
+    const v = { clase, id: el.id, c: col, r: fil, dc, df }
+    gesto.current.v = { ...v, valido: true }
+    setVista(gesto.current.v)
   }
 
-  const onMesaMove = (e) => {
+  const onMove = (e) => {
     const g = gesto.current
     if (!g || !gridRef.current) return
     const { c, r } = celdaDe(e)
-    let v
-    if (g.tipo === 'mover') {
-      const nc = c - g.offC, nr = r - g.offR
-      v = { id: g.id, tipo: g.tipo, c: nc, r: nr, dc: g.dc, df: g.df }
-    } else {
-      // Redimensionar: la esquina se queda quieta y el lado sigue al cursor. El
-      // mínimo es un cuadro —una mesa de cero no existe— y el máximo, el mismo
-      // que acota el servidor.
-      const [dc, df] = tamanoAlArrastrar({ tipo: g.tipo, col: g.col, fila: g.fil, dc: g.dc, df: g.df }, c, r)
-      v = { id: g.id, tipo: g.tipo, c: g.col, r: g.fil, dc, df }
+    if (g.accion === 'crear') {
+      const { c: nc, r: nr, dc, df } = rectDeArrastre(g.c0, g.r0, c, r)
+      nuevaVista({ clase: g.clase, id: '', c: nc, r: nr, dc, df })
+      return
     }
-    // Se repinta solo cuando cambia de celda: un setState por píxel haría
-    // justo lo contrario de fluido.
-    setVista((prev) => {
-      if (prev && prev.c === v.c && prev.r === v.r && prev.dc === v.dc && prev.df === v.df) return prev
-      g.movido = true
-      const siguiente = { ...v, valido: cabe(g.id, v.c, v.r, v.dc, v.df) }
-      g.v = siguiente
-      return siguiente
-    })
+    if (g.accion === 'mover') {
+      nuevaVista({ clase: g.clase, id: g.id, c: c - g.offC, r: r - g.offR, dc: g.dc, df: g.df })
+      return
+    }
+    // Redimensionar: la esquina se queda quieta y el lado sigue al cursor.
+    const tope = g.clase === 'mesa' ? MAX_CELDAS_MESA : Math.max(plano.columnas, plano.filas)
+    const dc = g.tipo === 'alto' ? g.dc : clamp(c - g.col + 1, 1, tope)
+    const df = g.tipo === 'ancho' ? g.df : clamp(r - g.fil + 1, 1, tope)
+    nuevaVista({ clase: g.clase, id: g.id, c: g.col, r: g.fil, dc, df })
   }
 
-  const onMesaUp = () => {
+  const onUp = async () => {
     const g = gesto.current
     gesto.current = null
-    // Se lee del ref, no del estado: al soltar, el último `setVista` puede no
-    // haber repintado todavía y se aplicaría la posición anterior.
+    // Se lee del ref y no del estado: al soltar, el último repintado puede no
+    // haber ocurrido todavía y se aplicaría la posición anterior.
     const v = g?.v
     setVista(null)
     if (!g || !v) return
-    // Un toque sin desplazamiento es una selección, no un movimiento.
+    if (g.accion === 'crear') { await crear(g.clase, v, g.movido); return }
     if (!g.movido) return
     if (!v.valido) {
-      toast({ title: 'Ahí no cabe', body: 'La mesa se sale del plano o pisa otra mesa.', kind: 'warn' })
+      toast({ title: 'Ahí no cabe', body: 'Se sale del plano o pisa algo que ya está puesto.', kind: 'warn' })
       return
     }
-    setMesas((ms) => ms.map((m) => {
-      if (m.id !== g.id) return m
-      // Al achicar, el aforo se recorta al nuevo tope: dejarlo por encima haría
-      // que el servidor rechazara el guardado con un número que la pantalla
-      // mostraba como válido.
-      return {
+    aplicarGesto(g.clase, g.id, v)
+  }
+
+  const aplicarGesto = (clase, id, v) => {
+    if (clase === 'mesa') {
+      setMesas((ms) => ms.map((m) => (m.id !== id ? m : {
         ...m, columna: v.c, fila: v.r, anchoCeldas: v.dc, altoCeldas: v.df,
+        // Al achicar, el aforo se recorta al nuevo tope: dejarlo por encima hace
+        // que el servidor rechace el guardado con un número que la pantalla
+        // mostraba como válido.
         capacidad: aforoAjustado(m.capacidad, v.dc, v.df),
+        zona: zonaDeCelda(plano.areas, v.c, v.r) || m.zona,
+      })))
+    } else {
+      const lista = clase === 'area' ? 'areas' : 'mostradores'
+      setPlano((p) => ({
+        ...p,
+        [lista]: (p[lista] || []).map((x) => (x.id !== id ? x
+          : { ...x, columna: v.c, fila: v.r, ancho: v.dc, alto: v.df })),
+      }))
+    }
+    setDirty(true)
+  }
+
+  const crear = async (clase, v, movido) => {
+    if (clase === 'bloqueo') {
+      // Bloquear pinta el rectángulo entero: marcar pared por pared una fila de
+      // ocho celdas era ocho toques.
+      setPlano((p) => {
+        const nuevas = [...(p.bloqueadas || [])]
+        for (let i = 0; i < v.dc; i++) {
+          for (let j = 0; j < v.df; j++) {
+            const c = v.c + i, r = v.r + j
+            if (mesaEn(c, r) || (p.mostradores || []).some((x) => cubreCelda(x, c, r))) continue
+            const ya = nuevas.findIndex((b) => b.columna === c && b.fila === r)
+            // Un toque simple alterna; un arrastre pinta. Así se puede
+            // desbloquear una celda sin tener que arrastrar sobre ella.
+            if (ya >= 0) { if (!movido) nuevas.splice(ya, 1) } else nuevas.push({ columna: c, fila: r })
+          }
+        }
+        return { ...p, bloqueadas: nuevas }
+      })
+      setDirty(true)
+      return
+    }
+    if (!v.valido) {
+      toast({ title: 'Ahí no cabe', body: 'Se sale del plano o pisa algo que ya está puesto.', kind: 'warn' })
+      return
+    }
+    if (clase === 'mesa') {
+      // La mesa se crea YA, con el número que sigue: el nombre y el aforo se
+      // ajustan en el panel con la mesa a la vista, que es más rápido que
+      // decidirlos de memoria en un modal.
+      try {
+        const m = await api.crearMesa({
+          nombre: siguienteNombreMesa(mesas || []),
+          zona: zonaDeCelda(plano.areas, v.c, v.r),
+          capacidad: aforoMaximo(v.dc, v.df), forma: 'cuadrada',
+          columna: v.c, fila: v.r, anchoCeldas: v.dc, altoCeldas: v.df,
+        })
+        setMesas((ms) => [...(ms || []), m])
+        setSel({ tipo: 'mesa', id: m.id })
+      } catch (e) {
+        toast({ title: 'No se pudo agregar la mesa', body: e?.message || 'Error', kind: 'error' })
       }
-    }))
+      return
+    }
+    // Áreas y mostradores viven en el plano: se crean en local y se persisten
+    // con «Guardar plano», junto con la grilla que los contiene.
+    const id = `${clase}_${Date.now().toString(36)}`
+    if (clase === 'area') {
+      const colores = ['violeta', 'teal', 'ambar', 'rosa', 'pizarra']
+      const n = (plano.areas || []).length
+      const area = {
+        id, nombre: `Área ${n + 1}`, columna: v.c, fila: v.r, ancho: v.dc, alto: v.df,
+        color: colores[n % colores.length],
+      }
+      setPlano((p) => ({ ...p, areas: [...(p.areas || []), area] }))
+      setSel({ tipo: 'area', id })
+    } else {
+      const tipo = tipos[0]?.codigo || 'barra'
+      const most = {
+        id, nombre: tipos[0]?.nombre || 'Barra', tipo,
+        columna: v.c, fila: v.r, ancho: v.dc, alto: v.df,
+      }
+      setPlano((p) => ({ ...p, mostradores: [...(p.mostradores || []), most] }))
+      setSel({ tipo: 'mostrador', id })
+    }
     setDirty(true)
   }
 
@@ -331,26 +431,44 @@ function MapaMesas() {
     setBusy(true)
     try {
       const ms = (mesas || []).map((m) => ({ ...m, columna: clamp(m.columna || 0, 0, plano.columnas - 1), fila: clamp(m.fila || 0, 0, plano.filas - 1) }))
-      await api.guardarPlanoSalon({ filas: plano.filas, columnas: plano.columnas, bloqueadas: plano.bloqueadas })
-      // El tamaño viaja junto con la posición: en el plano se redimensiona
-      // arrastrando, así que mover y agrandar son el mismo gesto y tienen que
-      // guardarse en la misma llamada o el plano queda a medias.
+      // El plano va PRIMERO: el servidor deduce de sus áreas la zona de cada
+      // mesa, así que guardarlo después dejaría las zonas un guardado atrás.
+      await api.guardarPlanoSalon({
+        filas: plano.filas, columnas: plano.columnas, bloqueadas: plano.bloqueadas,
+        areas: plano.areas || [], mostradores: plano.mostradores || [],
+      })
+      // El tamaño viaja junto con la posición: mover y agrandar son el mismo
+      // gesto, y por rutas distintas el plano queda a medias si una falla.
       await api.guardarMapaMesas(ms.map((m) => {
         const [dc, df] = dimensionDeMesa(m)
         return { id: m.id, columna: m.columna, fila: m.fila, anchoCeldas: dc, altoCeldas: df }
       }))
-      setMesas(ms); setDirty(false); reload()
+      await cargar(); setDirty(false); reload()
       toast({ title: 'Plano guardado' })
     } catch (e) { toast({ title: 'No se pudo guardar', body: e?.message || 'Error', kind: 'error' }) }
     finally { setBusy(false) }
   }
+
   const eliminar = async (m) => {
     if (!(await confirm({ title: '¿Eliminar esta mesa?', body: `La mesa «${m.nombre}» se quitará del salón.`, confirmLabel: 'Eliminar', tone: 'danger' }))) return
-    try { await api.eliminarMesa(m.id); if (sel === m.id) setSel(null); await cargar(); reload(); toast({ title: 'Mesa eliminada' }) }
+    try { await api.eliminarMesa(m.id); setSel(null); await cargar(); reload(); toast({ title: 'Mesa eliminada' }) }
     catch (e) { toast({ title: 'No se pudo eliminar', body: e?.message || 'Error', kind: 'error' }) }
   }
 
-  const seleccionada = (mesas || []).find((m) => m.id === sel) || null
+  const quitarDelPlano = (clase, id) => {
+    const lista = clase === 'area' ? 'areas' : 'mostradores'
+    setPlano((p) => ({ ...p, [lista]: (p[lista] || []).filter((x) => x.id !== id) }))
+    setSel(null); setDirty(true)
+  }
+  const editarDelPlano = (clase, id, parche) => {
+    const lista = clase === 'area' ? 'areas' : 'mostradores'
+    setPlano((p) => ({ ...p, [lista]: (p[lista] || []).map((x) => (x.id === id ? { ...x, ...parche } : x)) }))
+    setDirty(true)
+  }
+
+  const mesaSel = sel?.tipo === 'mesa' ? (mesas || []).find((m) => m.id === sel.id) : null
+  const areaSel = sel?.tipo === 'area' ? (plano.areas || []).find((a) => a.id === sel.id) : null
+  const mostSel = sel?.tipo === 'mostrador' ? (plano.mostradores || []).find((x) => x.id === sel.id) : null
 
   if (mesas === null) return <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4"><TableSkeleton rows={5} cols={3} /></div>
   if (err) return <Empty icon={<Icon.CircleAlert size={22} />} title="No se pudo cargar el salón" body={String(err?.message || err)} cta={<Button onClick={cargar} icon={<Icon.Refresh size={15} />}>Reintentar</Button>} />
@@ -358,11 +476,13 @@ function MapaMesas() {
   const stepper = (label, val, on) => (
     <div className="flex items-center gap-1">
       <span className="text-[11.5px] text-slate-500">{label}</span>
-      <button className="w-7 h-7 rounded-md border border-slate-300 dark:border-slate-700 disabled:opacity-40" disabled={!puedeEditar} onClick={() => on(val - 1)}>−</button>
+      <button type="button" className="w-7 h-7 rounded-md border border-slate-300 dark:border-slate-700 disabled:opacity-40" disabled={!puedeEditar} onClick={() => on(val - 1)}>−</button>
       <span className="w-6 text-center text-[13px] font-semibold tabular-nums">{val}</span>
-      <button className="w-7 h-7 rounded-md border border-slate-300 dark:border-slate-700 disabled:opacity-40" disabled={!puedeEditar} onClick={() => on(val + 1)}>+</button>
+      <button type="button" className="w-7 h-7 rounded-md border border-slate-300 dark:border-slate-700 disabled:opacity-40" disabled={!puedeEditar} onClick={() => on(val + 1)}>+</button>
     </div>
   )
+
+  const px = (n) => n * cel
 
   return (
     <div>
@@ -371,8 +491,7 @@ function MapaMesas() {
           {stepper('Columnas', plano.columnas, setColumnas)}
           {stepper('Filas', plano.filas, setFilas)}
           {puedeEditar ? (
-            <Segmented size="sm" value={modo} onChange={setModo}
-              options={[{ value: 'mesas', label: 'Mesas' }, { value: 'bloquear', label: 'Bloquear' }]} />
+            <Segmented size="sm" value={herramienta} onChange={setHerramienta} options={HERRAMIENTAS} />
           ) : null}
         </div>
         {puedeEditar ? (
@@ -384,73 +503,127 @@ function MapaMesas() {
           <span key={k} className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded" style={{ background: c.bg, border: `1.5px solid ${c.border}` }} /> {c.label}</span>
         ))}
         <span className="inline-flex items-center gap-1.5"><span className="w-3 h-3 rounded" style={{ backgroundImage: 'repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 3px,#cbd5e1 3px,#cbd5e1 5px)' }} /> Bloqueado</span>
-        {puedeEditar ? <span className="text-slate-400">· {modo === 'bloquear' ? 'Toca una celda para bloquearla/desbloquearla.' : 'Toca una celda vacía para agregar mesa; arrastra una mesa para moverla.'}</span> : null}
+        {puedeEditar ? <span className="text-slate-400">· {AYUDA_HERRAMIENTA[herramienta]}</span> : null}
       </div>
 
-      <div className="grid lg:grid-cols-[1fr,260px] gap-4">
+      <div className="grid lg:grid-cols-[1fr,280px] gap-4">
         <div ref={wrapRef} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-3 overflow-auto">
-          <div ref={gridRef} className="relative mx-auto select-none" style={{ width: cel * plano.columnas, display: 'grid', gridTemplateColumns: `repeat(${plano.columnas}, ${cel}px)`, gridTemplateRows: `repeat(${plano.filas}, ${cel}px)`, gap: 0 }}>
-            {Array.from({ length: plano.filas }).flatMap((_, r) => Array.from({ length: plano.columnas }).map((_, c) => {
-              const cubierta = mesaEn(c, r); const m = anclaEn(c, r); const blk = bloqueada(c, r)
-              // Una celda TAPADA por una mesa grande (pero que no es su esquina)
-              // no se dibuja: la mesa ya la abarca con su span.
-              if (cubierta && !m) return null
-              const [dc, df] = m ? dimensionVisible(m) : [1, 1]
-              const col = m ? colorEstado(m.estado) : null
-              const activo = m && sel === m.id
-              // La mesa que se está arrastrando se atenúa: lo que se mira es la
-              // vista previa, y dos copias opacas a la vez confunden.
-              const arrastrandoEsta = !!(m && vista && vista.id === m.id && vista.tipo === 'mover')
-              return (
-                <div key={c + '-' + r} onPointerDown={() => (m ? null : clicCelda(c, r))}
-                  className="border border-slate-100 dark:border-slate-800 flex items-center justify-center"
-                  style={{
-                    gridColumn: `${c + 1} / span ${dc}`, gridRow: `${r + 1} / span ${df}`,
-                    background: blk ? 'repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 4px,#cbd5e1 4px,#cbd5e1 7px)' : 'transparent',
-                    cursor: puedeEditar && !m ? 'pointer' : 'default',
-                  }}>
-                  {m ? (
-                    <div onPointerDown={(e) => onMesaDown(e, m)} onPointerMove={onMesaMove}
-                      onPointerUp={onMesaUp} onPointerCancel={onMesaUp} onClick={() => setSel(m.id)}
-                      className="relative flex flex-col items-center justify-center touch-none"
-                      style={{ width: cel * dc - 8, height: cel * df - 8, background: col.bg, border: `2px solid ${activo ? '#6A2CF0' : col.border}`, borderRadius: m.forma === 'redonda' ? '50%' : 8, color: col.text, cursor: puedeEditar && modo === 'mesas' ? (arrastrandoEsta ? 'grabbing' : 'grab') : 'pointer', boxShadow: activo ? '0 0 0 3px rgba(106,44,240,.18)' : 'none', opacity: arrastrandoEsta ? 0.4 : 1 }}>
-                      <span className="font-display font-bold leading-none" style={{ fontSize: Math.max(12, cel * 0.24) }}>{m.nombre}</span>
-                      <span className="inline-flex items-center gap-0.5 opacity-80" style={{ fontSize: Math.max(9, cel * 0.16) }}><Icon.Users size={Math.max(9, cel * 0.16)} /> {m.capacidad || 0}</span>
+          <div ref={gridRef} onPointerDown={onGridDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+            className="relative mx-auto select-none touch-none"
+            style={{ width: px(plano.columnas), height: px(plano.filas), cursor: puedeEditar ? 'crosshair' : 'default' }}>
 
-                      {/* TIRADORES DE TAMAÑO, solo en la mesa seleccionada: uno
-                          por lado y uno en la esquina. Aparecen al seleccionar y
-                          no siempre porque doce mesas con seis tiradores cada
-                          una convierten el plano en un alfiletero. */}
-                      {puedeEditar && modo === 'mesas' && activo ? TIRADORES.map((t) => (
-                        <span key={t.tipo} title={t.titulo}
-                          onPointerDown={(e) => onMesaDown(e, m, t.tipo)} onPointerMove={onMesaMove}
-                          onPointerUp={onMesaUp} onPointerCancel={onMesaUp}
-                          className="absolute bg-white dark:bg-slate-900 border-2 border-elerp-500 rounded-full touch-none"
-                          style={{ width: 12, height: 12, cursor: t.cursor, ...t.pos }} />
-                      )) : null}
-                    </div>
-                  ) : blk && puedeEditar ? (
-                    <Icon.CircleX size={Math.max(12, cel * 0.28)} className="text-slate-400" />
+            {/* ÁREAS, debajo de todo: son superficie, no muebles. El rótulo sí
+                recibe el toque, porque es lo único de un área que se puede
+                agarrar sin robarle el clic a las mesas que contiene. */}
+            {(plano.areas || []).map((a) => {
+              const c = COLOR_AREA[a.color] || COLOR_AREA.violeta
+              const activa = sel?.tipo === 'area' && sel.id === a.id
+              return (
+                <div key={a.id} className="absolute pointer-events-none rounded-lg"
+                  style={{ left: px(a.columna), top: px(a.fila), width: px(a.ancho), height: px(a.alto), background: c.bg, border: `2px ${activa ? 'solid' : 'dashed'} ${c.border}` }}>
+                  <span onPointerDown={(e) => onElementoDown(e, 'area', a)} onPointerMove={onMove}
+                    onPointerUp={onUp} onPointerCancel={onUp}
+                    className="pointer-events-auto absolute left-1 top-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold cursor-grab touch-none"
+                    style={{ background: c.chip, color: c.text }}>
+                    {a.nombre}
+                  </span>
+                  {puedeEditar && activa ? (
+                    <span onPointerDown={(e) => onElementoDown(e, 'area', a, 'ambos')} onPointerMove={onMove}
+                      onPointerUp={onUp} onPointerCancel={onUp}
+                      className="pointer-events-auto absolute bg-white dark:bg-slate-900 border-2 rounded-full touch-none"
+                      style={{ width: 12, height: 12, right: -7, bottom: -7, cursor: 'nwse-resize', borderColor: c.border }} />
                   ) : null}
                 </div>
               )
-            }))}
+            })}
 
-            {/* VISTA PREVIA del gesto: dónde va a quedar la mesa y si cabe. Es
-                lo que vuelve el arrastre legible — antes no se veía nada hasta
-                soltar, y un destino inválido no decía por qué no pasaba nada. */}
-            {vista ? (
-              <div className="pointer-events-none rounded-lg relative"
+            {/* CELDAS: la cuadrícula y lo bloqueado. */}
+            {Array.from({ length: plano.filas }).flatMap((_, r) => Array.from({ length: plano.columnas }).map((_, c) => (
+              <div key={`g${c}-${r}`} className="absolute border border-slate-100 dark:border-slate-800 pointer-events-none flex items-center justify-center"
                 style={{
-                  gridColumn: `${clamp(vista.c, 0, plano.columnas - 1) + 1} / span ${Math.min(vista.dc, plano.columnas)}`,
-                  gridRow: `${clamp(vista.r, 0, plano.filas - 1) + 1} / span ${Math.min(vista.df, plano.filas)}`,
+                  left: px(c), top: px(r), width: cel, height: cel,
+                  background: bloqueada(c, r) ? 'repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 4px,#cbd5e1 4px,#cbd5e1 7px)' : 'transparent',
+                }}>
+                {bloqueada(c, r) && puedeEditar ? <Icon.CircleX size={Math.max(12, cel * 0.28)} className="text-slate-400" /> : null}
+              </div>
+            )))}
+
+            {/* MOSTRADORES: muebles de servicio. Ocupan piso como una mesa. */}
+            {(plano.mostradores || []).map((x) => {
+              const activo = sel?.tipo === 'mostrador' && sel.id === x.id
+              const arrastrando = vista && vista.id === x.id && vista.clase === 'mostrador'
+              return (
+                <div key={x.id} onPointerDown={(e) => onElementoDown(e, 'mostrador', x)} onPointerMove={onMove}
+                  onPointerUp={onUp} onPointerCancel={onUp}
+                  className="absolute rounded-lg flex items-center justify-center gap-1 touch-none"
+                  style={{
+                    left: px(x.columna) + 4, top: px(x.fila) + 4, width: px(x.ancho) - 8, height: px(x.alto) - 8,
+                    background: '#334155', color: '#E2E8F0',
+                    border: `2px solid ${activo ? '#6A2CF0' : '#1E293B'}`,
+                    cursor: puedeEditar ? 'grab' : 'pointer', opacity: arrastrando ? 0.4 : 1,
+                    boxShadow: activo ? '0 0 0 3px rgba(106,44,240,.18)' : 'none',
+                  }}>
+                  <Icon.Utensils size={Math.max(11, cel * 0.2)} />
+                  <span className="font-semibold leading-none truncate px-1" style={{ fontSize: Math.max(10, cel * 0.18) }}>{x.nombre}</span>
+                  {puedeEditar && activo ? TIRADORES.map((t) => (
+                    <span key={t.tipo} title={t.titulo}
+                      onPointerDown={(e) => onElementoDown(e, 'mostrador', x, t.tipo)} onPointerMove={onMove}
+                      onPointerUp={onUp} onPointerCancel={onUp}
+                      className="absolute bg-white dark:bg-slate-900 border-2 border-elerp-500 rounded-full touch-none"
+                      style={{ width: 12, height: 12, cursor: t.cursor, ...t.pos }} />
+                  )) : null}
+                </div>
+              )
+            })}
+
+            {/* MESAS. */}
+            {(mesas || []).map((m) => {
+              const [dc, df] = dimensionVisible(m)
+              const col = colorEstado(m.estado)
+              const activo = sel?.tipo === 'mesa' && sel.id === m.id
+              const arrastrando = vista && vista.id === m.id && vista.clase === 'mesa'
+              return (
+                <div key={m.id} onPointerDown={(e) => onElementoDown(e, 'mesa', m)} onPointerMove={onMove}
+                  onPointerUp={onUp} onPointerCancel={onUp}
+                  className="absolute flex flex-col items-center justify-center touch-none"
+                  style={{
+                    left: px(m.columna || 0) + 4, top: px(m.fila || 0) + 4,
+                    width: px(dc) - 8, height: px(df) - 8,
+                    background: col.bg, border: `2px solid ${activo ? '#6A2CF0' : col.border}`,
+                    borderRadius: m.forma === 'redonda' ? '50%' : 8, color: col.text,
+                    cursor: puedeEditar ? 'grab' : 'pointer', opacity: arrastrando ? 0.4 : 1,
+                    boxShadow: activo ? '0 0 0 3px rgba(106,44,240,.18)' : 'none',
+                  }}>
+                  <span className="font-display font-bold leading-none" style={{ fontSize: Math.max(12, cel * 0.24) }}>{m.nombre}</span>
+                  <span className="inline-flex items-center gap-0.5 opacity-80" style={{ fontSize: Math.max(9, cel * 0.16) }}><Icon.Users size={Math.max(9, cel * 0.16)} /> {m.capacidad || 0}</span>
+
+                  {/* Tiradores solo en la seleccionada: doce mesas con tres
+                      tiradores cada una convierten el plano en un alfiletero. */}
+                  {puedeEditar && activo ? TIRADORES.map((t) => (
+                    <span key={t.tipo} title={t.titulo}
+                      onPointerDown={(e) => onElementoDown(e, 'mesa', m, t.tipo)} onPointerMove={onMove}
+                      onPointerUp={onUp} onPointerCancel={onUp}
+                      className="absolute bg-white dark:bg-slate-900 border-2 border-elerp-500 rounded-full touch-none"
+                      style={{ width: 12, height: 12, cursor: t.cursor, ...t.pos }} />
+                  )) : null}
+                </div>
+              )
+            })}
+
+            {/* VISTA PREVIA del gesto: qué se está dibujando, dónde y si cabe.
+                Sin esto el arrastre no mostraba nada hasta soltar y un destino
+                inválido no decía por qué no pasaba nada. */}
+            {vista ? (
+              <div className="pointer-events-none absolute rounded-lg"
+                style={{
+                  left: px(vista.c) + 3, top: px(vista.r) + 3,
+                  width: px(vista.dc) - 6, height: px(vista.df) - 6,
                   border: `2px dashed ${vista.valido ? '#6A2CF0' : '#B3362C'}`,
                   background: vista.valido ? 'rgba(106,44,240,.10)' : 'rgba(179,54,44,.10)',
-                  margin: 3,
                 }}>
-                <span className="absolute -mt-0.5 ml-1 num font-semibold"
+                <span className="absolute left-1 top-0.5 num font-semibold"
                   style={{ fontSize: 11, color: vista.valido ? '#6A2CF0' : '#B3362C' }}>
-                  {vista.dc}×{vista.df} · {aforoMaximo(vista.dc, vista.df)}p
+                  {vista.dc}×{vista.df}{vista.clase === 'mesa' ? ` · ${aforoMaximo(vista.dc, vista.df)}p` : ''}
                 </span>
               </div>
             ) : null}
@@ -458,20 +631,116 @@ function MapaMesas() {
         </div>
 
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-3.5">
-          {!seleccionada ? (
-            <div className="text-[12.5px] text-slate-400">
-              Ajusta <strong>columnas y filas</strong> para dar forma al salón, <strong>bloquea</strong> las celdas donde no van mesas (paredes, cocina) y coloca las mesas en la grilla.
-              {puedeEditar ? ' Toca una mesa para editar su nombre, zona, capacidad y forma.' : ''}
-            </div>
+          {mesaSel ? (
+            <PanelMesa key={mesaSel.id} mesa={mesaSel} puedeEditar={puedeEditar}
+              onGuardado={async () => { await cargar(); reload() }} onEliminar={() => eliminar(mesaSel)} toast={toast} />
+          ) : areaSel ? (
+            <PanelArea key={areaSel.id} area={areaSel} puedeEditar={puedeEditar}
+              onCambio={(p) => editarDelPlano('area', areaSel.id, p)} onQuitar={() => quitarDelPlano('area', areaSel.id)} />
+          ) : mostSel ? (
+            <PanelMostrador key={mostSel.id} mostrador={mostSel} tipos={tipos} puedeEditar={puedeEditar}
+              onCambio={(p) => editarDelPlano('mostrador', mostSel.id, p)} onQuitar={() => quitarDelPlano('mostrador', mostSel.id)} />
           ) : (
-            <PanelMesa key={seleccionada.id} mesa={seleccionada} puedeEditar={puedeEditar}
-              onGuardado={async () => { await cargar(); reload() }} onEliminar={() => eliminar(seleccionada)} toast={toast} />
+            <div className="text-[12.5px] text-slate-400 space-y-2">
+              <p>Ajusta <strong>columnas y filas</strong> para dar forma al salón y <strong>arrastra sobre la grilla</strong> para dibujar.</p>
+              <ul className="space-y-1">
+                <li><strong className="text-slate-500 dark:text-slate-300">Mesa</strong> — ocupa piso y tiene aforo (4 personas por cuadro).</li>
+                <li><strong className="text-slate-500 dark:text-slate-300">Mostrador</strong> — barra, caja, barra de postres. Ocupa piso, sin aforo.</li>
+                <li><strong className="text-slate-500 dark:text-slate-300">Área</strong> — Terraza, Salón principal, Pórtico. No ocupa: las mesas viven adentro y toman su zona.</li>
+                <li><strong className="text-slate-500 dark:text-slate-300">Bloquear</strong> — paredes, columnas, cocina.</li>
+              </ul>
+              <p>Toca algo del plano para editarlo; arrastra sus bordes para cambiarle el tamaño.</p>
+            </div>
           )}
         </div>
       </div>
+    </div>
+  )
+}
 
-      {nueva ? <NuevaMesaModal columna={nueva.columna} fila={nueva.fila} onClose={() => setNueva(null)}
-        onCreada={async (m) => { setNueva(null); await cargar(); reload(); setSel(m.id) }} toast={toast} /> : null}
+/* HERRAMIENTAS del editor. */
+const HERRAMIENTAS = [
+  { value: 'mesa', label: 'Mesa' },
+  { value: 'mostrador', label: 'Mostrador' },
+  { value: 'area', label: 'Área' },
+  { value: 'bloquear', label: 'Bloquear' },
+]
+
+const AYUDA_HERRAMIENTA = {
+  mesa: 'Arrastra sobre la grilla para dibujar una mesa; su tamaño define el aforo.',
+  mostrador: 'Arrastra para dibujar la barra, la caja o una estación de servicio.',
+  area: 'Arrastra para delimitar una zona (Terraza, Salón principal, Pórtico). Las mesas de adentro toman su nombre.',
+  bloquear: 'Arrastra para marcar paredes o zonas donde no van mesas; toca una marcada para liberarla.',
+}
+
+/* Tintes de las áreas. Cinco alcanzan: un salón con más de cinco zonas nombradas
+ * no se lee en un plano de todos modos, y una paleta corta evita que cada sede
+ * invente su propio código de colores. */
+const COLOR_AREA = {
+  violeta: { bg: 'rgba(106,44,240,.07)', border: 'rgba(106,44,240,.45)', chip: 'rgba(106,44,240,.14)', text: '#5B21B6' },
+  teal: { bg: 'rgba(9,182,155,.08)', border: 'rgba(9,182,155,.5)', chip: 'rgba(9,182,155,.16)', text: '#0F766E' },
+  ambar: { bg: 'rgba(146,96,10,.08)', border: 'rgba(146,96,10,.45)', chip: 'rgba(146,96,10,.16)', text: '#92600A' },
+  rosa: { bg: 'rgba(190,24,93,.07)', border: 'rgba(190,24,93,.4)', chip: 'rgba(190,24,93,.14)', text: '#9D174D' },
+  pizarra: { bg: 'rgba(71,85,105,.08)', border: 'rgba(71,85,105,.45)', chip: 'rgba(71,85,105,.16)', text: '#334155' },
+}
+
+/* PanelArea: nombre y color de una zona. El nombre no es cosmético — es la zona
+ * que toman sus mesas y con la que el personal las nombra en voz alta. */
+function PanelArea({ area, puedeEditar, onCambio, onQuitar }) {
+  return (
+    <div className="space-y-3">
+      <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Área del salón</div>
+      <Field label="Nombre de la zona" hint="las mesas de adentro lo toman como su zona">
+        <Input value={area.nombre} disabled={!puedeEditar} autoFocus
+          onChange={(e) => onCambio({ nombre: e.target.value })} placeholder="Terraza, Salón principal, Pórtico…" />
+      </Field>
+      <div>
+        <div className="text-[12px] font-medium text-slate-500 mb-1.5">Color</div>
+        <div className="flex items-center gap-2">
+          {Object.entries(COLOR_AREA).map(([k, c]) => (
+            <button key={k} type="button" disabled={!puedeEditar} title={k} onClick={() => onCambio({ color: k })}
+              className="h-7 w-7 rounded-lg border-2 disabled:opacity-40"
+              style={{ background: c.chip, borderColor: area.color === k ? c.text : 'transparent' }} />
+          ))}
+        </div>
+      </div>
+      <div className="text-[11.5px] text-slate-400 num">{area.ancho}×{area.alto} cuadros</div>
+      {puedeEditar ? (
+        <Button size="sm" variant="ghost" icon={<Icon.Trash size={14} />} onClick={onQuitar}>Quitar área</Button>
+      ) : null}
+    </div>
+  )
+}
+
+/* PanelMostrador: el mueble de servicio. El TIPO viene del catálogo del
+ * servidor, que es quien valida — una lista escrita acá se desincroniza. */
+function PanelMostrador({ mostrador, tipos, puedeEditar, onCambio, onQuitar }) {
+  return (
+    <div className="space-y-3">
+      <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Mostrador de servicio</div>
+      <Field label="Nombre">
+        <Input value={mostrador.nombre} disabled={!puedeEditar} autoFocus
+          onChange={(e) => onCambio({ nombre: e.target.value })} placeholder="Barra, Caja 1, Postres…" />
+      </Field>
+      <Field label="Tipo">
+        <Select value={mostrador.tipo} disabled={!puedeEditar}
+          onChange={(e) => {
+            const t = tipos.find((x) => x.codigo === e.target.value)
+            // Cambiar el tipo renombra el mueble SOLO si el nombre era el que
+            // venía por defecto: renombrar «Caja 2» a «Barra» sería perder lo
+            // que alguien escribió.
+            const renombrar = tipos.some((x) => x.nombre === mostrador.nombre)
+            onCambio({ tipo: e.target.value, ...(renombrar && t ? { nombre: t.nombre } : {}) })
+          }}>
+          {(tipos.length > 0 ? tipos : [{ codigo: 'barra', nombre: 'Barra' }]).map((t) => (
+            <option key={t.codigo} value={t.codigo}>{t.nombre}</option>
+          ))}
+        </Select>
+      </Field>
+      <div className="text-[11.5px] text-slate-400 num">{mostrador.ancho}×{mostrador.alto} cuadros</div>
+      {puedeEditar ? (
+        <Button size="sm" variant="ghost" icon={<Icon.Trash size={14} />} onClick={onQuitar}>Quitar mostrador</Button>
+      ) : null}
     </div>
   )
 }
@@ -576,46 +845,6 @@ function PanelMesa({ mesa, puedeEditar, onGuardado, onEliminar, toast }) {
         </div>
       ) : null}
     </div>
-  )
-}
-
-function NuevaMesaModal({ onClose, onCreada, toast, columna = 0, fila = 0 }) {
-  const [f, setF] = useState({ nombre: '', zona: '', capacidad: 4, forma: 'cuadrada', anchoCeldas: 1, altoCeldas: 1 })
-  const [busy, setBusy] = useState(false)
-  const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
-  const tope = aforoMaximo(f.anchoCeldas, f.altoCeldas)
-  const cambiarTamano = (a, b) => setF((s) => ({
-    ...s, anchoCeldas: a, altoCeldas: b,
-    capacidad: aforoAjustado(s.capacidad, a, b),
-  }))
-  const crear = async () => {
-    if (!f.nombre.trim()) { toast({ title: 'Ponle un nombre o número a la mesa', kind: 'warn' }); return }
-    setBusy(true)
-    try {
-      const m = await api.crearMesa({ nombre: f.nombre.trim(), zona: f.zona.trim(), capacidad: Number(f.capacidad) || 0, forma: f.forma, columna, fila, anchoCeldas: f.anchoCeldas, altoCeldas: f.altoCeldas })
-      toast({ title: 'Mesa agregada', body: m.nombre }); onCreada(m)
-    } catch (e) { toast({ title: 'No se pudo agregar', body: e?.message || 'Error', kind: 'error' }); setBusy(false) }
-  }
-  return (
-    <Modal open onClose={onClose} size="sm" icon={<Icon.Utensils size={18} />} title="Agregar mesa"
-      footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button loading={busy} onClick={crear}>Agregar</Button></>}>
-      <div className="space-y-3">
-        <Field label="Nombre / número"><Input autoFocus value={f.nombre} onChange={(e) => set('nombre', e.target.value)} placeholder="1, Terraza 3, Barra 2…" /></Field>
-        <Field label="Zona / salón"><Input value={f.zona} onChange={(e) => set('zona', e.target.value)} placeholder="Salón principal, Terraza…" /></Field>
-        <TamanoMesa ancho={f.anchoCeldas} alto={f.altoCeldas} onCambio={cambiarTamano} />
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Capacidad" hint={`máx. ${tope}`}>
-            <Input type="number" min={0} max={tope} value={f.capacidad}
-              onChange={(e) => set('capacidad', Math.min(Number(e.target.value) || 0, tope))} />
-          </Field>
-          <Field label="Forma">
-            <Select value={f.forma} onChange={(e) => set('forma', e.target.value)}>
-              {FORMAS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
-            </Select>
-          </Field>
-        </div>
-      </div>
-    </Modal>
   )
 }
 

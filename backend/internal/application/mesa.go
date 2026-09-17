@@ -18,6 +18,19 @@ var (
 	// ocupa varias (ver mesa.Dimension), así que el choque puede no ser evidente
 	// mirando solo las esquinas.
 	ErrMesasSolapadas = errors.New("hay mesas encimadas en el plano")
+	// ErrAreasSolapadas: dos zonas comparten superficie. La zona de las mesas de
+	// esa franja quedaría ambigua, y la zona es lo que el personal usa para
+	// nombrar las mesas en voz alta.
+	ErrAreasSolapadas = errors.New("hay áreas encimadas en el plano")
+	// ErrAreaSinNombre: un área sin nombre no sirve para nada — su único
+	// propósito es nombrar una parte del salón.
+	ErrAreaSinNombre = errors.New("el área necesita un nombre (Terraza, Salón principal…)")
+	// ErrMostradoresSolapados / ErrMostradorPisaMesa: un mostrador es un mueble
+	// real; ahí no cabe otra cosa.
+	ErrMostradoresSolapados = errors.New("hay mostradores encimados en el plano")
+	ErrMostradorPisaMesa    = errors.New("un mostrador no puede ocupar el lugar de una mesa")
+	ErrMostradorSinNombre   = errors.New("el mostrador necesita un nombre (Barra, Caja…)")
+	ErrMostradorTipo        = errors.New("el tipo de mostrador no está en el catálogo")
 	// ErrAforoExcedeTamano: se pidió más gente de la que caben en los cuadros
 	// que ocupa la mesa (4 por cuadro).
 	ErrAforoExcedeTamano = errors.New("el aforo no cabe en el tamaño de la mesa")
@@ -63,9 +76,42 @@ func (s *Service) PlanoSalon(empresaID, sedeID string) mesa.Plano {
 // salón de una sede. Acota filas/columnas al rango válido y descarta celdas fuera
 // de la grilla.
 func (s *Service) GuardarPlanoSalon(empresaID, sedeID, actor, origen string, filas, columnas int, bloqueadas []mesa.Celda) (mesa.Plano, error) {
+	return s.GuardarPlanoCompleto(empresaID, sedeID, actor, origen, PlanoEntrada{
+		Filas: filas, Columnas: columnas, Bloqueadas: bloqueadas, conservar: true,
+	})
+}
+
+// PlanoEntrada es el plano completo que deja el editor: la grilla, las celdas
+// bloqueadas, las ÁREAS (zonas nombradas) y los MOSTRADORES (barra, caja, barra
+// de postres).
+type PlanoEntrada struct {
+	Filas       int
+	Columnas    int
+	Bloqueadas  []mesa.Celda
+	Areas       []mesa.Area
+	Mostradores []mesa.Mostrador
+	// conservar deja áreas y mostradores como están. Lo usa la ruta vieja, que
+	// solo sabe de grilla: sin esto, un cliente anterior borraría la barra y las
+	// zonas del local con solo cambiar el número de filas.
+	conservar bool
+}
+
+// GuardarPlanoCompleto guarda la grilla con sus áreas y mostradores.
+//
+// Dos reglas que no se pueden relajar:
+//   - Un MOSTRADOR no puede pisar una mesa ni a otro mostrador: es un mueble
+//     real y ahí no cabe otra cosa.
+//   - Dos ÁREAS no pueden encimarse: la zona de las mesas de esa franja quedaría
+//     ambigua, y la zona es lo que el personal usa para nombrar las mesas.
+//
+// Un área SÍ se superpone a las mesas: para eso está, las contiene. Y al
+// guardar, cada mesa toma la zona del área donde cayó — dibujarla una vez vale
+// más que escribir «Terraza» en veinte fichas y que tres queden «terraza».
+func (s *Service) GuardarPlanoCompleto(empresaID, sedeID, actor, origen string, in PlanoEntrada) (mesa.Plano, error) {
 	if s.planos == nil {
 		return mesa.Plano{}, ErrMesasNoDisponible
 	}
+	filas, columnas := in.Filas, in.Columnas
 	if filas < mesa.FilasMin {
 		filas = mesa.FilasMin
 	}
@@ -78,9 +124,9 @@ func (s *Service) GuardarPlanoSalon(empresaID, sedeID, actor, origen string, fil
 	if columnas > mesa.ColumnasMax {
 		columnas = mesa.ColumnasMax
 	}
-	limpias := make([]mesa.Celda, 0, len(bloqueadas))
+	limpias := make([]mesa.Celda, 0, len(in.Bloqueadas))
 	vistas := map[[2]int]bool{}
-	for _, c := range bloqueadas {
+	for _, c := range in.Bloqueadas {
 		if c.Columna < 0 || c.Columna >= columnas || c.Fila < 0 || c.Fila >= filas {
 			continue
 		}
@@ -91,10 +137,147 @@ func (s *Service) GuardarPlanoSalon(empresaID, sedeID, actor, origen string, fil
 		vistas[k] = true
 		limpias = append(limpias, c)
 	}
-	p := mesa.Plano{EmpresaID: empresaID, SedeID: sedeID, Filas: filas, Columnas: columnas, Bloqueadas: limpias, Actualizada: ahora()}
+	areas, mostradores := in.Areas, in.Mostradores
+	if in.conservar {
+		// La ruta vieja solo manda grilla: se conserva lo que ya había.
+		if ant, ok := s.planos.Get(empresaID, sedeID); ok {
+			areas, mostradores = ant.Areas, ant.Mostradores
+		}
+	} else {
+		var err error
+		if areas, err = saneaAreas(areas, columnas, filas); err != nil {
+			return mesa.Plano{}, err
+		}
+		if mostradores, err = s.saneaMostradores(empresaID, sedeID, mostradores, columnas, filas); err != nil {
+			return mesa.Plano{}, err
+		}
+	}
+
+	p := mesa.Plano{
+		EmpresaID: empresaID, SedeID: sedeID, Filas: filas, Columnas: columnas,
+		Bloqueadas: limpias, Areas: areas, Mostradores: mostradores, Actualizada: ahora(),
+	}
 	out := s.planos.Upsert(p)
+	// La zona de cada mesa se deduce del área donde está. Se hace DESPUÉS de
+	// guardar el plano para que use las áreas nuevas, y solo cuando la mesa cae
+	// dentro de alguna: fuera de toda área la zona escrita a mano se respeta.
+	s.aplicarZonasDeAreas(empresaID, sedeID, out)
 	s.audit.Append(evento(empresaID, actor, origen, "restaurante.plano.guardar", sedeID, ""))
 	return out, nil
+}
+
+/* El id de un área o un mostrador lo manda el cliente (UUIDv7 del lado del
+ * navegador, como el resto del sistema offline-first). Si viene vacío se deriva
+ * de su esquina: dos áreas no pueden encimarse y dos mostradores tampoco, así
+ * que la esquina los identifica sin ambigüedad y el id queda estable entre
+ * guardados en vez de cambiar en cada uno. */
+
+// saneaAreas valida y recorta las áreas al plano.
+func saneaAreas(areas []mesa.Area, columnas, filas int) ([]mesa.Area, error) {
+	out := make([]mesa.Area, 0, len(areas))
+	for _, a := range areas {
+		a.Nombre = strings.TrimSpace(a.Nombre)
+		if a.Nombre == "" {
+			return nil, ErrAreaSinNombre
+		}
+		if a.ID == "" {
+			a.ID = fmt.Sprintf("area_%d_%d", a.Columna, a.Fila)
+		}
+		a.Columna, a.Fila = maxInt(0, a.Columna), maxInt(0, a.Fila)
+		// Se RECORTA al plano en vez de rechazar: achicar la grilla no debería
+		// impedir guardar, solo dejar el área dentro de lo que quedó.
+		a.Ancho = clampInt(a.Ancho, 1, columnas-a.Columna)
+		a.Alto = clampInt(a.Alto, 1, filas-a.Fila)
+		if a.Columna >= columnas || a.Fila >= filas {
+			continue // quedó fuera de la grilla: se descarta
+		}
+		for _, otra := range out {
+			if a.SeSolapaCon(otra) {
+				return nil, fmt.Errorf("%w: «%s» y «%s»", ErrAreasSolapadas, a.Nombre, otra.Nombre)
+			}
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+// saneaMostradores valida los muebles de servicio contra el plano y las mesas.
+func (s *Service) saneaMostradores(empresaID, sedeID string, ms []mesa.Mostrador, columnas, filas int) ([]mesa.Mostrador, error) {
+	var mesas []mesa.Mesa
+	if s.mesas != nil {
+		for _, m := range s.mesas.List(empresaID, sedeID) {
+			if m.Activa {
+				mesas = append(mesas, m)
+			}
+		}
+	}
+	out := make([]mesa.Mostrador, 0, len(ms))
+	for _, m := range ms {
+		m.Nombre = strings.TrimSpace(m.Nombre)
+		if m.Nombre == "" {
+			return nil, ErrMostradorSinNombre
+		}
+		if !mesa.TipoMostradorValido(m.Tipo) {
+			return nil, fmt.Errorf("%w: «%s»", ErrMostradorTipo, m.Nombre)
+		}
+		if m.ID == "" {
+			m.ID = fmt.Sprintf("most_%d_%d", m.Columna, m.Fila)
+		}
+		m.Columna, m.Fila = maxInt(0, m.Columna), maxInt(0, m.Fila)
+		m.Ancho = clampInt(m.Ancho, 1, columnas-m.Columna)
+		m.Alto = clampInt(m.Alto, 1, filas-m.Fila)
+		if m.Columna >= columnas || m.Fila >= filas {
+			continue
+		}
+		for _, otro := range out {
+			if m.SeSolapaCon(otro) {
+				return nil, fmt.Errorf("%w: «%s» y «%s»", ErrMostradoresSolapados, m.Nombre, otro.Nombre)
+			}
+		}
+		for _, x := range mesas {
+			if m.PisaMesa(x) {
+				return nil, fmt.Errorf("%w: «%s» y la mesa «%s»", ErrMostradorPisaMesa, m.Nombre, x.Nombre)
+			}
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+// aplicarZonasDeAreas pone a cada mesa la zona del área que la contiene. Sin
+// áreas dibujadas no toca nada: la zona escrita a mano sigue valiendo.
+func (s *Service) aplicarZonasDeAreas(empresaID, sedeID string, p mesa.Plano) {
+	if s.mesas == nil || len(p.Areas) == 0 {
+		return
+	}
+	for _, m := range s.mesas.List(empresaID, sedeID) {
+		zona := p.ZonaDe(m.Columna, m.Fila)
+		if zona == "" || zona == m.Zona {
+			continue
+		}
+		m.Zona = zona
+		s.mesas.Update(m)
+	}
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func clampInt(v, lo, hi int) int {
+	if hi < lo {
+		return lo
+	}
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // Mesas lista las mesas del salón de una sede, ordenadas por zona y luego por
@@ -296,6 +479,20 @@ func (s *Service) GuardarMapa(empresaID, actor, origen string, pos []PosicionMes
 		for j := i + 1; j < len(final); j++ {
 			if final[i].SeSolapaCon(final[j]) {
 				return fmt.Errorf("%w: «%s» y «%s»", ErrMesasSolapadas, final[i].Nombre, final[j].Nombre)
+			}
+		}
+	}
+	// Y contra los MUEBLES: la barra y la caja ocupan piso. Sin esto se podría
+	// arrastrar una mesa encima de la barra y el plano diría una cosa que el
+	// local no permite.
+	if s.planos != nil && sedeID != "" {
+		if p, ok := s.planos.Get(empresaID, sedeID); ok {
+			for _, most := range p.Mostradores {
+				for _, m := range final {
+					if most.PisaMesa(m) {
+						return fmt.Errorf("%w: «%s» y «%s»", ErrMostradorPisaMesa, most.Nombre, m.Nombre)
+					}
+				}
 			}
 		}
 	}

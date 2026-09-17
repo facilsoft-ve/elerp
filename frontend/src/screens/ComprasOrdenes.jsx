@@ -274,7 +274,14 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
   const [sedeId, setSedeId] = useState(db.SEDE_ACTIVA?.id || sedes[0]?.id || '')
   const [condicionesPago, setCondicionesPago] = useState('Contado')
   const [notas, setNotas] = useState('')
-  // Líneas: { sku, nombre, cantidad, costoUnitario, exento }
+  /* Líneas: { sku, nombre, cantidad, costoUnitario, exento }
+   *
+   * `exento` NO se edita acá: sale de la ficha del producto, que es donde se
+   * configura el impuesto. Marcarlo por renglón dejaba que la misma harina
+   * entrara exenta en una orden y gravada en la siguiente, según quién la
+   * cargara — y la diferencia recién se veía al conciliar el libro de compras.
+   * La columna «Impuestos» sigue diciendo «Exento» cuando lo es, que es la
+   * información útil sin ser una palanca. */
   const [lineas, setLineas] = useState([])
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(0)
@@ -435,7 +442,6 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
                   <th className="py-2 px-3 font-medium">Producto</th>
                   <th className="py-2 pr-3 font-medium text-center w-20">Cantidad</th>
                   <th className="py-2 pr-3 font-medium text-right w-32">Costo unit.</th>
-                  <th className="py-2 pr-3 font-medium text-center w-20">Exento</th>
                   <th className="py-2 pr-3 font-medium text-right w-32">Subtotal</th>
                   <th className="py-2 pr-3 font-medium text-right w-32">Impuestos (IVA)</th>
                   <th className="py-2 pr-3 w-9"></th>
@@ -455,10 +461,6 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
                     <td className="py-2 pr-3 text-right">
                       <input type="number" min="0" step="0.01" value={l.costoUnitario} onChange={(e) => setLinea(l.sku, 'costoUnitario', Number(e.target.value))}
                         className="w-28 h-8 text-right px-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm num ring-focus private-mask" />
-                    </td>
-                    <td className="py-2 pr-3 text-center">
-                      <input type="checkbox" checked={!!l.exento} onChange={(e) => setLinea(l.sku, 'exento', e.target.checked)}
-                        className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-elerp-500 ring-focus" />
                     </td>
                     <td className="py-2 pr-3 text-right num font-medium private-mask">{fmtCurrency(netoLinea(l), 'VES')}</td>
                     <td className="py-2 pr-3 text-right num tabular-nums">
