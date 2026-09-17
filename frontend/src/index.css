@@ -161,3 +161,15 @@ html.dark .row-hover:hover { background: rgba(35,40,52,.6); }
   .comprobante-print-root { display: block !important; }
   @page { margin: 14mm; }
 }
+
+
+/* Fondo del hero de la web pública: un halo de marca arriba a la derecha sobre
+   blanco. Se replica acá para que el login y la landing se lean como la misma
+   pieza y no como dos productos distintos. En oscuro el halo se apaga: sobre
+   fondo oscuro un radial morado ensucia en vez de acompañar. */
+.bg-hero-elerp {
+  background:
+    radial-gradient(1200px 400px at 85% -12%, var(--hb-azul-suave), transparent 60%),
+    linear-gradient(180deg, #fff, #FAFBFC);
+}
+.dark .bg-hero-elerp { background: #020617; }
