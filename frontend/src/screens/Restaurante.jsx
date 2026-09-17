@@ -221,7 +221,18 @@ function MapaMesas() {
     medir(); window.addEventListener('resize', medir)
     return () => window.removeEventListener('resize', medir)
   }, [mesas])
-  const cel = Math.max(46, Math.min(96, Math.floor(ancho / (plano.columnas || 8)))) // lado de celda en px
+  /* LADO DE LA CELDA, en píxeles. La celda se estira para llenar el ancho
+   * disponible, acotada entre un mínimo y un máximo.
+   *
+   * El MÁXIMO es el que manda en un salón chico: con 8 columnas la celda
+   * llegaba al tope y el plano ocupaba una pantalla entera para ocho mesas.
+   * Bajado a 68 px el salón completo entra de un vistazo, que es para lo que
+   * sirve un plano.
+   *
+   * El MÍNIMO no se toca: 46 px es el tamaño por debajo del cual un dedo deja
+   * de acertarle a una mesa en la tablet del salón, y un plano de 20 columnas
+   * ya lo alcanza. Achicar ahí sería ganar vista y perder el uso. */
+  const cel = Math.max(46, Math.min(68, Math.floor(ancho / (plano.columnas || 8))))
 
   const salon = { mesas: mesas || [], plano }
   const dimension = (m) => dimensionDeMesa(m)
