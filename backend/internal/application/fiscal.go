@@ -646,6 +646,12 @@ func (s *Service) EmitirNotaCredito(empresaID, sedeID, actor, origen, refID, mot
 		if d.Tipo != fiscal.TipoNotaCredito || d.RefDocumentoID != refID {
 			continue
 		}
+		// SOLO cuentan las notas que DEVOLVIERON mercancía. Una nota por descuento
+		// o por ajuste de precio no devolvió nada, así que no puede consumir el
+		// cupo de una devolución real posterior.
+		if !fiscal.NCDevuelveMercancia(d.MotivoCodigo) {
+			continue
+		}
 		for _, l := range d.Lineas {
 			yaAcreditado[l.SKU] += l.Cantidad
 		}
@@ -666,7 +672,7 @@ func (s *Service) EmitirNotaCredito(empresaID, sedeID, actor, origen, refID, mot
 		// La nota hereda las alícuotas del original: acredita la misma operación con
 		// las mismas tasas. Usar la config de hoy descuadraría el asiento.
 		AlicuotaIVA: orig.AlicuotaIVA, AlicuotaIGTF: orig.AlicuotaIGTF,
-		RefDocumentoID: refID, Motivo: motivo,
+		RefDocumentoID: refID, Motivo: motivo, MotivoCodigo: fiscal.MotivoNCDevolucion,
 		Actor: actor, Fecha: ahora(),
 	}
 
@@ -797,6 +803,11 @@ type NotaDebitoEntrada struct {
 	// Exento marca el cargo como NO gravado con IVA (p. ej. intereses de mora, que
 	// no causan IVA). Por defecto el cargo es gravado, como un mayor precio.
 	Exento bool
+	// MotivoCodigo es el motivo del catálogo (fiscal.MotivosNotaDebito). La
+	// contadora declaró que hoy las notas de débito son por DIFERENCIAL CAMBIARIO
+	// o porque SE COBRÓ DE MENOS; tipificarlo permite declarar y auditar por
+	// motivo en vez de leer texto libre. Vacío = sin tipificar (compatibilidad).
+	MotivoCodigo string
 }
 
 // EmitirNotaDebito emite una nota de débito (tipo nota_debito) que referencia a

@@ -243,6 +243,14 @@ type Documento struct {
 
 	RefDocumentoID string `json:"refDocumentoId" bson:"refdocumentoid"` // original referenciado (nota/anulación)
 	Motivo         string `json:"motivo" bson:"motivo"`
+	// MotivoCodigo es el motivo del catálogo (fiscal.MotivosNotaCredito /
+	// MotivosNotaDebito). `Motivo` sigue siendo el texto que la gente lee; este
+	// es el que permite DECLARAR y AUDITAR por motivo, y —en la nota de crédito—
+	// el que decide si la nota reingresa mercancía al inventario.
+	//
+	// Vacío en las notas emitidas antes del catálogo: se leen como devolución,
+	// que es lo que eran.
+	MotivoCodigo string `json:"motivoCodigo,omitempty" bson:"motivocodigo,omitempty"`
 
 	Actor string `json:"actor" bson:"actor"`
 	Fecha string `json:"fecha" bson:"fecha"` // UTC RFC3339
