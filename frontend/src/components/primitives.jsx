@@ -177,10 +177,10 @@ export const Stat = ({ label, value, sub, delta, deltaPositive, icon, accent, hu
   </Card>
 )
 
-export const Toggle = ({ checked, onChange, label, sub }) => (
-  <label className="flex items-center gap-3 cursor-pointer select-none">
-    <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 rounded-full transition-colors ${checked ? 'bg-elerp-500' : 'bg-slate-200 dark:bg-slate-700'} ring-focus`}>
+export const Toggle = ({ checked, onChange, label, sub, disabled = false }) => (
+  <label className={`flex items-center gap-3 select-none ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}>
+    <button type="button" role="switch" aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)}
+      className={`relative h-5 w-9 rounded-full transition-colors ${checked ? 'bg-elerp-500' : 'bg-slate-200 dark:bg-slate-700'} ring-focus disabled:cursor-not-allowed`}>
       <span className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : ''}`} />
     </button>
     {label ? <span className="text-sm">{label}{sub ? <span className="block text-[12px] text-slate-500">{sub}</span> : null}</span> : null}
@@ -269,8 +269,12 @@ export const PageHeader = ({ breadcrumb, title, sub, actions }) => {
 export const Segmented = ({ options, value, onChange, size = 'md' }) => (
   <div className={`inline-flex items-center p-0.5 rounded-lg bg-slate-200 dark:bg-slate-800/70 ${size === 'sm' ? 'text-[12.5px]' : 'text-[13px]'}`}>
     {options.map((o) => (
-      <button key={o.value} onClick={() => onChange(o.value)}
-        className={`px-2.5 py-1 rounded-md font-semibold transition-colors ${value === o.value ? 'bg-white dark:bg-slate-900 shadow-sm text-slate-900 dark:text-slate-100' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
+      // `type="button"` explícito: dentro de un <form> el default es submit, y un
+      // selector de vista no debería enviar nada.
+      // Una opción `disabled` se apaga en vez de desaparecer: quien la ve
+      // entiende que existe pero no aplica a este documento.
+      <button key={o.value} type="button" disabled={o.disabled} onClick={() => onChange(o.value)}
+        className={`px-2.5 py-1 rounded-md font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${value === o.value ? 'bg-white dark:bg-slate-900 shadow-sm text-slate-900 dark:text-slate-100' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}>
         {o.label}
       </button>
     ))}

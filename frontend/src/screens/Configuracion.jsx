@@ -838,6 +838,70 @@ function AvisoPresenciaSinUbicacion() {
   )
 }
 
+/* PresenciaEstricta — el interruptor que faltaba.
+ *
+ * La verificación estaba construida entera (coordenadas de la sede, radio,
+ * distancia, excepción del supervisor con motivo) pero NADA la encendía: ninguna
+ * pantalla llamaba a `fijarRolesPresencia`, así que `rolesPresenciaEstricta`
+ * quedaba siempre vacío y la regla no aplicaba a nadie.
+ *
+ * Solo se ofrecen los roles OPERATIVOS —los que trabajan en el local— y no la
+ * Dueña, la Contadora ni el Desarrollador: esos tres administran DESDE FUERA
+ * (la contadora casi siempre desde su oficina), y exigirles estar en la sede
+ * sería dejar a la empresa sin quien la administre desde el primer viaje.
+ */
+const ROLES_PRESENCIA = ['mesonero', 'cajero', 'vendedor']
+
+function PresenciaEstricta({ puedeEditar }) {
+  const { db, reload } = useData()
+  const toast = useToast()
+  const guardados = db.EMPRESA?.rolesPresenciaEstricta || []
+  const [busy, setBusy] = useState('')
+
+  const alternar = async (rol) => {
+    const activo = guardados.includes(rol)
+    const siguiente = activo ? guardados.filter((r) => r !== rol) : [...guardados, rol]
+    setBusy(rol)
+    try {
+      await api.fijarRolesPresencia({ roles: siguiente })
+      await reload()
+      toast({
+        title: activo ? 'Presencia estricta desactivada' : 'Presencia estricta activada',
+        body: activo
+          ? `${rolLabel(rol)} puede empezar a trabajar desde cualquier lugar.`
+          : `${rolLabel(rol)} tendrá que estar en la sede para empezar a trabajar.`,
+      })
+    } catch (e) {
+      toast({ title: 'No se pudo guardar', body: e?.message || 'Error', kind: 'error' })
+    } finally { setBusy('') }
+  }
+
+  return (
+    <div className="mb-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4">
+      <div className="flex items-start gap-2.5">
+        <span className="text-slate-400 mt-0.5"><Icon.Globe size={17} /></span>
+        <div className="flex-1 min-w-0">
+          <div className="text-[13px] font-semibold">Presencia estricta</div>
+          <div className="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5 max-w-xl">
+            Estos roles solo pueden empezar a trabajar <strong>estando en la sede</strong>: al iniciar
+            turno se compara su ubicación con la del local. Un supervisor puede autorizar la
+            excepción con un motivo, y queda registrada.
+          </div>
+          <div className="mt-2.5 space-y-2">
+            {ROLES_PRESENCIA.map((rol) => (
+              <Toggle key={rol} checked={guardados.includes(rol)} disabled={!puedeEditar || busy === rol}
+                onChange={() => alternar(rol)} label={rolLabel(rol)} />
+            ))}
+          </div>
+          <div className="text-[11.5px] text-slate-400 dark:text-slate-500 mt-2.5">
+            Requiere que la sede tenga ubicación configurada (se pone abajo, en el mapa de cada sede).
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function Sedes() {
   const { db, reload } = useData()
   const { ui } = useUI()
@@ -894,6 +958,7 @@ function Sedes() {
         ) : null}
       </div>
 
+      <PresenciaEstricta puedeEditar={puedeEditar} />
       <AvisoPresenciaSinUbicacion />
 
       {sedes.length === 0 ? (

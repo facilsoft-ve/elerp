@@ -103,7 +103,10 @@ import (
 // v30: el catálogo demo lleva su CLASIFICACIÓN de alícuota explícita (general,
 // reducida y suntuaria), para que las tres tasas se vean en uso; el restaurante
 // trae horario de atención y el horario semanal de sus mesoneros.
-const versionSeedDemo = 30
+// v31: las sedes demo llevan UBICACIÓN (coordenadas + radio) y dirección
+// completa, para que el mapa de la sede y la presencia estricta se vean
+// funcionando y no vacíos.
+const versionSeedDemo = 31
 
 // Seed siembra la base con los datos demo (misma fuente que in-memory), de
 // forma idempotente: si ya hay empresas, no hace nada.
@@ -173,6 +176,24 @@ func Seed(db *gomongo.Database) {
 		for _, m := range snap.Membresias {
 			st.Membresias.c.insert(m)
 		}
+	}
+
+	// UBICACIÓN de las sedes demo. Va aparte del bloque de arriba porque las
+	// sedes solo se siembran en una base virgen (recrearlas rompería membresías
+	// reales), así que una demo ya sembrada nunca vería las coordenadas nuevas y
+	// su mapa saldría vacío. Es un relleno, no una imposición: solo se toca la
+	// sede que NO tiene ubicación, de modo que unas coordenadas puestas a mano
+	// desde Configuración sobreviven a cualquier resiembra.
+	for _, sd := range snap.Sedes {
+		if !sd.TieneUbicacion() {
+			continue
+		}
+		actual, ok := st.Sedes.ByID(sd.EmpresaID, sd.ID)
+		if !ok || actual.TieneUbicacion() {
+			continue
+		}
+		actual.Lat, actual.Lon, actual.RadioM = sd.Lat, sd.Lon, sd.RadioM
+		st.Sedes.Update(actual)
 	}
 
 	// Usuarios de demostración que no existan todavía (vendedor, cajero,

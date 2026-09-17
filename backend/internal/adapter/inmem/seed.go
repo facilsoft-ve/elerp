@@ -117,28 +117,28 @@ func New() *Store {
 		CuentasContables: NewCuentaContableRepo(), Asientos: NewAsientoRepo(), Periodos: NewPeriodoRepo(),
 		Proveedores: NewProveedorRepo(), OrdenesCompra: NewOrdenCompraRepo(),
 		FacturasCompra: NewFacturaCompraRepo(), Solicitudes: NewSolicitudCompraRepo(),
-		Retenciones:  NewRetencionRepo(),
-		Dispositivos: NewDispositivoFiscalRepo(),
-		ListasPrecio: NewListaPrecioRepo(),
-		Cupones:      NewCuponRepo(),
-		Promociones:  NewPromocionRepo(),
-		Unidades:     NewUnidadMedidaRepo(),
-		Almacenes:    NewAlmacenRepo(),
-		Modulos:      NewModuloRepo(),
-		Legal:        NewLegalRepo(),
-		Plantillas:   NewPlantillaRepo(),
-		Mesas:        NewMesaRepo(),
-		Planos:       NewPlanoRepo(),
-		Asignaciones: NewAsignacionRepo(),
-		ConfigSalon:  NewConfigSalonRepo(),
-		Impresoras:   NewImpresoraRepo(),
-		Cuentas:      NewCuentaRepo(),
-		Reservas:     NewReservaRepo(),
-		Mesoneros:    NewMesoneroRepo(),
-		Turnos:       NewTurnoRepo(),
-		Alicuotas:    NewAlicuotaRepo(),
+		Retenciones:   NewRetencionRepo(),
+		Dispositivos:  NewDispositivoFiscalRepo(),
+		ListasPrecio:  NewListaPrecioRepo(),
+		Cupones:       NewCuponRepo(),
+		Promociones:   NewPromocionRepo(),
+		Unidades:      NewUnidadMedidaRepo(),
+		Almacenes:     NewAlmacenRepo(),
+		Modulos:       NewModuloRepo(),
+		Legal:         NewLegalRepo(),
+		Plantillas:    NewPlantillaRepo(),
+		Mesas:         NewMesaRepo(),
+		Planos:        NewPlanoRepo(),
+		Asignaciones:  NewAsignacionRepo(),
+		ConfigSalon:   NewConfigSalonRepo(),
+		Impresoras:    NewImpresoraRepo(),
+		Cuentas:       NewCuentaRepo(),
+		Reservas:      NewReservaRepo(),
+		Mesoneros:     NewMesoneroRepo(),
+		Turnos:        NewTurnoRepo(),
+		Alicuotas:     NewAlicuotaRepo(),
 		ConceptosISLR: NewConceptoISLRRepo(),
-		Horarios:     NewHorarioRepo(),
+		Horarios:      NewHorarioRepo(),
 	}
 	s.seedDemo()
 	// Demos por RUBRO (restaurante, ferretería, farmacia): ver seed_nichos.go.
@@ -206,8 +206,13 @@ func (s *Store) seedDemo() {
 		ObtenidaEn: fecha, Actor: "seed", Detalle: "dato sembrado del modo demo",
 		Estado: tasa.EstadoVigente,
 	})
-	s.Sedes.Create(sede.Sede{ID: demoSede1ID, EmpresaID: demoEmpID, Nombre: "Sede Principal", Direccion: "Av. Bolívar, Caracas", Activa: true})
-	s.Sedes.Create(sede.Sede{ID: demoSede2ID, EmpresaID: demoEmpID, Nombre: "Sede Este", Direccion: "C.C. El Este, Caracas", Activa: true})
+	// Las sedes de demostración llevan UBICACIÓN: sin coordenadas el mapa de la
+	// sede y la presencia estricta se ven vacíos y parecen no existir. Son puntos
+	// reales de Caracas (Av. Bolívar y Los Dos Caminos) con el radio por defecto.
+	s.Sedes.Create(sede.Sede{ID: demoSede1ID, EmpresaID: demoEmpID, Nombre: "Sede Principal", Direccion: "Av. Bolívar, Caracas 1010, Distrito Capital",
+		Lat: 10.5061, Lon: -66.9146, RadioM: 150, Activa: true})
+	s.Sedes.Create(sede.Sede{ID: demoSede2ID, EmpresaID: demoEmpID, Nombre: "Sede Este", Direccion: "C.C. Lido, Av. Francisco de Miranda, Los Dos Caminos, Caracas 1071",
+		Lat: 10.5031, Lon: -66.8480, RadioM: 200, Activa: true})
 
 	// Usuario demo + membresía de Dueña (para "Entrar en modo demo").
 	s.Usuarios.Create(usuario.Usuario{ID: application.DemoUserID, Nombre: application.DemoNombre, Email: application.DemoEmail})
@@ -323,10 +328,10 @@ func (s *Store) seedDemo() {
 	// OJO: es una clasificación DE EJEMPLO, no una fuente legal. Qué bien va en
 	// cada alícuota lo define el reglamento y lo decide la contadora.
 	alicuotaSKU := map[string]string{
-		"PAN-001": fiscal.CodReducida,   // panadería
-		"LEC-001": fiscal.CodReducida,   // fórmula láctea
-		"ELE-TV":  fiscal.CodSuntuario,  // electrónica de gama alta
-		"CAL-001": fiscal.CodSuntuario,  // calzado de marca
+		"PAN-001": fiscal.CodReducida,  // panadería
+		"LEC-001": fiscal.CodReducida,  // fórmula láctea
+		"ELE-TV":  fiscal.CodSuntuario, // electrónica de gama alta
+		"CAL-001": fiscal.CodSuntuario, // calzado de marca
 	}
 	for _, c := range catalogo {
 		costoPorSKU[c.sku] = c.costo
@@ -342,8 +347,8 @@ func (s *Store) seedDemo() {
 			EmpresaID: demoEmpID, SKU: c.sku, Nombre: c.nombre, Rubro: c.rubro,
 			UnidadBase: unidad, TipoVenta: tipoVenta, Precio: c.precio, Moneda: c.moneda, ExentoIVA: c.exento,
 			AlicuotaCodigo: alicuotaDemo(c.sku, c.exento, alicuotaSKU),
-			CodigoBarras: c.codigo,
-			Activo:       c.activo, Presentaciones: pres,
+			CodigoBarras:   c.codigo,
+			Activo:         c.activo, Presentaciones: pres,
 		})
 		// Movimiento de entrada inicial (compra) al ledger. Los agotados no
 		// reciben entrada: su existencia es 0 porque nunca entró stock.
