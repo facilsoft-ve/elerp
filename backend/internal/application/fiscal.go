@@ -88,14 +88,14 @@ var (
 	// receptor. Se pide con el mismo criterio que el RIF —solo al cliente
 	// identificado— porque al consumidor final tampoco se le pide RIF.
 	ErrReceptorSinDireccion = errors.New("el cliente no tiene dirección fiscal y la factura la exige")
-	ErrDocumentoNoExiste         = errors.New("documento no existe")
-	ErrYaAnulado                 = errors.New("el documento ya fue anulado")
-	ErrNotaCreditoVacia          = errors.New("la nota de crédito no acredita ninguna cantidad")
-	ErrNotaCreditoSKU            = errors.New("el producto no está en la factura original")
-	ErrNotaCreditoExcede         = errors.New("la cantidad a acreditar excede lo facturado (descontando notas de crédito previas)")
-	ErrNotaDebitoVacia           = errors.New("la nota de débito no carga ningún monto")
-	ErrNotaDebitoConcepto        = errors.New("la nota de débito necesita un concepto que explique el cargo")
-	ErrSinTasaDivisa             = errors.New("no hay tasa cargada para esa divisa: sin ella no se puede convertir el pago a bolívares")
+	ErrDocumentoNoExiste    = errors.New("documento no existe")
+	ErrYaAnulado            = errors.New("el documento ya fue anulado")
+	ErrNotaCreditoVacia     = errors.New("la nota de crédito no acredita ninguna cantidad")
+	ErrNotaCreditoSKU       = errors.New("el producto no está en la factura original")
+	ErrNotaCreditoExcede    = errors.New("la cantidad a acreditar excede lo facturado (descontando notas de crédito previas)")
+	ErrNotaDebitoVacia      = errors.New("la nota de débito no carga ningún monto")
+	ErrNotaDebitoConcepto   = errors.New("la nota de débito necesita un concepto que explique el cargo")
+	ErrSinTasaDivisa        = errors.New("no hay tasa cargada para esa divisa: sin ella no se puede convertir el pago a bolívares")
 	// ErrComboNoFacturable: un combo nunca entra como línea de la factura. El
 	// frontend lo explota en las líneas de sus componentes antes de emitir; esta
 	// guarda de servidor evita que un combo entre como línea por error.
@@ -571,7 +571,7 @@ func (s *Service) AnularDocumento(empresaID, sedeID, actor, origen, refID, motiv
 		EmpresaID: empresaID, SedeID: sedeID, Tipo: fiscal.TipoAnulacion, Modalidad: orig.Modalidad,
 		ClienteID: orig.ClienteID, ClienteNombre: orig.ClienteNombre, ClienteDocumento: orig.ClienteDocumento,
 		ClienteDireccion: orig.ClienteDireccion,
-		Lineas: orig.Lineas, Subtotal: -orig.Subtotal, IVA: -orig.IVA, IGTF: -orig.IGTF, Total: -orig.Total,
+		Lineas:           orig.Lineas, Subtotal: -orig.Subtotal, IVA: -orig.IVA, IGTF: -orig.IGTF, Total: -orig.Total,
 		// Las dos bases también se revierten: los libros fiscales se cuadran por
 		// base imponible y base exenta, no solo por el total.
 		BaseImponible: -orig.BaseImponible, BaseExenta: -orig.BaseExenta,
@@ -808,6 +808,13 @@ type NotaDebitoEntrada struct {
 	// o porque SE COBRÓ DE MENOS; tipificarlo permite declarar y auditar por
 	// motivo en vez de leer texto libre. Vacío = sin tipificar (compatibilidad).
 	MotivoCodigo string
+	// Porcentaje (0–100) calcula el cargo como un % en vez de un monto fijo. Es
+	// como se pacta de verdad —«5 % por mora», «el diferencial es 8 %»— y hacer
+	// esa regla de tres a mano es justo donde se cuela el céntimo que después no
+	// cuadra contra la factura. Se usa Monto O Porcentaje, nunca los dos.
+	Porcentaje float64
+	// SKU acota el porcentaje a UN renglón de la factura. Vacío = sobre el total.
+	SKU string
 }
 
 // EmitirNotaDebito emite una nota de débito (tipo nota_debito) que referencia a
@@ -833,9 +840,31 @@ func (s *Service) EmitirNotaDebito(empresaID, sedeID, actor, origen, refID strin
 	if strings.TrimSpace(in.Concepto) == "" {
 		return fiscal.Documento{}, ErrNotaDebitoConcepto
 	}
-	monto := round2(in.Monto)
+	if in.Porcentaje < 0 || in.Porcentaje > 100 {
+		return fiscal.Documento{}, ErrNCPorcentaje
+	}
+	if in.Porcentaje > 0 && in.Monto > 0 {
+		// Los dos a la vez: no se puede adivinar cuál quiso decir, y elegir por él
+		// daría un cargo distinto del pactado.
+		return fiscal.Documento{}, ErrNotaDebitoVacia
+	}
+	// El cargo se reparte entre gravado y exento igual que en la nota de crédito
+	// (misma aritmética, signo opuesto). Sin tope: un cargo posterior SÍ puede
+	// superar el renglón que lo originó.
+	baseGravada, baseExenta, _, err := repartirBase(orig, in.SKU, in.Monto, in.Porcentaje, in.Exento)
+	if err != nil {
+		return fiscal.Documento{}, err
+	}
+	monto := round2(baseGravada + baseExenta)
 	if monto <= 0.004 {
 		return fiscal.Documento{}, ErrNotaDebitoVacia
+	}
+	// El motivo se acota al catálogo; uno inventado se descarta en vez de
+	// guardarse, porque un código que no existe rompe cualquier consulta por
+	// motivo sin que nadie lo note.
+	motivoND := strings.TrimSpace(in.MotivoCodigo)
+	if motivoND != "" && !fiscal.MotivoNDValido(motivoND) {
+		return fiscal.Documento{}, ErrNotaDebitoConcepto
 	}
 
 	nd := fiscal.Documento{
@@ -849,15 +878,35 @@ func (s *Service) EmitirNotaDebito(empresaID, sedeID, actor, origen, refID strin
 		// se grava con la tasa vigente al emitir la factura, no con la config de hoy.
 		AlicuotaIVA: orig.AlicuotaIVA, AlicuotaIGTF: orig.AlicuotaIGTF,
 		RefDocumentoID: refID, Motivo: strings.TrimSpace(in.Concepto),
-		Actor: actor, Fecha: ahora(),
+		MotivoCodigo: motivoND, Actor: actor, Fecha: ahora(),
 	}
 
-	// Una sola línea: el concepto del cargo. Montos POSITIVOS (espejo de la NC, que
-	// los guarda negativos): la nota de débito suma.
-	nd.Lineas = []fiscal.Linea{{
-		Nombre: strings.TrimSpace(in.Concepto), Cantidad: 1, PrecioUnitario: monto, Total: monto,
-		Exento: in.Exento,
-	}}
+	// Montos POSITIVOS (espejo de la NC, que los guarda negativos): la nota de
+	// débito suma. Un renglón por condición: si el cargo porcentual tocó base
+	// gravada y exenta a la vez, van separados para que el IVA salga bien.
+	etiqueta := strings.TrimSpace(in.Concepto)
+	if in.Porcentaje > 0 {
+		sobre := "sobre " + orig.NumeroCompleto
+		if strings.TrimSpace(in.SKU) != "" {
+			sobre = "sobre " + strings.TrimSpace(in.SKU)
+		}
+		etiqueta = fmt.Sprintf("%s (%.2f%% %s)", etiqueta, in.Porcentaje, sobre)
+	}
+	nd.Lineas = nil
+	if baseGravada > 0 {
+		nd.Lineas = append(nd.Lineas, fiscal.Linea{
+			Nombre: etiqueta, Cantidad: 1, PrecioUnitario: baseGravada, Total: baseGravada,
+		})
+	}
+	if baseExenta > 0 {
+		nombre := etiqueta
+		if baseGravada > 0 {
+			nombre += " (exento)"
+		}
+		nd.Lineas = append(nd.Lineas, fiscal.Linea{
+			Nombre: nombre, Cantidad: 1, PrecioUnitario: baseExenta, Total: baseExenta, Exento: true,
+		})
+	}
 	nd.Subtotal = monto
 	// Tasa histórica: la del documento original, con fallback al default del sistema
 	// para facturas previas a la configuración de alícuotas (misma regla que la NC).
@@ -865,13 +914,9 @@ func (s *Service) EmitirNotaDebito(empresaID, sedeID, actor, origen, refID strin
 	if tasaIVA <= 0 {
 		tasaIVA = fiscal.AlicuotaIVA
 	}
-	if in.Exento {
-		nd.BaseExenta = monto
-		nd.IVA = 0
-	} else {
-		nd.BaseImponible = monto
-		nd.IVA = round2(monto * tasaIVA)
-	}
+	nd.BaseImponible = baseGravada
+	nd.BaseExenta = baseExenta
+	nd.IVA = round2(baseGravada * tasaIVA)
 	// El IGTF no aplica: no hay pago en divisas: la nota de débito es un ajuste de
 	// valor a cobrar, no un cobro. Total = base + IVA.
 	nd.Total = round2(nd.Subtotal + nd.IVA)

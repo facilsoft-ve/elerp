@@ -3,6 +3,7 @@ package application
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/mornix/elerp/internal/domain/fiscal"
@@ -26,6 +27,7 @@ var (
 	ErrNCDescuentoExcede = errors.New("el descuento no puede superar el monto de la factura")
 	ErrNCAjusteVacio     = errors.New("hay que indicar al menos un producto y su precio correcto")
 	ErrNCAjustePrecio    = errors.New("el precio correcto debe ser menor que el facturado: para cobrar de más va una nota de débito")
+	ErrNCPorcentaje      = errors.New("el porcentaje debe ir entre 0 y 100")
 )
 
 // AjustePrecioLinea es la corrección del precio de UN renglón de la factura: el
@@ -38,16 +40,125 @@ type AjustePrecioLinea struct {
 	PrecioCorrecto float64
 }
 
+// DescuentoNC describe un descuento: por MONTO fijo o por PORCENTAJE, y sobre
+// toda la factura o sobre UN producto.
+//
+// El porcentaje existe porque así se pacta un descuento en la vida real («10 %
+// por pronto pago»), y calcularlo a mano para escribir el monto es justo donde
+// se cuela un error de céntimos que después no cuadra con la factura.
+type DescuentoNC struct {
+	// Monto fijo, o Porcentaje (0–100). Se usa UNO de los dos.
+	Monto      float64
+	Porcentaje float64
+	// SKU vacío = sobre toda la factura. Con SKU = sobre ese renglón.
+	SKU string
+	// Exento solo aplica al descuento por MONTO sobre toda la factura, donde no
+	// hay de dónde deducir la condición. En los demás casos se hereda de la
+	// factura o del renglón, que es el dato correcto.
+	Exento bool
+	Nota   string
+}
+
+// baseDelDescuento resuelve sobre qué monto se aplica el porcentaje y cómo se
+// reparte entre gravado y exento.
+//
+// EL PORCENTAJE VA SOBRE LA BASE, no sobre el total con IVA. Da lo mismo en
+// plata —el IVA es proporcional, así que 10 % de la base baja el total un 10 %—
+// pero aplicarlo sobre el total y volver a calcular IVA encima descontaría dos
+// veces el impuesto.
+//
+// Sobre toda la factura con bases mixtas, el descuento se reparte EN PROPORCIÓN
+// entre lo gravado y lo exento: cargarlo todo a una sola base cambiaría el IVA
+// de la nota y descuadraría el libro.
+func (s *Service) baseDelDescuento(orig fiscal.Documento, d DescuentoNC) (gravado, exento float64, err error) {
+	g, e, tope, err := repartirBase(orig, d.SKU, d.Monto, d.Porcentaje, d.Exento)
+	if err != nil {
+		return 0, 0, err
+	}
+	// Tope SOLO en la nota de crédito: no se puede acreditar más de lo que se
+	// cobró. La nota de débito no lo tiene, porque un cargo posterior (mora,
+	// diferencial cambiario) sí puede superar el renglón que lo originó.
+	if tope > 0 && round2(g+e) > round2(tope)+0.005 {
+		return 0, 0, fmt.Errorf("%w: %s (máximo %.2f)", ErrNCDescuentoExcede, d.SKU, tope)
+	}
+	return g, e, nil
+}
+
+// repartirBase resuelve sobre qué monto se aplica un ajuste y cómo se reparte
+// entre base gravada y exenta. Lo comparten la nota de crédito y la de débito:
+// la aritmética del «% sobre el total» o del «% sobre este producto» es la misma
+// en las dos; lo único que cambia es el signo y si hay tope.
+//
+// `tope` devuelve el total del renglón cuando el ajuste va sobre un producto (0
+// cuando va sobre toda la factura), para que quien llama decida si acota.
+func repartirBase(orig fiscal.Documento, sku string, monto, porcentaje float64, exentoDeclarado bool) (gravado, exento, tope float64, err error) {
+	sku = strings.TrimSpace(sku)
+	if sku != "" {
+		var ol *fiscal.Linea
+		for i := range orig.Lineas {
+			if orig.Lineas[i].SKU == sku {
+				ol = &orig.Lineas[i]
+				break
+			}
+		}
+		if ol == nil {
+			return 0, 0, 0, fmt.Errorf("%w: %s", ErrNotaCreditoSKU, sku)
+		}
+		// El renglón de una NC guarda montos negativos; el porcentaje se aplica
+		// sobre la MAGNITUD para no invertir el signo del ajuste.
+		base := math.Abs(ol.Total)
+		if porcentaje > 0 {
+			monto = base * porcentaje / 100
+		}
+		monto = round2(monto)
+		if ol.Exento {
+			return 0, monto, base, nil
+		}
+		return monto, 0, base, nil
+	}
+	// Sobre toda la factura: el porcentaje se reparte EN PROPORCIÓN entre lo
+	// gravado y lo exento. Cargarlo todo a una sola base cambiaría el IVA del
+	// ajuste y descuadraría el libro.
+	if porcentaje > 0 {
+		return round2(orig.BaseImponible * porcentaje / 100), round2(orig.BaseExenta * porcentaje / 100), 0, nil
+	}
+	// Monto fijo sin producto: la condición la declara quien emite, porque no hay
+	// de dónde deducirla.
+	if exentoDeclarado {
+		return 0, round2(monto), 0, nil
+	}
+	return round2(monto), 0, 0, nil
+}
+
 // NotaCreditoDescuento emite una NC que baja el monto de la factura sin devolver
-// mercancía. El descuento entra como un único renglón sin SKU: no hay producto
-// que devolver, y ponerle uno haría que el guard anti-sobre-crédito de las
+// mercancía. El descuento entra como renglones sin SKU: no hay producto que
+// devolver, y ponerle uno haría que el guard anti-sobre-crédito de las
 // devoluciones contara una cantidad que nadie devolvió.
 func (s *Service) NotaCreditoDescuento(empresaID, actor, origen, refID string, monto float64, exento bool, nota string) (fiscal.Documento, error) {
+	return s.NotaCreditoDescuentoDe(empresaID, actor, origen, refID,
+		DescuentoNC{Monto: monto, Exento: exento, Nota: nota})
+}
+
+// NotaCreditoDescuentoDe es la variante completa: monto o porcentaje, sobre la
+// factura o sobre un producto.
+func (s *Service) NotaCreditoDescuentoDe(empresaID, actor, origen, refID string, d DescuentoNC) (fiscal.Documento, error) {
 	orig, err := s.facturaAcreditable(empresaID, refID)
 	if err != nil {
 		return fiscal.Documento{}, err
 	}
-	monto = round2(monto)
+	if d.Porcentaje < 0 || d.Porcentaje > 100 {
+		return fiscal.Documento{}, ErrNCPorcentaje
+	}
+	if (d.Monto > 0) == (d.Porcentaje > 0) {
+		// Los dos o ninguno: no se puede adivinar cuál quiso decir, y elegir por
+		// él daría un descuento distinto del que pactó.
+		return fiscal.Documento{}, ErrNCDescuentoMonto
+	}
+	gravado, exentoMonto, err := s.baseDelDescuento(orig, d)
+	if err != nil {
+		return fiscal.Documento{}, err
+	}
+	monto := round2(gravado + exentoMonto)
 	if monto <= 0 {
 		return fiscal.Documento{}, ErrNCDescuentoMonto
 	}
@@ -56,16 +167,32 @@ func (s *Service) NotaCreditoDescuento(empresaID, actor, origen, refID string, m
 	if disponible := s.montoAcreditableRestante(empresaID, orig); monto > disponible+0.005 {
 		return fiscal.Documento{}, fmt.Errorf("%w (disponible %.2f)", ErrNCDescuentoExcede, disponible)
 	}
-	texto := strings.TrimSpace(nota)
+	texto := strings.TrimSpace(d.Nota)
 	if texto == "" {
 		texto = fiscal.NombreMotivo(fiscal.MotivosNotaCredito(), fiscal.MotivoNCDescuento)
 	}
-	linea := fiscal.Linea{
-		Nombre: "Descuento sobre " + orig.NumeroCompleto, Cantidad: 1,
-		PrecioUnitario: monto, Total: monto, Exento: exento,
+	// El rótulo dice CÓMO se calculó: quien lee la nota dentro de un año tiene
+	// que poder reconstruir el descuento sin adivinar.
+	sobre := "sobre " + orig.NumeroCompleto
+	if d.SKU != "" {
+		sobre = "sobre " + d.SKU
+	}
+	etiqueta := "Descuento " + sobre
+	if d.Porcentaje > 0 {
+		etiqueta = fmt.Sprintf("Descuento %.2f%% %s", d.Porcentaje, sobre)
+	}
+	lineas := []fiscal.Linea{}
+	if gravado > 0 {
+		lineas = append(lineas, fiscal.Linea{Nombre: etiqueta, Cantidad: 1, PrecioUnitario: gravado, Total: gravado})
+	}
+	if exentoMonto > 0 {
+		lineas = append(lineas, fiscal.Linea{
+			Nombre: etiqueta + " (exento)", Cantidad: 1,
+			PrecioUnitario: exentoMonto, Total: exentoMonto, Exento: true,
+		})
 	}
 	return s.emitirNotaCreditoSinMercancia(empresaID, actor, origen, orig,
-		fiscal.MotivoNCDescuento, texto, []fiscal.Linea{linea})
+		fiscal.MotivoNCDescuento, texto, lineas)
 }
 
 // NotaCreditoAjustePrecio emite una NC por haber facturado a un precio MAYOR que
@@ -97,7 +224,7 @@ func (s *Service) NotaCreditoAjustePrecio(empresaID, actor, origen, refID string
 		// una devolución. Con SKU, el guard anti-sobre-crédito de las devoluciones
 		// contaría esta cantidad y bloquearía una devolución real posterior.
 		lineas = append(lineas, fiscal.Linea{
-			Nombre: fmt.Sprintf("Ajuste de precio · %s (%.2f → %.2f)", ol.Nombre, ol.PrecioUnitario, a.PrecioCorrecto),
+			Nombre:   fmt.Sprintf("Ajuste de precio · %s (%.2f → %.2f)", ol.Nombre, ol.PrecioUnitario, a.PrecioCorrecto),
 			Cantidad: 1, PrecioUnitario: diferencia, Total: diferencia,
 			// La exención la HEREDA del renglón original: la diferencia de precio de
 			// un producto exento tampoco causa IVA.

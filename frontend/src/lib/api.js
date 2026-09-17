@@ -135,8 +135,20 @@ export const api = {
   anularDocumento: (id, motivo) => request(`/api/fiscal/documentos/${encodeURIComponent(id)}/anular`, { method: 'POST', body: JSON.stringify({ motivo }) }),
   // Nota de crédito PARCIAL: acredita solo las cantidades indicadas por línea.
   notaCredito: (id, body) => request(`/api/fiscal/documentos/${encodeURIComponent(id)}/nota-credito`, { method: 'POST', body: JSON.stringify(body) }),
-  // Nota de débito: cargo adicional (concepto + monto) que AUMENTA el monto de una
-  // factura. Espejo positivo de la nota de crédito. body = { concepto, monto, exento? }.
+  // Nota de crédito por DESCUENTO: baja el monto SIN devolver mercancía (por eso
+  // no mueve inventario). body = { monto } o { porcentaje }, más `sku` para
+  // acotarlo a un renglón, `exento` y `nota`.
+  notaCreditoDescuento: (id, body) => request(`/api/fiscal/documentos/${encodeURIComponent(id)}/nota-credito/descuento`, { method: 'POST', body: JSON.stringify(body) }),
+  // Nota de crédito por AJUSTE DE PRECIO: se facturó más caro de lo correcto y se
+  // acredita la diferencia. body = { nota, ajustes: [{ sku, precioCorrecto }] }.
+  notaCreditoAjustePrecio: (id, body) => request(`/api/fiscal/documentos/${encodeURIComponent(id)}/nota-credito/ajuste-precio`, { method: 'POST', body: JSON.stringify(body) }),
+  // Catálogo de motivos de nota ({ credito, debito }). Del servidor y no escrito a
+  // mano acá: el motivo decide si la nota mueve inventario, y una lista propia se
+  // desincroniza del que valida.
+  motivosNota: () => request('/api/fiscal/motivos-nota'),
+  // Nota de débito: cargo adicional que AUMENTA el monto de una factura. Espejo
+  // positivo de la nota de crédito. body = { concepto, monto | porcentaje, sku?,
+  // exento?, motivoCodigo? }.
   emitirNotaDebito: (id, body) => request(`/api/fiscal/documentos/${encodeURIComponent(id)}/nota-debito`, { method: 'POST', body: JSON.stringify(body) }),
 
   // Cierres Z (reporte fiscal diario por sede). Append-only: se emiten y se

@@ -9,6 +9,7 @@ import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
 import { SelectorConceptoISLR, esTextoLibre } from '../components/conceptoIslr.jsx'
 import { ComprobanteModal, comprobanteDeFactura } from '../components/ComprobantePDF.jsx'
+import { SelectorAjuste, ResumenAjuste, calcularAjuste, cuerpoAjuste, ajusteVacio } from '../components/ajusteNota.jsx'
 
 // Anular (reversa total), nota de crédito (reversa parcial, resta) y nota de
 // débito (cargo adicional, suma) son acciones sensibles: solo Dueña/Desarrollador.
@@ -640,17 +641,46 @@ function AnularModal({ doc, onClose, onSaved, toast }) {
   )
 }
 
-// Nota de crédito PARCIAL: acredita cantidades por línea (devolución/descuento).
-// A diferencia de Anular (reversa total), aquí el cajero elige cuánto devolver de
-// cada renglón. El backend impone el tope real (descontando notas previas); acá el
-// máximo por línea es la cantidad facturada, con validación inmediata.
+/* NOTA DE CRÉDITO. El MOTIVO decide qué formulario se muestra y, sobre todo, si
+ * la nota mueve inventario:
+ *
+ *   - Devolución      → cantidades por renglón. ÚNICO motivo que reingresa stock.
+ *   - Descuento       → monto o PORCENTAJE, sobre la factura o sobre un producto.
+ *   - Ajuste de precio→ el precio correcto por renglón; se acredita la diferencia.
+ *
+ * Antes esto era un solo formulario (cantidades) para todo, y acreditar un
+ * descuento REINGRESABA mercancía que nadie devolvió: el stock quedaba inflado y
+ * el costo de ventas mal, en silencio. El catálogo de motivos viene del servidor,
+ * que es quien valida; tenerlo escrito acá se desincronizaría.
+ */
 function NotaCreditoModal({ doc, onClose, onSaved, toast, ccy }) {
-  const lineasOrig = doc.lineas || []
-  const [cant, setCant] = useState(() => lineasOrig.map(() => ''))
-  const [motivo, setMotivo] = useState('')
+  const [motivos, setMotivos] = useState([])
+  const [motivoCodigo, setMotivoCodigo] = useState('devolucion')
+  const [nota, setNota] = useState('')
   const [touched, setTouched] = useState(false)
   const [busy, setBusy] = useState(false)
 
+  const lineasOrig = doc.lineas || []
+  const [cant, setCant] = useState(() => lineasOrig.map(() => ''))
+  const [ajuste, setAjuste] = useState(ajusteVacio)
+  const [precios, setPrecios] = useState(() => lineasOrig.map(() => ''))
+
+  useEffect(() => {
+    let vivo = true
+    api.motivosNota()
+      .then((r) => { if (vivo) setMotivos(r?.credito || []) })
+      // Sin catálogo se sigue pudiendo devolver, que es el caso del mostrador.
+      .catch(() => { if (vivo) setMotivos([]) })
+    return () => { vivo = false }
+  }, [])
+
+  const tasaIVA = Number(doc.alicuotaIVA) > 0 ? Number(doc.alicuotaIVA) : IVA_TASA
+  const esDevolucion = motivoCodigo === 'devolucion'
+  const esDescuento = motivoCodigo === 'descuento'
+  const esAjuste = motivoCodigo === 'ajuste_precio'
+
+  // --- Devolución: totales en vivo con la regla del backend (IVA solo sobre lo
+  // gravado; el IGTF no se acredita).
   const parsed = lineasOrig.map((l, i) => {
     const n = Number(cant[i])
     return Number.isFinite(n) ? n : 0
@@ -658,34 +688,65 @@ function NotaCreditoModal({ doc, onClose, onSaved, toast, ccy }) {
   const excede = lineasOrig.some((l, i) => parsed[i] > (Number(l.cantidad) || 0) + 1e-9)
   const negativo = parsed.some((n) => n < 0)
   const algo = parsed.some((n) => n > 0)
-
-  // Total a acreditar EN VIVO, con la misma regla del backend: IVA solo sobre lo
-  // gravado (líneas no exentas). El IGTF no se acredita.
-  const { subtotal, iva, total } = useMemo(() => {
-    let sub = 0, base = 0
+  const calcDevolucion = useMemo(() => {
+    let gravado = 0, exento = 0
     lineasOrig.forEach((l, i) => {
       const q = parsed[i]
       if (q <= 0) return
       const monto = (Number(l.precioUnitario) || 0) * q
-      sub += monto
-      if (!l.exento) base += monto
+      if (l.exento) exento += monto; else gravado += monto
     })
-    const ivaV = base * IVA_TASA
-    return { subtotal: sub, iva: ivaV, total: sub + ivaV }
+    const iva = gravado * tasaIVA
+    return { gravado, exento, base: gravado + exento, iva, total: gravado + exento + iva, error: '' }
   }, [cant]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const motivoErr = !motivo.trim() ? 'El motivo es obligatorio (queda en la nota de crédito).' : ''
-  const puedeConfirmar = algo && !excede && !negativo && !motivoErr
+  // --- Descuento: monto o porcentaje. Con tope: no se acredita más de lo cobrado.
+  const calcDescuento = useMemo(() => calcularAjuste(doc, ajuste, { tope: true }), [ajuste]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- Ajuste de precio: se acredita (facturado − correcto) × cantidad. El precio
+  // correcto tiene que ser MENOR: cobrar de más va por nota de débito.
+  const calcAjuste = useMemo(() => {
+    let gravado = 0, exento = 0, err = ''
+    lineasOrig.forEach((l, i) => {
+      const v = precios[i]
+      if (v === '' || v === null) return
+      const nuevo = Number(v)
+      const viejo = Number(l.precioUnitario) || 0
+      if (!Number.isFinite(nuevo) || nuevo < 0) { err = 'Hay un precio inválido.'; return }
+      if (nuevo >= viejo) { err = 'El precio correcto debe ser menor que el facturado: para cobrar de más va una nota de débito.'; return }
+      const dif = (viejo - nuevo) * (Number(l.cantidad) || 0)
+      if (l.exento) exento += dif; else gravado += dif
+    })
+    const iva = gravado * tasaIVA
+    const base = gravado + exento
+    if (!err && base <= 0) err = 'Indica el precio correcto de al menos un producto.'
+    return { gravado, exento, base, iva, total: base + iva, error: err }
+  }, [precios]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const calc = esDevolucion ? calcDevolucion : esDescuento ? calcDescuento : calcAjuste
+  const notaErr = !nota.trim() ? 'El motivo es obligatorio (queda en la nota de crédito).' : ''
+  const devolucionErr = esDevolucion && (!algo || excede || negativo)
+  const puedeConfirmar = !notaErr && !calc.error && !devolucionErr && calc.total > 0
 
   const confirmar = async () => {
     setTouched(true)
     if (!puedeConfirmar) return
     setBusy(true)
     try {
-      const lineas = lineasOrig
-        .map((l, i) => ({ sku: l.sku, cantidad: parsed[i] }))
-        .filter((x) => x.cantidad > 0)
-      const nc = await api.notaCredito(doc.id, { motivo: motivo.trim(), lineas })
+      let nc
+      if (esDevolucion) {
+        const lineas = lineasOrig
+          .map((l, i) => ({ sku: l.sku, cantidad: parsed[i] }))
+          .filter((x) => x.cantidad > 0)
+        nc = await api.notaCredito(doc.id, { motivo: nota.trim(), lineas })
+      } else if (esDescuento) {
+        nc = await api.notaCreditoDescuento(doc.id, { ...cuerpoAjuste(ajuste), nota: nota.trim() })
+      } else {
+        const ajustes = lineasOrig
+          .map((l, i) => ({ sku: l.sku, precioCorrecto: Number(precios[i]) }))
+          .filter((x, i) => precios[i] !== '' && Number.isFinite(x.precioCorrecto))
+        nc = await api.notaCreditoAjustePrecio(doc.id, { nota: nota.trim(), ajustes })
+      }
       toast({ title: 'Nota de crédito emitida', body: `Se generó ${nc?.numeroCompleto || ''}.` })
       await onSaved()
       onClose()
@@ -695,6 +756,8 @@ function NotaCreditoModal({ doc, onClose, onSaved, toast, ccy }) {
     }
   }
 
+  const fichaMotivo = motivos.find((m) => m.codigo === motivoCodigo)
+
   return (
     <Modal open onClose={onClose} size="md" icon={<Icon.Receipt size={18} />}
       title="Nota de crédito" sub={doc.numeroCompleto}
@@ -703,80 +766,126 @@ function NotaCreditoModal({ doc, onClose, onSaved, toast, ccy }) {
         <Button variant="destructive" onClick={confirmar} loading={busy} disabled={!puedeConfirmar} icon={<Icon.Receipt size={16} />}>Emitir nota de crédito</Button>
       </>}>
       <div className="space-y-3.5">
-        <div className="flex items-start gap-2 text-[12.5px] text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/60 rounded-lg px-3 py-2.5">
-          <Icon.CircleAlert size={15} className="mt-0.5 shrink-0" />
-          <span>Devolución/descuento parcial. Indica cuánto acreditar de cada renglón; la factura original no se modifica y se reingresa el inventario devuelto.</span>
-        </div>
+        <Field label="Motivo de la nota" required
+          hint={fichaMotivo?.mueveInventario ? 'reingresa el inventario' : 'no mueve inventario'}>
+          <Select value={motivoCodigo} onChange={(e) => setMotivoCodigo(e.target.value)}>
+            {(motivos.length > 0 ? motivos : [{ codigo: 'devolucion', nombre: 'Devolución de mercancía' }])
+              .filter((m) => m.codigo !== 'error_facturacion')
+              .map((m) => <option key={m.codigo} value={m.codigo}>{m.nombre}</option>)}
+          </Select>
+        </Field>
 
-        <div>
-          <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">Líneas a acreditar</div>
-          <div className="rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
-            {lineasOrig.map((l, i) => {
-              const max = Number(l.cantidad) || 0
-              const invalid = touched && (parsed[i] > max + 1e-9 || parsed[i] < 0)
-              return (
+        {fichaMotivo?.ayuda ? (
+          <div className="flex items-start gap-2 text-[12.5px] text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/60 rounded-lg px-3 py-2.5">
+            <Icon.CircleAlert size={15} className="mt-0.5 shrink-0" />
+            <span>{fichaMotivo.ayuda} La factura original no se modifica: se emite un documento nuevo que la referencia.</span>
+          </div>
+        ) : null}
+
+        {esDevolucion ? (
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">Cantidades a devolver</div>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+              {lineasOrig.map((l, i) => {
+                const max = Number(l.cantidad) || 0
+                const invalid = touched && (parsed[i] > max + 1e-9 || parsed[i] < 0)
+                return (
+                  <div key={i} className="flex items-center gap-3 px-3 py-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] font-medium truncate">{l.nombre || l.sku}</div>
+                      <div className="text-[11px] text-slate-400 num">Facturado {fmtNum(max)} × {fmtCurrency(l.precioUnitario, 'VES')}{l.exento ? ' · exento' : ''}</div>
+                    </div>
+                    <Input type="number" min={0} max={max} step="any" className="w-24 text-right num" invalid={invalid}
+                      value={cant[i]} placeholder="0"
+                      onChange={(e) => setCant((prev) => prev.map((v, j) => (j === i ? e.target.value : v)))}
+                      onBlur={() => setTouched(true)} />
+                  </div>
+                )
+              })}
+            </div>
+            {touched && excede ? <div className="mt-1 text-[11.5px] text-red-600">No puedes acreditar más de lo facturado en alguna línea.</div> : null}
+          </div>
+        ) : null}
+
+        {esDescuento ? <SelectorAjuste doc={doc} valor={ajuste} onChange={setAjuste} etiqueta="Descuento" /> : null}
+
+        {esAjuste ? (
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">Precio correcto por producto</div>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+              {lineasOrig.map((l, i) => (
                 <div key={i} className="flex items-center gap-3 px-3 py-2">
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-medium truncate">{l.nombre || l.sku}</div>
-                    <div className="text-[11px] text-slate-400 num">Facturado {fmtNum(max)} × {fmtCurrency(l.precioUnitario, 'VES')}{l.exento ? ' · exento' : ''}</div>
+                    <div className="text-[11px] text-slate-400 num">Facturado a {fmtCurrency(l.precioUnitario, 'VES')} × {fmtNum(l.cantidad)}{l.exento ? ' · exento' : ''}</div>
                   </div>
-                  <Input type="number" min={0} max={max} step="any" className="w-24 text-right num" invalid={invalid}
-                    value={cant[i]} placeholder="0"
-                    onChange={(e) => setCant((prev) => prev.map((v, j) => (j === i ? e.target.value : v)))}
-                    onBlur={() => setTouched(true)} />
+                  <Input type="number" min={0} step="any" className="w-28 text-right num" placeholder="Precio correcto"
+                    value={precios[i]}
+                    onChange={(e) => setPrecios((prev) => prev.map((v, j) => (j === i ? e.target.value : v)))} />
                 </div>
-              )
-            })}
+              ))}
+            </div>
           </div>
-          {touched && excede ? <div className="mt-1 text-[11.5px] text-red-600">No puedes acreditar más de lo facturado en alguna línea.</div> : null}
-        </div>
+        ) : null}
 
-        <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3 space-y-1.5 text-[13px]">
-          <div className="flex items-center justify-between"><span className="text-slate-500">Subtotal a acreditar</span><span className="num private-mask">{fmtCurrency(subtotal, ccy)}</span></div>
-          <div className="flex items-center justify-between"><span className="text-slate-500">IVA</span><span className="num private-mask">{fmtCurrency(iva, ccy)}</span></div>
-          <div className="border-t border-slate-200 dark:border-slate-700 pt-1.5 flex items-center justify-between">
-            <span className="font-semibold">Total a acreditar</span><span className="num font-semibold text-amber-700 dark:text-amber-300 private-mask">-{fmtCurrency(total, ccy)}</span>
-          </div>
-        </div>
+        {touched && calc.error ? <div className="text-[11.5px] text-red-600">{calc.error}</div> : null}
 
-        <Field label="Motivo de la nota de crédito" required error={touched ? motivoErr : ''}>
-          <Input value={motivo} onChange={(e) => setMotivo(e.target.value)} onBlur={() => setTouched(true)} invalid={touched && !!motivoErr} placeholder="Ej: 3 unidades llegaron dañadas, descuento acordado…" autoFocus />
+        <ResumenAjuste calc={calc} ccy={ccy} />
+
+        <Field label="Detalle del motivo" required error={touched ? notaErr : ''}>
+          <Input value={nota} onChange={(e) => setNota(e.target.value)} onBlur={() => setTouched(true)}
+            invalid={touched && !!notaErr} placeholder="Ej: 3 unidades llegaron dañadas, descuento acordado…" />
         </Field>
       </div>
     </Modal>
   )
 }
 
-// Nota de débito: cargo adicional que AUMENTA el monto de una factura (cargos,
-// intereses de mora, corrección de precio al alza). Espejo POSITIVO de la nota de
-// crédito: en vez de acreditar líneas de la factura, carga un CONCEPTO nuevo con
-// su monto y su IVA (calculado en vivo con la misma regla del backend). El IVA se
-// omite si el cargo es exento (p. ej. intereses de mora). La factura original no
-// se modifica; el backend emite un documento inmutable con serie propia (-ND).
+/* NOTA DE DÉBITO: cargo adicional que AUMENTA el monto de una factura. Espejo
+ * positivo de la nota de crédito. El cargo se puede expresar en monto o en
+ * PORCENTAJE (sobre la factura o sobre un producto), que es como se pactan de
+ * verdad el diferencial cambiario y la mora. No toca inventario: es un ajuste de
+ * valor, no mercancía. */
 function NotaDebitoModal({ doc, onClose, onSaved, toast, ccy }) {
+  const [motivos, setMotivos] = useState([])
+  const [motivoCodigo, setMotivoCodigo] = useState('')
   const [concepto, setConcepto] = useState('')
-  const [monto, setMonto] = useState('')
-  const [exento, setExento] = useState(false)
+  const [ajuste, setAjuste] = useState(ajusteVacio)
   const [touched, setTouched] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  const base = Number(monto)
-  const baseOk = Number.isFinite(base) && base > 0
-  // Total a cargar EN VIVO, con la misma regla del backend: IVA solo si el cargo es
-  // gravado; el IGTF no aplica (no es un cobro en divisas, es un ajuste de valor).
-  const iva = useMemo(() => (baseOk && !exento ? base * IVA_TASA : 0), [monto, exento]) // eslint-disable-line react-hooks/exhaustive-deps
-  const total = (baseOk ? base : 0) + iva
+  useEffect(() => {
+    let vivo = true
+    api.motivosNota()
+      .then((r) => { if (vivo) setMotivos(r?.debito || []) })
+      .catch(() => { if (vivo) setMotivos([]) })
+    return () => { vivo = false }
+  }, [])
 
+  // Elegir el motivo PROPONE el concepto, sin imponerlo: nueve de cada diez veces
+  // el nombre del motivo es exactamente lo que se quería escribir, y quien
+  // necesita precisar («diferencial al 15/09») lo edita encima.
+  const elegirMotivo = (codigo) => {
+    const ficha = motivos.find((m) => m.codigo === codigo)
+    setMotivoCodigo(codigo)
+    if (ficha && !concepto.trim()) setConcepto(ficha.nombre)
+    // La mora no causa IVA: se marca exento solo.
+    if (codigo === 'intereses_mora') setAjuste((a) => ({ ...a, exento: true }))
+  }
+
+  // Sin tope: un cargo posterior SÍ puede superar el renglón que lo originó.
+  const calc = useMemo(() => calcularAjuste(doc, ajuste), [ajuste]) // eslint-disable-line react-hooks/exhaustive-deps
   const conceptoErr = !concepto.trim() ? 'El concepto es obligatorio (explica el cargo y queda en la nota).' : ''
-  const montoErr = !baseOk ? 'Indica un monto mayor que cero.' : ''
-  const puedeConfirmar = !conceptoErr && !montoErr
+  const puedeConfirmar = !conceptoErr && !calc.error && calc.total > 0
 
   const confirmar = async () => {
     setTouched(true)
     if (!puedeConfirmar) return
     setBusy(true)
     try {
-      const nd = await api.emitirNotaDebito(doc.id, { concepto: concepto.trim(), monto: base, exento })
+      const nd = await api.emitirNotaDebito(doc.id, {
+        ...cuerpoAjuste(ajuste), concepto: concepto.trim(), motivoCodigo: motivoCodigo || undefined,
+      })
       toast({ title: 'Nota de débito emitida', body: `Se generó ${nd?.numeroCompleto || ''}.` })
       await onSaved()
       onClose()
@@ -785,6 +894,8 @@ function NotaDebitoModal({ doc, onClose, onSaved, toast, ccy }) {
       setBusy(false)
     }
   }
+
+  const fichaMotivo = motivos.find((m) => m.codigo === motivoCodigo)
 
   return (
     <Modal open onClose={onClose} size="md" icon={<Icon.Receipt size={18} />}
@@ -796,27 +907,27 @@ function NotaDebitoModal({ doc, onClose, onSaved, toast, ccy }) {
       <div className="space-y-3.5">
         <div className="flex items-start gap-2 text-[12.5px] text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/60 rounded-lg px-3 py-2.5">
           <Icon.CircleAlert size={15} className="mt-0.5 shrink-0" />
-          <span>Cargo adicional que <strong>aumenta</strong> el monto de la factura (cargos, intereses de mora, corrección de precio al alza). La factura original no se modifica; se emite un documento nuevo que la referencia.</span>
+          <span>{fichaMotivo?.ayuda || 'Cargo adicional que aumenta el monto de la factura.'} La factura original no se modifica; se emite un documento nuevo que la referencia.</span>
         </div>
+
+        <Field label="Motivo del cargo" hint="opcional, pero permite declarar por motivo">
+          <Select value={motivoCodigo} onChange={(e) => elegirMotivo(e.target.value)}>
+            <option value="">Sin tipificar</option>
+            {motivos.map((m) => <option key={m.codigo} value={m.codigo}>{m.nombre}</option>)}
+          </Select>
+        </Field>
 
         <Field label="Concepto del cargo" required error={touched ? conceptoErr : ''}>
-          <Input value={concepto} onChange={(e) => setConcepto(e.target.value)} onBlur={() => setTouched(true)} invalid={touched && !!conceptoErr} placeholder="Ej: Interés de mora por pago tardío, ajuste de precio…" autoFocus />
+          <Input value={concepto} onChange={(e) => setConcepto(e.target.value)} onBlur={() => setTouched(true)}
+            invalid={touched && !!conceptoErr} placeholder="Ej: Interés de mora por pago tardío, diferencial cambiario…" />
         </Field>
 
-        <Field label="Monto base del cargo" required error={touched ? montoErr : ''}>
-          <Input type="number" min={0} step="any" className="num" value={monto} placeholder="0,00"
-            onChange={(e) => setMonto(e.target.value)} onBlur={() => setTouched(true)} invalid={touched && !!montoErr} />
-        </Field>
+        <SelectorAjuste doc={doc} valor={ajuste} onChange={setAjuste} etiqueta="Cargo" />
 
-        <Toggle checked={exento} onChange={setExento} label="Cargo exento de IVA" sub="Actívalo si el cargo no causa IVA (p. ej. intereses de mora)." />
+        {touched && calc.error ? <div className="text-[11.5px] text-red-600">{calc.error}</div> : null}
 
-        <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3 space-y-1.5 text-[13px]">
-          <div className="flex items-center justify-between"><span className="text-slate-500">Base del cargo</span><span className="num private-mask">{fmtCurrency(baseOk ? base : 0, ccy)}</span></div>
-          <div className="flex items-center justify-between"><span className="text-slate-500">IVA{exento ? ' (exento)' : ''}</span><span className="num private-mask">{fmtCurrency(iva, ccy)}</span></div>
-          <div className="border-t border-slate-200 dark:border-slate-700 pt-1.5 flex items-center justify-between">
-            <span className="font-semibold">Total a cargar</span><span className="num font-semibold text-sky-700 dark:text-sky-300 private-mask">+{fmtCurrency(total, ccy)}</span>
-          </div>
-        </div>
+        <ResumenAjuste calc={calc} ccy={ccy} signo="+" titulo="Total a cargar"
+          tono="text-sky-700 dark:text-sky-300" />
       </div>
     </Modal>
   )

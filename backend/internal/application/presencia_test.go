@@ -71,6 +71,12 @@ func TestPresencia_OtroRolNoSeVeAfectado(t *testing.T) {
 // trabajar por una configuración a medias. Se prefiere no verificar.
 func TestPresencia_SedeSinCoordenadasNoAplica(t *testing.T) {
 	svc, _ := servicioPresencia(t)
+	// Las sedes del seed demo SÍ traen coordenadas (para que la demo muestre el
+	// mapa y la presencia), así que acá se borran a propósito: lo que se prueba
+	// es la sede a medio configurar, no la del seed.
+	if _, err := svc.FijarUbicacionSede(empDemo, sede1, actorA, origenTst, 0, 0, 0); err != nil {
+		t.Fatalf("borrar ubicación: %v", err)
+	}
 	if _, err := svc.FijarRolesPresencia(empDemo, actorA, origenTst, []string{usuario.RolMesonero}); err != nil {
 		t.Fatalf("fijar roles: %v", err)
 	}

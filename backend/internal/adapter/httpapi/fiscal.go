@@ -447,12 +447,19 @@ func (s *Server) handleNotaDebito(c *fiber.Ctx) error {
 		Concepto string  `json:"concepto"`
 		Monto    float64 `json:"monto"`
 		Exento   bool    `json:"exento"`
+		// Porcentaje sobre el total de la factura, o sobre el renglón `sku`.
+		Porcentaje   float64 `json:"porcentaje"`
+		SKU          string  `json:"sku"`
+		MotivoCodigo string  `json:"motivoCodigo"`
 	}
 	if err := c.BodyParser(&in); err != nil || in.Concepto == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "concepto requerido"})
 	}
 	out, err := s.svc.EmitirNotaDebito(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c), c.Params("id"),
-		application.NotaDebitoEntrada{Concepto: in.Concepto, Monto: in.Monto, Exento: in.Exento})
+		application.NotaDebitoEntrada{
+			Concepto: in.Concepto, Monto: in.Monto, Exento: in.Exento,
+			Porcentaje: in.Porcentaje, SKU: in.SKU, MotivoCodigo: in.MotivoCodigo,
+		})
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -778,12 +785,17 @@ func (s *Server) handleNCDescuento(c *fiber.Ctx) error {
 		Monto  float64 `json:"monto"`
 		Exento bool    `json:"exento"`
 		Nota   string  `json:"nota"`
+		// Porcentaje sobre el total de la factura, o sobre el renglón `sku`.
+		Porcentaje float64 `json:"porcentaje"`
+		SKU        string  `json:"sku"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
-	out, err := s.svc.NotaCreditoDescuento(empresaIDOf(c), principalOf(c).UserID, origen(c),
-		c.Params("id"), in.Monto, in.Exento, in.Nota)
+	out, err := s.svc.NotaCreditoDescuentoDe(empresaIDOf(c), principalOf(c).UserID, origen(c), c.Params("id"),
+		application.DescuentoNC{
+			Monto: in.Monto, Porcentaje: in.Porcentaje, SKU: in.SKU, Exento: in.Exento, Nota: in.Nota,
+		})
 	if err != nil {
 		return errorDeNota(c, err)
 	}
