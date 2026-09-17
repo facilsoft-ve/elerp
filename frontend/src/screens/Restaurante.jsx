@@ -9,8 +9,10 @@ import { Reservaciones } from './Reservaciones.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
 import {
-  dimensionDeMesa, aforoMaximo, ocupaCelda, cabeEn, cabeArea, cabeMostrador, cubreCelda,
+  dimensionDeMesa, aforoMaximo, ocupaCelda, cabeEn, cabeMostrador, cubreCelda,
   aforoAjustado, rectDeArrastre, zonaDeCelda, siguienteNombreMesa, MAX_CELDAS_MESA,
+  celdasDeArea, cajaDe, areaCubre, celdasLibresParaArea, celdasCabenParaArea, celdasDelRect,
+  unirCeldas, quitarCeldas, ladosDeCelda,
 } from '../lib/plano.js'
 import { TurnosSalon } from './TurnosSalon.jsx'
 import { SelectorModelo, NotaCatalogo } from '../components/dispositivo.jsx'
@@ -277,18 +279,30 @@ function MapaMesas() {
   // valido responde si lo dibujado se puede soltar ahí. Cada cosa tiene su
   // regla, y son distintas a propósito (ver la cabecera del archivo).
   const valido = (v) => {
-    if (v.clase === 'area') return cabeArea(salon, v.id, v.c, v.r, v.dc, v.df)
+    if (v.clase === 'area') {
+      // Recortar siempre vale: quitar celdas de una zona no puede chocar con nada.
+      if (v.modo === 'borrar') return true
+      // Mover: o entra COMPLETA o no se mueve. Quedarse con «lo que cabe»
+      // partiría la terraza al arrastrarla, que no es lo que nadie pidió.
+      if (v.modo === 'mover') return celdasCabenParaArea(plano, v.id, v.celdas)
+      // Dibujar o ampliar: de lo trazado se toma lo que cabe. Basta con que
+      // quede algo — así pintar contra el borde o junto a otra zona se siente
+      // natural, sin tener que calcular el rectángulo exacto.
+      return (v.celdas || []).length > 0
+    }
     if (v.clase === 'mostrador') return cabeMostrador(salon, v.id, v.c, v.r, v.dc, v.df)
     if (v.clase === 'bloqueo') return true // bloquear solo pinta celdas libres
     return cabeEn(salon, v.id, v.c, v.r, v.dc, v.df)
   }
 
+  // Se repinta solo cuando cambia de celda: un setState por píxel haría justo
+  // lo contrario de fluido.
   const nuevaVista = (v) => setVista((prev) => {
-    if (prev && prev.c === v.c && prev.r === v.r && prev.dc === v.dc && prev.df === v.df) return prev
+    if (prev && prev.c === v.c && prev.r === v.r && prev.dc === v.dc && prev.df === v.df
+      && (prev.celdas?.length || 0) === (v.celdas?.length || 0)) return prev
     if (gesto.current) gesto.current.movido = true
-    const sig = { ...v, valido: valido(v) }
-    if (gesto.current) gesto.current.v = sig
-    return sig
+    if (gesto.current) gesto.current.v = v
+    return v
   })
 
   // Empezar a DIBUJAR sobre la grilla vacía.
@@ -296,20 +310,85 @@ function MapaMesas() {
     if (!puedeEditar || gesto.current) return
     const { c, r } = celdaDe(e)
     e.preventDefault()
-    setSel(null)
     const clase = herramienta === 'bloquear' ? 'bloqueo' : herramienta
-    gesto.current = { accion: 'crear', clase, c0: c, r0: r, movido: false }
+
+    /* Con la herramienta Área, dibujar sobre el plano AMPLÍA la zona
+     * seleccionada en vez de crear otra. Es lo que permite una terraza en L: se
+     * pinta el brazo que falta. Sin zona seleccionada, se crea una nueva. */
+    const ampliando = clase === 'area' && sel?.tipo === 'area'
+    if (!ampliando) setSel(null)
+
+    gesto.current = {
+      accion: ampliando ? 'pintar' : 'crear', clase, c0: c, r0: r, movido: false,
+      id: ampliando ? sel.id : '', modo: ampliando ? 'pintar' : 'crear',
+    }
     try { gridRef.current.setPointerCapture(e.pointerId) } catch { /* sin captura igual funciona */ }
-    const v = { clase, id: '', c, r, dc: 1, df: 1 }
-    gesto.current.v = { ...v, valido: valido(v) }
+    gesto.current.v = vistaDelGesto(gesto.current, c, r)
     setVista(gesto.current.v)
   }
+
+  /* vistaDelGesto arma lo que se va a PINTAR en pantalla para el estado actual
+   * del gesto. Está aparte porque el área no se describe con un rectángulo
+   * —tiene forma— y mezclar los dos casos dentro del manejador de movimiento lo
+   * volvía ilegible. */
+  const vistaDelGesto = (g, c, r) => {
+    if (g.clase !== 'area') {
+      if (g.accion === 'crear') {
+        const { c: nc, r: nr, dc, df } = rectDeArrastre(g.c0, g.r0, c, r)
+        return conValidez({ clase: g.clase, id: g.id || '', c: nc, r: nr, dc, df })
+      }
+      if (g.accion === 'mover') {
+        return conValidez({ clase: g.clase, id: g.id, c: c - g.offC, r: r - g.offR, dc: g.dc, df: g.df })
+      }
+      const tope = g.clase === 'mesa' ? MAX_CELDAS_MESA : Math.max(plano.columnas, plano.filas)
+      const dc = g.tipo === 'alto' ? g.dc : clamp(c - g.col + 1, 1, tope)
+      const df = g.tipo === 'ancho' ? g.df : clamp(r - g.fil + 1, 1, tope)
+      return conValidez({ clase: g.clase, id: g.id, c: g.col, r: g.fil, dc, df })
+    }
+
+    // ÁREA: siempre en celdas.
+    if (g.accion === 'mover') {
+      const a = (plano.areas || []).find((x) => x.id === g.id)
+      if (!a) return null
+      const dcol = (c - g.offC) - (a.columna || 0)
+      const dfil = (r - g.offR) - (a.fila || 0)
+      const celdas = celdasDeArea(a).map((x) => ({ columna: x.columna + dcol, fila: x.fila + dfil }))
+      return conValidez({ clase: 'area', id: g.id, modo: 'mover', celdas, ...cajaDe(celdas) })
+    }
+    const { c: nc, r: nr, dc, df } = rectDeArrastre(g.c0, g.r0, c, r)
+    if (g.modo === 'borrar') {
+      const a = (plano.areas || []).find((x) => x.id === g.id)
+      const dentro = celdasDelRect(nc, nr, dc, df).filter((x) => a && areaCubre(a, x.columna, x.fila))
+      return conValidez({ clase: 'area', id: g.id, modo: 'borrar', celdas: dentro, c: nc, r: nr, dc, df })
+    }
+    const libres = celdasLibresParaArea(plano, g.id, nc, nr, dc, df)
+    return conValidez({ clase: 'area', id: g.id, modo: g.modo || 'crear', celdas: libres, c: nc, r: nr, dc, df })
+  }
+
+  const conValidez = (v) => ({ ...v, valido: valido(v) })
 
   // Empezar a MOVER o REDIMENSIONAR algo que ya existe.
   const onElementoDown = (e, clase, el, tipo = 'mover') => {
     if (!puedeEditar) { setSel({ tipo: clase, id: el.id }); return }
     e.preventDefault(); e.stopPropagation()
     setSel({ tipo: clase, id: el.id })
+    if (clase === 'area') {
+      /* Dos gestos sobre un área, y el que se usa depende de DÓNDE se agarra:
+       * el rótulo la mueve entera, el cuerpo RECORTA las celdas que se barren.
+       * Los tiradores de tamaño no aplican a una forma libre —ya no existen— y
+       * recortar tenía que vivir en algún lado: el cuerpo es el sitio evidente,
+       * simétrico con pintar sobre el plano para ampliarla. */
+      const o = celdaDe(e)
+      const modo = tipo === 'rotulo' ? 'mover' : 'borrar'
+      gesto.current = {
+        accion: modo === 'mover' ? 'mover' : 'pintar', clase: 'area', id: el.id, modo,
+        c0: o.c, r0: o.r, offC: o.c - (el.columna || 0), offR: o.r - (el.fila || 0), movido: false,
+      }
+      try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* idem */ }
+      gesto.current.v = vistaDelGesto(gesto.current, o.c, o.r)
+      setVista(gesto.current.v)
+      return
+    }
     const [dc, df] = clase === 'mesa' ? dimension(el) : [el.ancho || 1, el.alto || 1]
     const col = el.columna || 0
     const fil = el.fila || 0
@@ -331,20 +410,8 @@ function MapaMesas() {
     const g = gesto.current
     if (!g || !gridRef.current) return
     const { c, r } = celdaDe(e)
-    if (g.accion === 'crear') {
-      const { c: nc, r: nr, dc, df } = rectDeArrastre(g.c0, g.r0, c, r)
-      nuevaVista({ clase: g.clase, id: '', c: nc, r: nr, dc, df })
-      return
-    }
-    if (g.accion === 'mover') {
-      nuevaVista({ clase: g.clase, id: g.id, c: c - g.offC, r: r - g.offR, dc: g.dc, df: g.df })
-      return
-    }
-    // Redimensionar: la esquina se queda quieta y el lado sigue al cursor.
-    const tope = g.clase === 'mesa' ? MAX_CELDAS_MESA : Math.max(plano.columnas, plano.filas)
-    const dc = g.tipo === 'alto' ? g.dc : clamp(c - g.col + 1, 1, tope)
-    const df = g.tipo === 'ancho' ? g.df : clamp(r - g.fil + 1, 1, tope)
-    nuevaVista({ clase: g.clase, id: g.id, c: g.col, r: g.fil, dc, df })
+    const v = vistaDelGesto(g, c, r)
+    if (v) nuevaVista(v)
   }
 
   const onUp = async () => {
@@ -356,6 +423,7 @@ function MapaMesas() {
     setVista(null)
     if (!g || !v) return
     if (g.accion === 'crear') { await crear(g.clase, v, g.movido); return }
+    if (g.accion === 'pintar') { pintarArea(g.id, v); return }
     if (!g.movido) return
     if (!v.valido) {
       toast({ title: 'Ahí no cabe', body: 'Se sale del plano o pisa algo que ya está puesto.', kind: 'warn' })
@@ -374,13 +442,47 @@ function MapaMesas() {
         capacidad: aforoAjustado(m.capacidad, v.dc, v.df),
         zona: zonaDeCelda(plano.areas, v.c, v.r) || m.zona,
       })))
-    } else {
-      const lista = clase === 'area' ? 'areas' : 'mostradores'
+    } else if (clase === 'area') {
+      // El área se mueve ENTERA: sus celdas ya vienen trasladadas en la vista.
       setPlano((p) => ({
         ...p,
-        [lista]: (p[lista] || []).map((x) => (x.id !== id ? x
+        areas: (p.areas || []).map((x) => (x.id !== id ? x : { ...x, celdas: v.celdas, ...cajaDe(v.celdas) })),
+      }))
+    } else {
+      setPlano((p) => ({
+        ...p,
+        mostradores: (p.mostradores || []).map((x) => (x.id !== id ? x
           : { ...x, columna: v.c, fila: v.r, ancho: v.dc, alto: v.df })),
       }))
+    }
+    setDirty(true)
+  }
+
+  /* pintarArea suma o quita celdas de una zona. Es lo que da las formas libres:
+   * una terraza en L se pinta en dos trazos, y un recorte donde está la
+   * escalera se quita barriendo por encima.
+   *
+   * Quedarse sin celdas ELIMINA el área. Es lo coherente: una zona sin
+   * superficie no existe, y dejar un área fantasma que no se ve en el plano pero
+   * sigue en la lista es peor que borrarla.
+   */
+  const pintarArea = (id, v) => {
+    const celdas = v.celdas || []
+    if (celdas.length === 0) return
+    setPlano((p) => {
+      const areas = []
+      for (const a of p.areas || []) {
+        if (a.id !== id) { areas.push(a); continue }
+        const base = celdasDeArea(a)
+        const nuevas = v.modo === 'borrar' ? quitarCeldas(base, celdas) : unirCeldas(base, celdas)
+        if (nuevas.length === 0) continue // se borró entera
+        areas.push({ ...a, celdas: nuevas, ...cajaDe(nuevas) })
+      }
+      return { ...p, areas }
+    })
+    if (v.modo === 'borrar') {
+      const a = (plano.areas || []).find((x) => x.id === id)
+      if (a && quitarCeldas(celdasDeArea(a), celdas).length === 0) setSel(null)
     }
     setDirty(true)
   }
@@ -434,8 +536,9 @@ function MapaMesas() {
     if (clase === 'area') {
       const colores = ['violeta', 'teal', 'ambar', 'rosa', 'pizarra']
       const n = (plano.areas || []).length
+      const celdas = v.celdas || []
       const area = {
-        id, nombre: `Área ${n + 1}`, columna: v.c, fila: v.r, ancho: v.dc, alto: v.df,
+        id, nombre: `Área ${n + 1}`, celdas, ...cajaDe(celdas),
         color: colores[n % colores.length],
       }
       setPlano((p) => ({ ...p, areas: [...(p.areas || []), area] }))
@@ -574,49 +677,54 @@ function MapaMesas() {
             style={{ width: px(plano.columnas), height: px(plano.filas), cursor: puedeEditar ? 'crosshair' : 'default' }}>
 
             {/* ÁREAS, debajo de todo: son superficie, no muebles.
-                
-                QUIÉN RECIBE EL TOQUE depende de la herramienta, y es lo único
-                delicado de esta capa. Un área cubre las mesas que contiene: si
-                su cuerpo capturara el toque siempre, no se podría agarrar
-                ninguna mesa de la terraza. Pero si NUNCA lo capturara —como
-                estaba— arrastrar dentro de un área intentaría dibujar OTRA
-                área encima, que se rechaza por solaparse, y redimensionar la
-                zona se volvía imposible.
-                
-                Con la herramienta «Área» activa se está trabajando sobre las
-                zonas, así que el cuerpo manda; con cualquier otra, el cuerpo se
-                aparta y solo quedan el rótulo y los tiradores. */}
+
+                SE DIBUJAN CELDA POR CELDA, con borde solo en los lados que dan
+                hacia afuera. Pintar las cuatro aristas de cada una mostraría
+                una cuadrícula interna en vez de una zona, y un rectángulo único
+                no podría representar una terraza en L.
+
+                QUIÉN RECIBE EL TOQUE depende de la herramienta. Un área cubre
+                las mesas que contiene: si su cuerpo capturara el toque siempre,
+                no se podría agarrar ninguna mesa de la terraza. Con la
+                herramienta «Área» activa se está trabajando sobre las zonas, así
+                que el cuerpo manda —y ahí RECORTA—; con cualquier otra el cuerpo
+                se aparta y solo queda el rótulo. */}
             {(plano.areas || []).map((a) => {
               const c = COLOR_AREA[a.color] || COLOR_AREA.violeta
               const activa = sel?.tipo === 'area' && sel.id === a.id
               const cuerpoActivo = puedeEditar && herramienta === 'area'
-              const arrastrando = vista && vista.id === a.id && vista.clase === 'area'
+              const arrastrando = vista && vista.id === a.id && vista.clase === 'area' && vista.modo === 'mover'
+              const celdas = celdasDeArea(a)
+              const borde = `2px ${activa ? 'solid' : 'dashed'} ${c.border}`
               return (
-                <div key={a.id} onPointerDown={cuerpoActivo ? (e) => onElementoDown(e, 'area', a) : undefined}
-                  onPointerMove={cuerpoActivo ? onMove : undefined}
-                  onPointerUp={cuerpoActivo ? onUp : undefined} onPointerCancel={cuerpoActivo ? onUp : undefined}
-                  className={`absolute rounded-lg touch-none ${cuerpoActivo ? 'cursor-grab' : 'pointer-events-none'}`}
-                  style={{
-                    left: px(a.columna), top: px(a.fila), width: px(a.ancho), height: px(a.alto),
-                    background: c.bg, border: `2px ${activa ? 'solid' : 'dashed'} ${c.border}`,
-                    opacity: arrastrando ? 0.4 : 1,
-                  }}>
-                  <span onPointerDown={(e) => onElementoDown(e, 'area', a)} onPointerMove={onMove}
+                <div key={a.id} style={{ opacity: arrastrando ? 0.35 : 1 }}>
+                  {celdas.map((x) => {
+                    const l = ladosDeCelda(celdas, x.columna, x.fila)
+                    return (
+                      <div key={`${x.columna}-${x.fila}`}
+                        onPointerDown={cuerpoActivo ? (e) => onElementoDown(e, 'area', a, 'cuerpo') : undefined}
+                        onPointerMove={cuerpoActivo ? onMove : undefined}
+                        onPointerUp={cuerpoActivo ? onUp : undefined} onPointerCancel={cuerpoActivo ? onUp : undefined}
+                        className={`absolute touch-none ${cuerpoActivo ? 'cursor-cell' : 'pointer-events-none'}`}
+                        style={{
+                          left: px(x.columna), top: px(x.fila), width: cel, height: cel,
+                          background: c.bg,
+                          borderTop: l.arriba ? borde : 'none',
+                          borderBottom: l.abajo ? borde : 'none',
+                          borderLeft: l.izquierda ? borde : 'none',
+                          borderRight: l.derecha ? borde : 'none',
+                        }} />
+                    )
+                  })}
+                  {/* El RÓTULO va en la esquina de la caja que envuelve la zona,
+                      y es lo que la mueve entera. Es también el único agarre del
+                      área cuando otra herramienta está activa. */}
+                  <span onPointerDown={(e) => onElementoDown(e, 'area', a, 'rotulo')} onPointerMove={onMove}
                     onPointerUp={onUp} onPointerCancel={onUp}
-                    className="pointer-events-auto absolute left-1 top-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold cursor-grab touch-none"
-                    style={{ background: c.chip, color: c.text }}>
+                    className="absolute px-1.5 py-0.5 rounded-md text-[11px] font-semibold cursor-grab touch-none"
+                    style={{ left: px(a.columna) + 4, top: px(a.fila) + 4, background: c.chip, color: c.text }}>
                     {a.nombre}
                   </span>
-                  {/* Los tres tiradores, como en una mesa: un área que solo se
-                      pudiera agrandar en diagonal obliga a pelearse con el
-                      cursor para ensanchar una terraza de una fila de alto. */}
-                  {puedeEditar && activa ? TIRADORES.map((t) => (
-                    <span key={t.tipo} title={t.titulo}
-                      onPointerDown={(e) => onElementoDown(e, 'area', a, t.tipo)} onPointerMove={onMove}
-                      onPointerUp={onUp} onPointerCancel={onUp}
-                      className="pointer-events-auto absolute bg-white dark:bg-slate-900 border-2 rounded-full touch-none"
-                      style={{ width: 14, height: 14, cursor: t.cursor, borderColor: c.text, ...t.pos }} />
-                  )) : null}
                 </div>
               )
             })}
@@ -698,18 +806,35 @@ function MapaMesas() {
                 Sin esto el arrastre no mostraba nada hasta soltar y un destino
                 inválido no decía por qué no pasaba nada. */}
             {vista ? (
-              <div className="pointer-events-none absolute rounded-lg"
-                style={{
-                  left: px(vista.c) + 3, top: px(vista.r) + 3,
-                  width: px(vista.dc) - 6, height: px(vista.df) - 6,
-                  border: `2px dashed ${vista.valido ? '#6A2CF0' : '#B3362C'}`,
-                  background: vista.valido ? 'rgba(106,44,240,.10)' : 'rgba(179,54,44,.10)',
-                }}>
-                <span className="absolute left-1 top-0.5 num font-semibold"
-                  style={{ fontSize: 11, color: vista.valido ? '#6A2CF0' : '#B3362C' }}>
-                  {vista.dc}×{vista.df}{vista.clase === 'mesa' ? ` · ${aforoMaximo(vista.dc, vista.df)}p` : ''}
-                </span>
-              </div>
+              // Con celdas se dibuja la FORMA (un área en L se previsualiza en
+              // L); sin ellas, el rectángulo de una mesa o un mostrador.
+              vista.celdas ? (
+                <>
+                  {vista.celdas.map((x) => (
+                    <div key={`p${x.columna}-${x.fila}`} className="pointer-events-none absolute"
+                      style={{
+                        left: px(x.columna) + 2, top: px(x.fila) + 2, width: cel - 4, height: cel - 4,
+                        border: `2px dashed ${vista.modo === 'borrar' ? '#B3362C' : vista.valido ? '#6A2CF0' : '#B3362C'}`,
+                        background: vista.modo === 'borrar' ? 'rgba(179,54,44,.14)'
+                          : vista.valido ? 'rgba(106,44,240,.14)' : 'rgba(179,54,44,.10)',
+                        borderRadius: 6,
+                      }} />
+                  ))}
+                </>
+              ) : (
+                <div className="pointer-events-none absolute rounded-lg"
+                  style={{
+                    left: px(vista.c) + 3, top: px(vista.r) + 3,
+                    width: px(vista.dc) - 6, height: px(vista.df) - 6,
+                    border: `2px dashed ${vista.valido ? '#6A2CF0' : '#B3362C'}`,
+                    background: vista.valido ? 'rgba(106,44,240,.10)' : 'rgba(179,54,44,.10)',
+                  }}>
+                  <span className="absolute left-1 top-0.5 num font-semibold"
+                    style={{ fontSize: 11, color: vista.valido ? '#6A2CF0' : '#B3362C' }}>
+                    {vista.dc}×{vista.df}{vista.clase === 'mesa' ? ` · ${aforoMaximo(vista.dc, vista.df)}p` : ''}
+                  </span>
+                </div>
+              )
             ) : null}
           </div>
         </div>
@@ -754,7 +879,7 @@ const HERRAMIENTAS = [
 const AYUDA_HERRAMIENTA = {
   mesa: 'Arrastra sobre la grilla para dibujar una mesa; su tamaño define el aforo.',
   mostrador: 'Arrastra para dibujar la barra, la caja o una estación de servicio.',
-  area: 'Arrastra para delimitar una zona (Terraza, Salón principal, Pórtico). Las mesas de adentro toman su nombre.',
+  area: 'Arrastra para delimitar una zona (Terraza, Salón principal, Pórtico). Con una zona elegida, pintar la amplía y barrer por dentro la recorta: así se hacen las formas en L. Las mesas de adentro toman su nombre.',
   bloquear: 'Arrastra para marcar paredes o zonas donde no van mesas; toca una marcada para liberarla.',
 }
 
@@ -789,7 +914,11 @@ function PanelArea({ area, puedeEditar, onCambio, onQuitar }) {
           ))}
         </div>
       </div>
-      <div className="text-[11.5px] text-slate-400 num">{area.ancho}×{area.alto} cuadros</div>
+      <div className="text-[11.5px] text-slate-400">
+        <span className="num">{celdasDeArea(area).length}</span> cuadros.
+        Con la herramienta <strong>Área</strong>: pinta sobre el plano para ampliarla
+        y barre por encima de la zona para recortarla. El rótulo la mueve entera.
+      </div>
       {puedeEditar ? (
         <Button size="sm" variant="ghost" icon={<Icon.Trash size={14} />} onClick={onQuitar}>Quitar área</Button>
       ) : null}

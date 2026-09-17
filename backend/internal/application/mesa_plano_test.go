@@ -177,3 +177,102 @@ func TestPlano_AchicarLaGrillaRecortaLasAreas(t *testing.T) {
 		t.Fatalf("el área no se recortó a la grilla: %d×%d", out.Areas[0].Ancho, out.Areas[0].Alto)
 	}
 }
+
+/* ÁREAS DE FORMA LIBRE.
+ *
+ * Un local real tiene terrazas en L y salones con un recorte donde está la
+ * escalera. Obligar a que cada zona fuera un rectángulo forzaba a partir la
+ * terraza en «Terraza 1» y «Terraza 2», y con eso se pierde justo lo que el área
+ * existe para dar: UN nombre de zona para las mesas que están ahí. */
+
+// celdasL es una zona en L: tres celdas en fila y una colgando de la primera.
+func celdasL(c0, f0 int) []mesa.Celda {
+	return []mesa.Celda{
+		{Columna: c0, Fila: f0}, {Columna: c0 + 1, Fila: f0}, {Columna: c0 + 2, Fila: f0},
+		{Columna: c0, Fila: f0 + 1},
+	}
+}
+
+func TestArea_GuardaUnaFormaEnL(t *testing.T) {
+	svc, _ := servicioSalon(t)
+	out, err := svc.GuardarPlanoCompleto(empSalon, sedeSalon, actorA, origenTst, planoBase(
+		[]mesa.Area{{Nombre: "Terraza", Celdas: celdasL(0, 6)}}, nil))
+	if err != nil {
+		t.Fatalf("guardar área en L: %v", err)
+	}
+	a := out.Areas[0]
+	if len(a.Celdas) != 4 {
+		t.Fatalf("celdas = %d, se esperaban 4", len(a.Celdas))
+	}
+	// La caja se DERIVA y es solo dónde va el rótulo, no la forma.
+	if a.Columna != 0 || a.Fila != 6 || a.Ancho != 3 || a.Alto != 2 {
+		t.Fatalf("caja = (%d,%d) %dx%d, se esperaba (0,6) 3x2", a.Columna, a.Fila, a.Ancho, a.Alto)
+	}
+	// Y el hueco de la L NO pertenece al área.
+	if !a.Cubre(0, 7) {
+		t.Fatal("el brazo de la L debería pertenecer al área")
+	}
+	if a.Cubre(2, 7) {
+		t.Fatal("el hueco de la L no pertenece al área, aunque esté dentro de su caja")
+	}
+}
+
+// Dos zonas en L encajan una en el hueco de la otra: compararlas por su CAJA las
+// rechazaría sin motivo.
+func TestArea_DosFormasEncajanSinSolaparse(t *testing.T) {
+	svc, _ := servicioSalon(t)
+	_, err := svc.GuardarPlanoCompleto(empSalon, sedeSalon, actorA, origenTst, planoBase(
+		[]mesa.Area{
+			{Nombre: "Terraza", Celdas: celdasL(0, 6)},
+			{Nombre: "Pórtico", Celdas: []mesa.Celda{{Columna: 1, Fila: 7}, {Columna: 2, Fila: 7}}},
+		}, nil))
+	if err != nil {
+		t.Fatalf("dos zonas que encajan no deberían rechazarse: %v", err)
+	}
+}
+
+// Pero compartir UNA celda sigue siendo solape.
+func TestArea_UnaCeldaCompartidaSigueSiendoSolape(t *testing.T) {
+	svc, _ := servicioSalon(t)
+	_, err := svc.GuardarPlanoCompleto(empSalon, sedeSalon, actorA, origenTst, planoBase(
+		[]mesa.Area{
+			{Nombre: "Terraza", Celdas: celdasL(0, 6)},
+			{Nombre: "Pórtico", Celdas: []mesa.Celda{{Columna: 0, Fila: 7}}},
+		}, nil))
+	if err == nil {
+		t.Fatal("dos zonas que comparten una celda deberían rechazarse")
+	}
+}
+
+// Un área guardada antes del dibujo libre (solo rectángulo) se sigue leyendo, y
+// al guardarla queda expandida en celdas: no hay nada que migrar.
+func TestArea_LaFormaViejaSeLeeYSeExpande(t *testing.T) {
+	svc, _ := servicioSalon(t)
+	out, err := svc.GuardarPlanoCompleto(empSalon, sedeSalon, actorA, origenTst, planoBase(
+		[]mesa.Area{{Nombre: "Salón", Columna: 0, Fila: 6, Ancho: 2, Alto: 2}}, nil))
+	if err != nil {
+		t.Fatalf("guardar área rectangular: %v", err)
+	}
+	if len(out.Areas[0].Celdas) != 4 {
+		t.Fatalf("el rectángulo debía expandirse a 4 celdas, son %d", len(out.Areas[0].Celdas))
+	}
+}
+
+// La mesa toma la zona por CELDA: estar en la caja de la L no alcanza.
+func TestArea_LaZonaSeResuelvePorCelda(t *testing.T) {
+	svc, st := servicioSalon(t)
+	m := mesaPorNombre(t, st, "2")
+	antes := m.Zona
+	// El hueco de una L colocada sobre la mesa: no debería adoptarla.
+	hueco := []mesa.Celda{
+		{Columna: m.Columna, Fila: m.Fila + 1},
+		{Columna: m.Columna + 1, Fila: m.Fila + 1},
+	}
+	if _, err := svc.GuardarPlanoCompleto(empSalon, sedeSalon, actorA, origenTst, planoBase(
+		[]mesa.Area{{Nombre: "Terraza", Celdas: hueco}}, nil)); err != nil {
+		t.Fatalf("guardar: %v", err)
+	}
+	if got := mesaPorNombre(t, st, "2"); got.Zona != antes {
+		t.Fatalf("la mesa tomó una zona que no la contiene: %q → %q", antes, got.Zona)
+	}
+}

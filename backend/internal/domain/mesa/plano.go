@@ -37,17 +37,80 @@ type Plano struct {
  * se deduce de dónde está la mesa, que es como funciona en el local.
  */
 
-// Area es una zona del salón: un rectángulo con nombre.
+/* Area es una zona del salón: un CONJUNTO DE CELDAS con nombre.
+ *
+ * No un rectángulo. Un local real tiene terrazas en L, pórticos que rodean una
+ * esquina y salones con un recorte donde está la escalera; obligar a que cada
+ * zona sea un rectángulo forzaba a partir la terraza en dos «Terraza 1» y
+ * «Terraza 2», y con eso se pierde justo lo que el área existe para dar: UN
+ * nombre de zona para las mesas que están ahí.
+ *
+ * Columna/Fila/Ancho/Alto se conservan como la CAJA que envuelve al área. No es
+ * la forma —la forma son las celdas— pero sirve para dos cosas: ubicar el
+ * rótulo en el plano, y que las áreas guardadas antes de esto (que eran
+ * rectángulos) se sigan leyendo sin migrar nada. Cuando Celdas viene vacío, la
+ * caja ES el área.
+ */
 type Area struct {
-	ID      string `json:"id" bson:"id"`
-	Nombre  string `json:"nombre" bson:"nombre"`
-	Columna int    `json:"columna" bson:"columna"`
-	Fila    int    `json:"fila" bson:"fila"`
-	Ancho   int    `json:"ancho" bson:"ancho"`
-	Alto    int    `json:"alto" bson:"alto"`
+	ID     string `json:"id" bson:"id"`
+	Nombre string `json:"nombre" bson:"nombre"`
+	// Caja envolvente. Derivada de Celdas al guardar; con Celdas vacío, es el
+	// área completa (formato anterior).
+	Columna int `json:"columna" bson:"columna"`
+	Fila    int `json:"fila" bson:"fila"`
+	Ancho   int `json:"ancho" bson:"ancho"`
+	Alto    int `json:"alto" bson:"alto"`
+	// Celdas es la FORMA real del área.
+	Celdas []Celda `json:"celdas,omitempty" bson:"celdas,omitempty"`
 	// Color es el tinte del área en el plano (índice del catálogo, ver
 	// ColoresArea). Es identidad visual, no dato de negocio.
 	Color string `json:"color,omitempty" bson:"color,omitempty"`
+}
+
+// CeldasEfectivas es la forma del área: las celdas guardadas, o el rectángulo
+// expandido para las áreas anteriores al dibujo libre.
+func (a Area) CeldasEfectivas() []Celda {
+	if len(a.Celdas) > 0 {
+		return a.Celdas
+	}
+	out := make([]Celda, 0, maxi(a.Ancho, 1)*maxi(a.Alto, 1))
+	for i := 0; i < maxi(a.Ancho, 1); i++ {
+		for j := 0; j < maxi(a.Alto, 1); j++ {
+			out = append(out, Celda{Columna: a.Columna + i, Fila: a.Fila + j})
+		}
+	}
+	return out
+}
+
+// CajaDe calcula el rectángulo que envuelve un conjunto de celdas.
+func CajaDe(celdas []Celda) (columna, fila, ancho, alto int) {
+	if len(celdas) == 0 {
+		return 0, 0, 0, 0
+	}
+	minC, minF := celdas[0].Columna, celdas[0].Fila
+	maxC, maxF := minC, minF
+	for _, c := range celdas[1:] {
+		if c.Columna < minC {
+			minC = c.Columna
+		}
+		if c.Columna > maxC {
+			maxC = c.Columna
+		}
+		if c.Fila < minF {
+			minF = c.Fila
+		}
+		if c.Fila > maxF {
+			maxF = c.Fila
+		}
+	}
+	return minC, minF, maxC - minC + 1, maxF - minF + 1
+}
+
+func maxi(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // Mostrador es un mueble de servicio del salón.
@@ -110,17 +173,38 @@ func seSolapan(c1, f1, a1, al1, c2, f2, a2, al2 int) bool {
 	return c1 < c2+a2 && c2 < c1+a1 && f1 < f2+al2 && f2 < f1+al1
 }
 
-// Cubre indica si el área cubre la celda.
-func (a Area) Cubre(c, r int) bool { return cubre(a.Columna, a.Fila, a.Ancho, a.Alto, c, r) }
+// Cubre indica si el área cubre la celda. Va POR CELDAS, no por la caja: en una
+// terraza en L la caja incluye el hueco, y una mesa en ese hueco no está en la
+// terraza.
+func (a Area) Cubre(c, r int) bool {
+	for _, x := range a.CeldasEfectivas() {
+		if x.Columna == c && x.Fila == r {
+			return true
+		}
+	}
+	return false
+}
 
 // Cubre indica si el mostrador cubre la celda. Es lo que impide poner una mesa
 // encima de la barra.
 func (m Mostrador) Cubre(c, r int) bool { return cubre(m.Columna, m.Fila, m.Ancho, m.Alto, c, r) }
 
-// SeSolapaCon indica si dos áreas comparten superficie. Dos áreas encimadas
+// SeSolapaCon indica si dos áreas comparten alguna CELDA. Dos áreas encimadas
 // harían ambigua la zona de las mesas de esa franja, así que no se permiten.
+//
+// Por celdas y no por cajas: dos zonas en L pueden encajar una en el hueco de
+// la otra sin tocarse, y compararlas por su caja las rechazaría sin motivo.
 func (a Area) SeSolapaCon(o Area) bool {
-	return seSolapan(a.Columna, a.Fila, a.Ancho, a.Alto, o.Columna, o.Fila, o.Ancho, o.Alto)
+	ocupadas := make(map[Celda]bool)
+	for _, c := range o.CeldasEfectivas() {
+		ocupadas[c] = true
+	}
+	for _, c := range a.CeldasEfectivas() {
+		if ocupadas[c] {
+			return true
+		}
+	}
+	return false
 }
 
 // SeSolapaCon indica si dos mostradores comparten superficie.

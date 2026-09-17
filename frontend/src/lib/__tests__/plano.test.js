@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   dimensionDeMesa, aforoMaximo, ocupaCelda, cabeEn, tamanoAlArrastrar, aforoAjustado,
-  cabeArea, cabeMostrador, rectDeArrastre, zonaDeCelda, siguienteNombreMesa,
+  cabeMostrador, rectDeArrastre, zonaDeCelda, siguienteNombreMesa,
+  celdasDeArea, cajaDe, areaCubre, celdasLibresParaArea, celdasCabenParaArea,
+  unirCeldas, quitarCeldas, ladosDeCelda,
   MAX_CELDAS_MESA,
 } from '../plano.js'
 
@@ -158,20 +160,73 @@ describe('mostradores', () => {
   })
 })
 
-describe('áreas', () => {
-  // Para esto están: contienen las mesas.
-  it('se superpone a mesas y muebles sin problema', () => {
-    // Un área sobre la barra y libre de otras áreas: para eso está, los contiene.
-    expect(cabeArea(conMuebles, 'nueva', 0, 3, 3, 2)).toBe(true)
+/* UN ÁREA ES UN CONJUNTO DE CELDAS, no un rectángulo: un local real tiene
+ * terrazas en L y salones con un recorte donde está la escalera. Obligar a que
+ * cada zona fuera rectangular forzaba a partir la terraza en dos, y con eso se
+ * pierde lo que el área existe para dar: UN nombre de zona para sus mesas. */
+describe('áreas — forma libre', () => {
+  // Una L: tres celdas en fila y una colgando de la primera.
+  const ele = {
+    id: 'L', nombre: 'Terraza',
+    celdas: [
+      { columna: 0, fila: 0 }, { columna: 1, fila: 0 }, { columna: 2, fila: 0 },
+      { columna: 0, fila: 1 },
+    ],
+  }
+
+  it('la pertenencia va por celdas, no por la caja que la envuelve', () => {
+    expect(areaCubre(ele, 0, 1)).toBe(true)
+    // (2,1) está dentro de la caja 3×2 pero FUERA de la L: una mesa ahí no está
+    // en la terraza.
+    expect(areaCubre(ele, 2, 1)).toBe(false)
   })
 
-  it('no se superpone a otra área: la zona quedaría ambigua', () => {
-    expect(cabeArea(conMuebles, 'nueva', 2, 1, 2, 2)).toBe(false)
-    expect(cabeArea(conMuebles, 'a1', 0, 0, 4, 3)).toBe(true) // agrandarse a sí misma
+  it('la caja es solo el rectángulo que la envuelve', () => {
+    expect(cajaDe(ele.celdas)).toEqual({ columna: 0, fila: 0, ancho: 3, alto: 2 })
   })
 
-  it('no se sale del plano', () => {
-    expect(cabeArea(conMuebles, 'nueva', 5, 4, 2, 2)).toBe(false)
+  // Las áreas guardadas antes del dibujo libre eran rectángulos: se leen igual,
+  // sin migrar nada.
+  it('un área vieja sin celdas se lee como su rectángulo', () => {
+    const vieja = { id: 'v', columna: 1, fila: 1, ancho: 2, alto: 2 }
+    expect(celdasDeArea(vieja)).toHaveLength(4)
+    expect(areaCubre(vieja, 2, 2)).toBe(true)
+    expect(areaCubre(vieja, 3, 3)).toBe(false)
+  })
+
+  it('dos zonas en L encajan una en el hueco de la otra', () => {
+    const plano = { filas: 5, columnas: 6, areas: [ele] }
+    // El hueco de la L es (1,1)…(2,1): otra zona puede ocuparlo.
+    expect(celdasCabenParaArea(plano, 'otra', [{ columna: 1, fila: 1 }, { columna: 2, fila: 1 }])).toBe(true)
+    // Pero no una celda que la L ya ocupa.
+    expect(celdasCabenParaArea(plano, 'otra', [{ columna: 0, fila: 1 }])).toBe(false)
+  })
+
+  it('al dibujar se toma lo que cabe, sin rechazar el trazo entero', () => {
+    const plano = { filas: 5, columnas: 6, areas: [ele] }
+    // Un trazo de 2×2 sobre la esquina: dos celdas son de la L y dos están libres.
+    const libres = celdasLibresParaArea(plano, 'nueva', 0, 0, 2, 2)
+    expect(libres).toHaveLength(1) // solo (1,1): (0,0),(1,0),(0,1) son de la L
+    expect(libres[0]).toEqual({ columna: 1, fila: 1 })
+  })
+
+  it('el trazo se recorta al plano en vez de salirse', () => {
+    const plano = { filas: 2, columnas: 2, areas: [] }
+    expect(celdasLibresParaArea(plano, 'x', 1, 1, 3, 3)).toHaveLength(1)
+    expect(celdasCabenParaArea(plano, 'x', [{ columna: 5, fila: 0 }])).toBe(false)
+  })
+
+  it('pintar dos veces la misma celda no la duplica', () => {
+    const base = [{ columna: 0, fila: 0 }]
+    expect(unirCeldas(base, [{ columna: 0, fila: 0 }, { columna: 1, fila: 0 }])).toHaveLength(2)
+    expect(quitarCeldas(base, [{ columna: 0, fila: 0 }])).toHaveLength(0)
+  })
+
+  // El contorno: solo se pinta el borde que da hacia afuera, o la zona se vería
+  // como una cuadrícula en vez de una superficie.
+  it('solo son borde los lados que dan fuera del área', () => {
+    expect(ladosDeCelda(ele.celdas, 0, 0)).toEqual({ arriba: true, abajo: false, izquierda: true, derecha: false })
+    expect(ladosDeCelda(ele.celdas, 2, 0)).toEqual({ arriba: true, abajo: true, izquierda: false, derecha: true })
   })
 })
 
@@ -183,6 +238,14 @@ describe('zonaDeCelda', () => {
     expect(zonaDeCelda([terraza], 1, 1)).toBe('Terraza')
     expect(zonaDeCelda([terraza], 1, 3)).toBe('')
     expect(zonaDeCelda([], 0, 0)).toBe('')
+  })
+
+  // Con forma libre, el hueco de una L NO es la zona: una mesa ahí no está en
+  // la terraza aunque la caja la incluya.
+  it('el hueco de una zona en L no pertenece a la zona', () => {
+    const ele = { nombre: 'Terraza', celdas: [{ columna: 0, fila: 0 }, { columna: 0, fila: 1 }, { columna: 1, fila: 1 }] }
+    expect(zonaDeCelda([ele], 0, 1)).toBe('Terraza')
+    expect(zonaDeCelda([ele], 1, 0)).toBe('')
   })
 })
 

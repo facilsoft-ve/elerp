@@ -107,25 +107,130 @@ export function cabeMostrador({ mesas = [], plano }, id, c, r, dc, df) {
   return true
 }
 
-/** cabeArea: un área SÍ se superpone a mesas y muebles —para eso está, los
- *  contiene—, pero NO a otra área: dos zonas encimadas harían ambigua la zona de
- *  las mesas de esa franja. */
-export function cabeArea({ plano }, id, c, r, dc, df) {
-  if (!dentroDelPlano(plano, c, r, dc, df)) return false
-  return !(plano?.areas || []).some((a) => a.id !== id && seSolapan(a, { columna: c, fila: r, ancho: dc, alto: df }))
+/* UN ÁREA ES UN CONJUNTO DE CELDAS, no un rectángulo.
+ *
+ * Un local real tiene terrazas en L, pórticos que rodean una esquina y salones
+ * con un recorte donde está la escalera. Obligar a que cada zona fuera un
+ * rectángulo forzaba a partir la terraza en «Terraza 1» y «Terraza 2», y con eso
+ * se pierde justo lo que el área existe para dar: UN nombre de zona para las
+ * mesas que están ahí.
+ *
+ * La caja (columna/fila/ancho/alto) se conserva para ubicar el rótulo y para
+ * leer las áreas guardadas antes del dibujo libre, donde la caja ES el área. */
+
+/** celdasDeArea es la forma del área: sus celdas, o el rectángulo expandido. */
+export function celdasDeArea(a) {
+  if (a?.celdas?.length) return a.celdas
+  const out = []
+  for (let i = 0; i < Math.max(a?.ancho || 1, 1); i++) {
+    for (let j = 0; j < Math.max(a?.alto || 1, 1); j++) {
+      out.push({ columna: (a?.columna || 0) + i, fila: (a?.fila || 0) + j })
+    }
+  }
+  return out
 }
 
-const seSolapan = (a, b) =>
-  (a.columna || 0) < (b.columna || 0) + (b.ancho || 1) &&
-  (b.columna || 0) < (a.columna || 0) + (a.ancho || 1) &&
-  (a.fila || 0) < (b.fila || 0) + (b.alto || 1) &&
-  (b.fila || 0) < (a.fila || 0) + (a.alto || 1)
+/** cajaDe es el rectángulo que envuelve un conjunto de celdas. No es la forma:
+ *  es dónde cabe el rótulo. */
+export function cajaDe(celdas) {
+  if (!celdas?.length) return { columna: 0, fila: 0, ancho: 0, alto: 0 }
+  let minC = celdas[0].columna, maxC = minC, minF = celdas[0].fila, maxF = minF
+  for (const c of celdas) {
+    if (c.columna < minC) minC = c.columna
+    if (c.columna > maxC) maxC = c.columna
+    if (c.fila < minF) minF = c.fila
+    if (c.fila > maxF) maxF = c.fila
+  }
+  return { columna: minC, fila: minF, ancho: maxC - minC + 1, alto: maxF - minF + 1 }
+}
+
+/** areaCubre: ¿el área incluye esta celda? Por celdas y no por la caja: en una
+ *  terraza en L la caja incluye el hueco, y una mesa en el hueco NO está en la
+ *  terraza. */
+export const areaCubre = (a, c, r) =>
+  celdasDeArea(a).some((x) => x.columna === c && x.fila === r)
+
+/** celdasLibresParaArea filtra, de un rectángulo dibujado, las celdas que se
+ *  pueden sumar a un área: dentro del plano y sin pisar OTRA área. Devolver las
+ *  que sirven en vez de rechazar el trazo entero es lo que hace que pintar una
+ *  zona contra el borde o junto a otra se sienta natural: se agrega lo que cabe
+ *  y nadie tiene que calcular el rectángulo exacto. */
+export function celdasLibresParaArea(plano, id, c, r, dc, df) {
+  const ajenas = new Set()
+  for (const a of plano?.areas || []) {
+    if (a.id === id) continue
+    for (const x of celdasDeArea(a)) ajenas.add(`${x.columna},${x.fila}`)
+  }
+  const out = []
+  for (let i = 0; i < dc; i++) {
+    for (let j = 0; j < df; j++) {
+      const cc = c + i, rr = r + j
+      if (cc < 0 || rr < 0 || cc >= (plano?.columnas || 0) || rr >= (plano?.filas || 0)) continue
+      if (ajenas.has(`${cc},${rr}`)) continue
+      out.push({ columna: cc, fila: rr })
+    }
+  }
+  return out
+}
+
+/** celdasCabenParaArea: ¿TODAS estas celdas están dentro del plano y libres de
+ *  otras áreas? Se usa al mover una zona entera: ahí no vale quedarse con «lo
+ *  que cabe», porque partir la terraza al arrastrarla no es lo que nadie pidió;
+ *  o entra completa o no se mueve. */
+export function celdasCabenParaArea(plano, id, celdas) {
+  if (!celdas?.length) return false
+  const ajenas = new Set()
+  for (const a of plano?.areas || []) {
+    if (a.id === id) continue
+    for (const x of celdasDeArea(a)) ajenas.add(`${x.columna},${x.fila}`)
+  }
+  return celdas.every((c) =>
+    c.columna >= 0 && c.fila >= 0 &&
+    c.columna < (plano?.columnas || 0) && c.fila < (plano?.filas || 0) &&
+    !ajenas.has(`${c.columna},${c.fila}`))
+}
+
+/** celdasDelRect enumera las celdas de un rectángulo dibujado. */
+export function celdasDelRect(c, r, dc, df) {
+  const out = []
+  for (let i = 0; i < dc; i++) for (let j = 0; j < df; j++) out.push({ columna: c + i, fila: r + j })
+  return out
+}
+
+/** unirCeldas / quitarCeldas mantienen el conjunto sin repetidos. Pintar dos
+ *  veces sobre la misma celda no puede duplicarla. */
+export function unirCeldas(base, extra) {
+  const clave = (x) => `${x.columna},${x.fila}`
+  const vistas = new Set((base || []).map(clave))
+  const out = [...(base || [])]
+  for (const c of extra || []) if (!vistas.has(clave(c))) { vistas.add(clave(c)); out.push(c) }
+  return out
+}
+
+export function quitarCeldas(base, quitar) {
+  const fuera = new Set((quitar || []).map((x) => `${x.columna},${x.fila}`))
+  return (base || []).filter((c) => !fuera.has(`${c.columna},${c.fila}`))
+}
+
+/** ladosDeCelda dice qué bordes de una celda son BORDE DEL ÁREA: los que dan a
+ *  una celda que no le pertenece. Es lo que dibuja el contorno de una forma en
+ *  L; pintar las cuatro aristas de cada celda mostraría una cuadrícula interna
+ *  en vez de una zona. */
+export function ladosDeCelda(celdas, c, r) {
+  const hay = new Set((celdas || []).map((x) => `${x.columna},${x.fila}`))
+  return {
+    arriba: !hay.has(`${c},${r - 1}`),
+    abajo: !hay.has(`${c},${r + 1}`),
+    izquierda: !hay.has(`${c - 1},${r}`),
+    derecha: !hay.has(`${c + 1},${r}`),
+  }
+}
 
 /** zonaDeCelda devuelve el nombre del área que contiene la celda. Es lo que
  *  deduce la zona de una mesa por DÓNDE ESTÁ, en vez de que alguien escriba
  *  «Terraza», «terraza» y «Terrraza» en tres fichas distintas. */
 export function zonaDeCelda(areas, c, r) {
-  const a = (areas || []).find((x) => cubreCelda(x, c, r))
+  const a = (areas || []).find((x) => areaCubre(x, c, r))
   return a ? a.nombre : ''
 }
 

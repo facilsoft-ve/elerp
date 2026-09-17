@@ -180,16 +180,31 @@ func saneaAreas(areas []mesa.Area, columnas, filas int) ([]mesa.Area, error) {
 		if a.Nombre == "" {
 			return nil, ErrAreaSinNombre
 		}
+		// La forma son las CELDAS. Un área guardada antes del dibujo libre no las
+		// trae y su rectángulo se expande acá, así que no hay nada que migrar.
+		celdas := make([]mesa.Celda, 0, len(a.Celdas))
+		vistas := map[mesa.Celda]bool{}
+		for _, c := range a.CeldasEfectivas() {
+			// Se RECORTA al plano en vez de rechazar: achicar la grilla no debería
+			// impedir guardar, solo dejar el área dentro de lo que quedó.
+			if c.Columna < 0 || c.Fila < 0 || c.Columna >= columnas || c.Fila >= filas {
+				continue
+			}
+			if vistas[c] {
+				continue
+			}
+			vistas[c] = true
+			celdas = append(celdas, c)
+		}
+		if len(celdas) == 0 {
+			continue // quedó fuera de la grilla entera: se descarta
+		}
+		a.Celdas = celdas
+		// La caja se DERIVA: es dónde va el rótulo, no la forma. Guardarla también
+		// deja legible el área para cualquier lector que aún espere un rectángulo.
+		a.Columna, a.Fila, a.Ancho, a.Alto = mesa.CajaDe(celdas)
 		if a.ID == "" {
 			a.ID = fmt.Sprintf("area_%d_%d", a.Columna, a.Fila)
-		}
-		a.Columna, a.Fila = maxInt(0, a.Columna), maxInt(0, a.Fila)
-		// Se RECORTA al plano en vez de rechazar: achicar la grilla no debería
-		// impedir guardar, solo dejar el área dentro de lo que quedó.
-		a.Ancho = clampInt(a.Ancho, 1, columnas-a.Columna)
-		a.Alto = clampInt(a.Alto, 1, filas-a.Fila)
-		if a.Columna >= columnas || a.Fila >= filas {
-			continue // quedó fuera de la grilla: se descarta
 		}
 		for _, otra := range out {
 			if a.SeSolapaCon(otra) {
