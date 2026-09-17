@@ -512,27 +512,50 @@ function MapaMesas() {
             className="relative mx-auto select-none touch-none"
             style={{ width: px(plano.columnas), height: px(plano.filas), cursor: puedeEditar ? 'crosshair' : 'default' }}>
 
-            {/* ÁREAS, debajo de todo: son superficie, no muebles. El rótulo sí
-                recibe el toque, porque es lo único de un área que se puede
-                agarrar sin robarle el clic a las mesas que contiene. */}
+            {/* ÁREAS, debajo de todo: son superficie, no muebles.
+                
+                QUIÉN RECIBE EL TOQUE depende de la herramienta, y es lo único
+                delicado de esta capa. Un área cubre las mesas que contiene: si
+                su cuerpo capturara el toque siempre, no se podría agarrar
+                ninguna mesa de la terraza. Pero si NUNCA lo capturara —como
+                estaba— arrastrar dentro de un área intentaría dibujar OTRA
+                área encima, que se rechaza por solaparse, y redimensionar la
+                zona se volvía imposible.
+                
+                Con la herramienta «Área» activa se está trabajando sobre las
+                zonas, así que el cuerpo manda; con cualquier otra, el cuerpo se
+                aparta y solo quedan el rótulo y los tiradores. */}
             {(plano.areas || []).map((a) => {
               const c = COLOR_AREA[a.color] || COLOR_AREA.violeta
               const activa = sel?.tipo === 'area' && sel.id === a.id
+              const cuerpoActivo = puedeEditar && herramienta === 'area'
+              const arrastrando = vista && vista.id === a.id && vista.clase === 'area'
               return (
-                <div key={a.id} className="absolute pointer-events-none rounded-lg"
-                  style={{ left: px(a.columna), top: px(a.fila), width: px(a.ancho), height: px(a.alto), background: c.bg, border: `2px ${activa ? 'solid' : 'dashed'} ${c.border}` }}>
+                <div key={a.id} onPointerDown={cuerpoActivo ? (e) => onElementoDown(e, 'area', a) : undefined}
+                  onPointerMove={cuerpoActivo ? onMove : undefined}
+                  onPointerUp={cuerpoActivo ? onUp : undefined} onPointerCancel={cuerpoActivo ? onUp : undefined}
+                  className={`absolute rounded-lg touch-none ${cuerpoActivo ? 'cursor-grab' : 'pointer-events-none'}`}
+                  style={{
+                    left: px(a.columna), top: px(a.fila), width: px(a.ancho), height: px(a.alto),
+                    background: c.bg, border: `2px ${activa ? 'solid' : 'dashed'} ${c.border}`,
+                    opacity: arrastrando ? 0.4 : 1,
+                  }}>
                   <span onPointerDown={(e) => onElementoDown(e, 'area', a)} onPointerMove={onMove}
                     onPointerUp={onUp} onPointerCancel={onUp}
                     className="pointer-events-auto absolute left-1 top-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold cursor-grab touch-none"
                     style={{ background: c.chip, color: c.text }}>
                     {a.nombre}
                   </span>
-                  {puedeEditar && activa ? (
-                    <span onPointerDown={(e) => onElementoDown(e, 'area', a, 'ambos')} onPointerMove={onMove}
+                  {/* Los tres tiradores, como en una mesa: un área que solo se
+                      pudiera agrandar en diagonal obliga a pelearse con el
+                      cursor para ensanchar una terraza de una fila de alto. */}
+                  {puedeEditar && activa ? TIRADORES.map((t) => (
+                    <span key={t.tipo} title={t.titulo}
+                      onPointerDown={(e) => onElementoDown(e, 'area', a, t.tipo)} onPointerMove={onMove}
                       onPointerUp={onUp} onPointerCancel={onUp}
                       className="pointer-events-auto absolute bg-white dark:bg-slate-900 border-2 rounded-full touch-none"
-                      style={{ width: 12, height: 12, right: -7, bottom: -7, cursor: 'nwse-resize', borderColor: c.border }} />
-                  ) : null}
+                      style={{ width: 14, height: 14, cursor: t.cursor, borderColor: c.text, ...t.pos }} />
+                  )) : null}
                 </div>
               )
             })}
@@ -570,7 +593,7 @@ function MapaMesas() {
                       onPointerDown={(e) => onElementoDown(e, 'mostrador', x, t.tipo)} onPointerMove={onMove}
                       onPointerUp={onUp} onPointerCancel={onUp}
                       className="absolute bg-white dark:bg-slate-900 border-2 border-elerp-500 rounded-full touch-none"
-                      style={{ width: 12, height: 12, cursor: t.cursor, ...t.pos }} />
+                      style={{ width: 14, height: 14, cursor: t.cursor, ...t.pos }} />
                   )) : null}
                 </div>
               )
@@ -604,7 +627,7 @@ function MapaMesas() {
                       onPointerDown={(e) => onElementoDown(e, 'mesa', m, t.tipo)} onPointerMove={onMove}
                       onPointerUp={onUp} onPointerCancel={onUp}
                       className="absolute bg-white dark:bg-slate-900 border-2 border-elerp-500 rounded-full touch-none"
-                      style={{ width: 12, height: 12, cursor: t.cursor, ...t.pos }} />
+                      style={{ width: 14, height: 14, cursor: t.cursor, ...t.pos }} />
                   )) : null}
                 </div>
               )
@@ -754,8 +777,8 @@ function PanelMostrador({ mostrador, tipos, puedeEditar, onCambio, onQuitar }) {
  * redimensionar del sistema, que es la única pista universal de «esto se
  * arrastra». */
 const TIRADORES = [
-  { tipo: 'ancho', titulo: 'Ensanchar', cursor: 'ew-resize', pos: { right: -7, top: '50%', marginTop: -6 } },
-  { tipo: 'alto', titulo: 'Alargar', cursor: 'ns-resize', pos: { bottom: -7, left: '50%', marginLeft: -6 } },
+  { tipo: 'ancho', titulo: 'Ensanchar', cursor: 'ew-resize', pos: { right: -7, top: '50%', marginTop: -7 } },
+  { tipo: 'alto', titulo: 'Alargar', cursor: 'ns-resize', pos: { bottom: -7, left: '50%', marginLeft: -7 } },
   { tipo: 'ambos', titulo: 'Redimensionar', cursor: 'nwse-resize', pos: { right: -7, bottom: -7 } },
 ]
 

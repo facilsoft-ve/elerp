@@ -35,7 +35,12 @@ import { useState } from 'react'
  *     marca. Es lo mismo que hacen los botones de Google y Apple, que también se
  *     quedan claros sobre fondo oscuro.
  */
-const LOGO_HUBMY = '/hubmy-logo.png'
+/* La ruta va con BASE_URL y no con «/hubmy-logo.png» a secas: la app se sirve
+ * bajo /app, y en la raíz del dominio vive el SITIO público. Con la ruta
+ * absoluta el navegador pedía elerp.tech/hubmy-logo.png, recibía el HTML de la
+ * landing con un 200 —no un 404, que se habría notado antes—, no podía
+ * decodificarlo como imagen y el botón se quedaba sin logo. */
+const LOGO_HUBMY = `${import.meta.env.BASE_URL}hubmy-logo.png`
 
 // La tipografía es la que especifica Hubmy para su botón.
 const FUENTE_HUBMY = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
