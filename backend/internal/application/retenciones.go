@@ -286,6 +286,12 @@ func (s *Service) RegistrarRetencionEmitida(empresaID, actor, origen, facturaCom
 			in.Porcentaje = 75
 		}
 	}
+	// Concepto del MAESTRO también acá: el comprobante que se le EMITE al
+	// proveedor es justo donde la tarifa de ISLR se equivocaba a mano.
+	in, errConcepto := s.resolverConcepto(empresaID, in)
+	if errConcepto != nil {
+		return fiscal.Retencion{}, errConcepto
+	}
 	base, monto, err := calcularRetencion(impuesto, fc.IVA, in)
 	if err != nil {
 		return fiscal.Retencion{}, err

@@ -3,6 +3,7 @@ package application_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/mornix/elerp/internal/application"
 	"github.com/mornix/elerp/internal/domain/fiscal"
@@ -192,6 +193,54 @@ func TestRegistrarRetencion_SinConceptoSigueComoAntes(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("registrar: %v", err)
+	}
+	if !casi(r.Porcentaje, 7) || !casi(r.MontoRetenido, 700) {
+		t.Errorf("lo tecleado debe seguir valiendo: %v%% → %v", r.Porcentaje, r.MontoRetenido)
+	}
+}
+
+// El comprobante que se EMITE al proveedor es justo donde la tarifa de ISLR se
+// erraba a mano (y donde equivocarse significa enterarle de más o de menos al
+// SENIAT). Igual que en la recibida, se manda un porcentaje absurdo a propósito:
+// el maestro tiene que pisarlo.
+func TestRetencionEmitida_LaTarifaSaleDelMaestro(t *testing.T) {
+	svc, st := nuevoServicio(t)
+	svc.ConConceptosISLR(st.ConceptosISLR)
+	sku := primerSKU(t, svc)
+	fc := ocFacturada(t, svc, sku, "F-MAESTRO", "00-MAESTRO", time.Now().UTC().Format(time.RFC3339Nano))
+
+	r, err := svc.RegistrarRetencionEmitida(empDemo, actorA, origenTst, fc.ID, application.EntradaRetencion{
+		Impuesto: fiscal.ImpuestoISLR, Fecha: "2026-09-16",
+		Base: 10000, Porcentaje: 99, // disparate: el maestro manda
+		ConceptoCodigo: "honorarios", Sujeto: fiscal.SujetoJuridicaDomiciliada,
+	})
+	if err != nil {
+		t.Fatalf("registrar emitida: %v", err)
+	}
+	if !casi(r.Porcentaje, 5) { // jurídica domiciliada: 5%, no 3%
+		t.Errorf("la tarifa debe salir del maestro (5%%), quedó %v", r.Porcentaje)
+	}
+	if !casi(r.MontoRetenido, 500) {
+		t.Errorf("retenido = %v, se esperaban 500", r.MontoRetenido)
+	}
+	if r.Concepto == "" {
+		t.Error("el nombre del concepto debería copiarse del maestro")
+	}
+}
+
+// Sin concepto elegido, la emitida sigue comportándose como antes.
+func TestRetencionEmitida_SinConceptoSigueComoAntes(t *testing.T) {
+	svc, st := nuevoServicio(t)
+	svc.ConConceptosISLR(st.ConceptosISLR)
+	sku := primerSKU(t, svc)
+	fc := ocFacturada(t, svc, sku, "F-AMANO", "00-AMANO", time.Now().UTC().Format(time.RFC3339Nano))
+
+	r, err := svc.RegistrarRetencionEmitida(empDemo, actorA, origenTst, fc.ID, application.EntradaRetencion{
+		Impuesto: fiscal.ImpuestoISLR, Fecha: "2026-09-16",
+		Base: 10000, Porcentaje: 7, Concepto: "a mano", Sustraendo: 0,
+	})
+	if err != nil {
+		t.Fatalf("registrar emitida: %v", err)
 	}
 	if !casi(r.Porcentaje, 7) || !casi(r.MontoRetenido, 700) {
 		t.Errorf("lo tecleado debe seguir valiendo: %v%% → %v", r.Porcentaje, r.MontoRetenido)

@@ -6,6 +6,7 @@ import { useData } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
 import { ComprobanteRetencionModal } from '../components/ComprobanteRetencion.jsx'
+import { SelectorConceptoISLR, esTextoLibre } from '../components/conceptoIslr.jsx'
 import {
   filtrarRetenciones, txtRetencionesIVA, xmlRetencionesISLR,
   descargarTexto, nombreArchivoRetenciones,
@@ -362,7 +363,11 @@ function AltaRetencionModal({ modo, documentos, onClose, onSaved, toast, ccy }) 
   const [fecha, setFecha] = useState(hoyISO())
   const [porcentaje, setPorcentaje] = useState('75')
   const [base, setBase] = useState('')
-  const [concepto, setConcepto] = useState('')
+  // El concepto de ISLR no es texto: es una elección contra el MAESTRO
+  // ({codigo, sujeto}) con salida a texto libre. `sugerencia` es lo que devolvió
+  // el servidor (tarifa, sustraendo y monto) y manda sobre lo tecleado.
+  const [concepto, setConcepto] = useState({ codigo: '', sujeto: '', texto: '' })
+  const [sugerencia, setSugerencia] = useState(null)
   const [sustraendo, setSustraendo] = useState('')
   const [touched, setTouched] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -401,10 +406,14 @@ function AltaRetencionModal({ modo, documentos, onClose, onSaved, toast, ccy }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [impuesto])
 
-  const pct = Number(porcentaje)
+  // Con un concepto del maestro la tarifa y el sustraendo SON los del maestro: el
+  // servidor los va a pisar igual al registrar, así que la pantalla muestra lo que
+  // se va a guardar y no lo que alguien tecleó.
+  const delMaestro = esISLR && !!sugerencia
+  const pct = delMaestro ? Number(sugerencia.porcentaje) : Number(porcentaje)
   const pctValido = Number.isFinite(pct) && pct > 0 && pct <= 100
   const baseCalc = esISLR ? (Number(base) || 0) : ivaDoc
-  const sust = esISLR ? (Number(sustraendo) || 0) : 0
+  const sust = esISLR ? (delMaestro ? Number(sugerencia.sustraendo) || 0 : Number(sustraendo) || 0) : 0
   const montoRetenido = pctValido ? Math.max(0, round2(baseCalc * (pct / 100) - sust)) : 0
 
   const errDoc = !docId ? `Elige una factura de ${esRecibida ? 'venta' : 'compra'}.` : ''
@@ -414,7 +423,10 @@ function AltaRetencionModal({ modo, documentos, onClose, onSaved, toast, ccy }) 
   const errFecha = !fecha ? 'La fecha es obligatoria.' : ''
   const errPct = !pctValido ? 'El porcentaje debe estar entre 0 y 100.' : ''
   const errBase = esISLR && !(baseCalc > 0) ? 'La base gravable debe ser mayor que cero.' : ''
-  const errConcepto = esISLR && !concepto.trim() ? 'Indica el concepto de la retención de ISLR.' : ''
+  const errConcepto = !esISLR ? ''
+    : esTextoLibre(concepto)
+      ? (!concepto.texto?.trim() ? 'Indica el concepto de la retención de ISLR.' : '')
+      : (!concepto.sujeto ? 'Indica a quién se le retiene: la tarifa depende de eso.' : '')
   const errMonto = esISLR && pctValido && baseCalc > 0 && !(montoRetenido > 0)
     ? 'El monto a retener queda en cero (revisa el porcentaje y el sustraendo).' : ''
   const puedeConfirmar = !errDoc && !errComp && !errFecha && !errPct && !errBase && !errConcepto && !errMonto
@@ -424,7 +436,20 @@ function AltaRetencionModal({ modo, documentos, onClose, onSaved, toast, ccy }) 
     if (!puedeConfirmar) return
     setBusy(true)
     const body = { impuesto, numeroComprobante: numeroComprobante.trim(), fecha, porcentaje: pct }
-    if (esISLR) { body.base = Number(base) || 0; body.concepto = concepto.trim(); body.sustraendo = Number(sustraendo) || 0 }
+    if (esISLR) {
+      body.base = Number(base) || 0
+      if (esTextoLibre(concepto)) {
+        // Fuera del maestro sigue valiendo lo tecleado, como antes.
+        body.concepto = (concepto.texto || '').trim()
+        body.sustraendo = Number(sustraendo) || 0
+      } else {
+        // Del maestro: va el CÓDIGO y el sujeto, y el servidor resuelve la tarifa.
+        // Mandar además el porcentaje sería decirlo dos veces, con el riesgo de
+        // que discrepen.
+        body.conceptoCodigo = concepto.codigo
+        body.sujeto = concepto.sujeto
+      }
+    }
     try {
       const creada = esRecibida ? await api.registrarRetencionRecibida(docId, body) : await api.registrarRetencionEmitida(docId, body)
       const num = creada?.numeroComprobante || body.numeroComprobante
@@ -513,26 +538,36 @@ function AltaRetencionModal({ modo, documentos, onClose, onSaved, toast, ccy }) 
             {/* ISLR: concepto, base gravable (sugerida del neto) y sustraendo. */}
             {esISLR ? (
               <>
-                <Field label="Concepto de la retención" required error={touched ? errConcepto : ''} hint="según la providencia">
-                  <Input value={concepto} onChange={(e) => setConcepto(e.target.value)}
-                    onBlur={() => setTouched(true)} invalid={touched && !!errConcepto}
-                    placeholder="Ej: Honorarios profesionales, servicios, alquiler…" />
-                </Field>
+                <SelectorConceptoISLR base={baseCalc} valor={concepto}
+                  onChange={(v, sug) => { setConcepto(v); setSugerencia(sug) }}
+                  error={touched ? errConcepto : ''} />
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Base gravable" required error={touched ? errBase : ''} hint="sugerida: neto del documento">
                     <Input type="number" min={0} step="any" className="num" value={base}
                       onChange={(e) => setBase(e.target.value)} onBlur={() => setTouched(true)} invalid={touched && !!errBase} placeholder="0,00" />
                   </Field>
-                  <Field label="Sustraendo" hint="opcional">
-                    <Input type="number" min={0} step="any" className="num" value={sustraendo}
-                      onChange={(e) => setSustraendo(e.target.value)} placeholder="0,00" />
-                  </Field>
+                  {delMaestro ? (
+                    <Field label="Sustraendo" hint="del concepto elegido">
+                      <div className="h-10 flex items-center px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-[13px] num">
+                        {fmtNum(sust, 2)}
+                      </div>
+                    </Field>
+                  ) : (
+                    <Field label="Sustraendo" hint="opcional">
+                      <Input type="number" min={0} step="any" className="num" value={sustraendo}
+                        onChange={(e) => setSustraendo(e.target.value)} placeholder="0,00" />
+                    </Field>
+                  )}
                 </div>
               </>
             ) : null}
 
             <Field label="Porcentaje retenido" required error={touched ? errPct : ''}>
-              {esISLR ? (
+              {delMaestro ? (
+                <div className="h-10 w-32 flex items-center px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-[13px] num">
+                  {fmtNum(pct, 2)}%
+                </div>
+              ) : esISLR ? (
                 <Input type="number" min={0} max={100} step="any" className="w-32 num"
                   value={porcentaje} onChange={(e) => setPorcentaje(e.target.value)}
                   onBlur={() => setTouched(true)} invalid={touched && !!errPct} placeholder="%" />

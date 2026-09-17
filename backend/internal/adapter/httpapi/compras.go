@@ -113,6 +113,10 @@ func (s *Server) handleRetencionEmitida(c *fiber.Ctx) error {
 		Base              float64 `json:"base"`       // solo ISLR
 		Concepto          string  `json:"concepto"`   // solo ISLR
 		Sustraendo        float64 `json:"sustraendo"` // solo ISLR
+		// Del MAESTRO de conceptos: cuando vienen, el servicio toma de ahí la
+		// tarifa y el sustraendo. Vacíos ⇒ se teclea todo, como antes.
+		ConceptoCodigo string `json:"conceptoCodigo"` // solo ISLR
+		Sujeto         string `json:"sujeto"`         // solo ISLR
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
@@ -121,6 +125,7 @@ func (s *Server) handleRetencionEmitida(c *fiber.Ctx) error {
 		application.EntradaRetencion{
 			Impuesto: in.Impuesto, NumeroComprobante: in.NumeroComprobante, Fecha: in.Fecha,
 			Porcentaje: in.Porcentaje, Base: in.Base, Concepto: in.Concepto, Sustraendo: in.Sustraendo,
+			ConceptoCodigo: in.ConceptoCodigo, Sujeto: in.Sujeto,
 		})
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})

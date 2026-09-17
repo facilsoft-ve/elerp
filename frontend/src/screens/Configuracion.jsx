@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
 import { invalidarMaestro } from '../components/alicuota.jsx'
 import { SelectorModelo, NotaCatalogo } from '../components/dispositivo.jsx'
+import { MapaSede, BotonMiUbicacion } from '../components/mapaSede.jsx'
 import { fechaCortaVE, explicarFallo } from '../components/tasa.jsx'
 import { monedaLabel, monedaNombre, monedaSimbolo, permiteFuenteBcv } from '../lib/precio.js'
 import { Promociones } from './Promociones.jsx'
@@ -961,16 +962,41 @@ function Sedes() {
 function SedeForm({ sede, empresaId, onClose, onSaved }) {
   const edicion = !!sede
   const [f, setF] = useState({ nombre: sede?.nombre || '', direccion: sede?.direccion || '' })
+  // La UBICACIÓN va aparte del resto del formulario porque va por otra ruta
+  // (PUT .../ubicacion) y porque se puede BORRAR: lat/lon en cero es «esta sede
+  // no verifica presencia», que es un estado legítimo y distinto de «todavía no
+  // la puse».
+  const [ubi, setUbi] = useState({
+    lat: Number(sede?.lat) || 0,
+    lon: Number(sede?.lon) || 0,
+    radioM: Number(sede?.radioM) || 0,
+  })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
+  const hayPunto = !!(ubi.lat || ubi.lon)
+  const radioEfectivo = ubi.radioM || RADIO_SEDE_DEFECTO
+  const ubicacionCambio = hayPunto || !!(sede?.lat || sede?.lon)
+
+  const errRadio = ubi.radioM !== 0 && (ubi.radioM < RADIO_SEDE_MIN || ubi.radioM > RADIO_SEDE_MAX)
+    ? `El radio debe estar entre ${RADIO_SEDE_MIN} y ${RADIO_SEDE_MAX} metros.` : ''
+
   const guardar = async () => {
     if (!f.nombre.trim()) { setError('El nombre es obligatorio.'); return }
+    if (errRadio) { setError(errRadio); return }
     setBusy(true); setError('')
     const payload = { nombre: f.nombre.trim(), direccion: f.direccion.trim() }
     try {
-      if (edicion) await api.actualizarSede(empresaId, sede.id, payload)
-      else await api.crearSede(empresaId, payload)
+      const guardada = edicion
+        ? await api.actualizarSede(empresaId, sede.id, payload)
+        : await api.crearSede(empresaId, payload)
+      // La ubicación se fija DESPUÉS: una sede nueva no tiene id hasta existir.
+      // Si esto falla, la sede ya quedó guardada: se avisa sin deshacerla, que
+      // sería peor (perder el nombre por no poder poner un punto en el mapa).
+      const sedeId = guardada?.id || sede?.id
+      if (sedeId && ubicacionCambio) {
+        await api.fijarUbicacionSede(empresaId, sedeId, { lat: ubi.lat, lon: ubi.lon, radioM: ubi.radioM })
+      }
       onSaved(payload.nombre, edicion)
       onClose()
     } catch (e) {
@@ -980,7 +1006,7 @@ function SedeForm({ sede, empresaId, onClose, onSaved }) {
   }
 
   return (
-    <Modal open onClose={onClose} size="sm" icon={<Icon.Home size={18} />}
+    <Modal open onClose={onClose} size="md" icon={<Icon.Home size={18} />}
       title={edicion ? 'Editar sede' : 'Nueva sede'} sub="Una tienda o local de la empresa"
       footer={<>
         <Button variant="ghost" onClick={onClose}>Cancelar</Button>
@@ -995,11 +1021,65 @@ function SedeForm({ sede, empresaId, onClose, onSaved }) {
           <Input value={f.direccion} placeholder="Av. Principal, Local 3"
             onChange={(e) => setF((s) => ({ ...s, direccion: e.target.value }))} />
         </Field>
+
+        {/* UBICACIÓN EN EL MAPA. Es lo que hace posible la presencia estricta:
+            sin coordenadas la verificación devuelve «no aplica» y quien tenga el
+            usuario abre turno desde su casa. */}
+        <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
+          <div className="flex items-start justify-between gap-3 pt-3 mb-2">
+            <div>
+              <div className="text-[13px] font-semibold">Ubicación del local</div>
+              <div className="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">
+                Toca el mapa donde está la sede. Se usa para verificar que quien abre turno
+                esté <strong>en el local</strong> (roles con presencia estricta).
+              </div>
+            </div>
+            <BotonMiUbicacion disabled={busy}
+              onUbicacion={({ lat, lon }) => setUbi((u) => ({ ...u, lat, lon }))} />
+          </div>
+
+          <MapaSede lat={ubi.lat} lon={ubi.lon} radioM={radioEfectivo} disabled={busy}
+            onCambio={({ lat, lon }) => setUbi((u) => ({ ...u, lat, lon }))} />
+
+          <div className="grid grid-cols-[1fr_auto] gap-3 items-end mt-3">
+            <Field label="Radio de tolerancia" error={errRadio}
+              hint={ubi.radioM ? 'metros alrededor del punto' : `por defecto: ${RADIO_SEDE_DEFECTO} m`}>
+              <div className="flex items-center gap-2">
+                <Input type="number" min={RADIO_SEDE_MIN} max={RADIO_SEDE_MAX} step={10} className="w-32 num"
+                  value={ubi.radioM || ''} placeholder={String(RADIO_SEDE_DEFECTO)} invalid={!!errRadio}
+                  onChange={(e) => setUbi((u) => ({ ...u, radioM: Number(e.target.value) || 0 }))} />
+                <span className="text-[12.5px] text-slate-500">m</span>
+              </div>
+            </Field>
+            {hayPunto ? (
+              <Button size="sm" variant="ghost" icon={<Icon.Trash size={14} />} disabled={busy}
+                onClick={() => setUbi({ lat: 0, lon: 0, radioM: 0 })}>Quitar ubicación</Button>
+            ) : null}
+          </div>
+
+          {hayPunto ? (
+            <div className="text-[11.5px] text-slate-500 dark:text-slate-400 mt-1.5 num">
+              {ubi.lat.toFixed(6)}, {ubi.lon.toFixed(6)}
+            </div>
+          ) : (
+            <div className="text-[11.5px] text-amber-700 dark:text-amber-400 mt-1.5 inline-flex items-center gap-1">
+              <Icon.CircleAlert size={13} /> Sin ubicación, esta sede no verifica presencia.
+            </div>
+          )}
+        </div>
+
         {error && f.nombre.trim() ? <div className="text-[12px] text-red-600 dark:text-red-400">{error}</div> : null}
       </div>
     </Modal>
   )
 }
+
+// Límites del radio de presencia. Espejo de application/presencia.go
+// (radioMinimoM/radioMaximoM) y de sede.RadioPorDefecto: el servidor vuelve a
+// validar, esto es para avisar antes de mandar.
+const RADIO_SEDE_MIN = 20
+const RADIO_SEDE_MAX = 5000
+const RADIO_SEDE_DEFECTO = 150
 
 /* --- Impuestos y alícuotas (compliance as configuration) ----------------- */
 
