@@ -63,7 +63,19 @@ function PorCobrar() {
   const { ui } = useUI()
   const toast = useToast()
   const [cobrando, setCobrando] = useState(null)
-  const { data: res, loading, error, reload: cargar } = useRecurso(() => api.porCobrar(), [])
+  const [vista, setVista] = useState('saldos')
+  // El histórico de cobros va aparte del resumen de saldos: se pide una vez y se
+  // recarga junto con él, porque reversar un cobro cambia los dos.
+  const [cobros, setCobros] = useState(null)
+  const [reversando, setReversando] = useState(null)
+  const { data: res, loading, error, reload: recargarSaldos } = useRecurso(() => api.porCobrar(), [])
+
+  const cargarCobros = useCallback(() => {
+    api.cobros().then(setCobros).catch(() => setCobros([]))
+  }, [])
+  useEffect(() => { cargarCobros() }, [cargarCobros])
+
+  const cargar = () => { recargarSaldos(); cargarCobros() }
 
   if (loading || error) {
     return <EstadoRecurso loading={loading} error={error} onRetry={cargar} cols={5} rows={4}
@@ -79,6 +91,18 @@ function PorCobrar() {
         <Kpi label="Clientes con saldo" valor={fmtNum(res.clientesConSaldo, 0)} />
       </div>
 
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <Segmented value={vista} onChange={setVista} size="sm"
+          options={[
+            { value: 'saldos', label: 'Saldos' },
+            { value: 'cobros', label: `Cobros${(cobros || []).length ? ' (' + cobros.length + ')' : ''}` },
+          ]} />
+      </div>
+
+      {vista === 'cobros' ? (
+        <HistorialCobros cobros={cobros} ccy="VES" rol={ui.rol}
+          onReversar={setReversando} reversando={reversando?.id || ''} />
+      ) : (
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
         {res.cuentas.length === 0 ? (
           <Empty icon={<Icon.Receipt size={22} />} title="No hay nada por cobrar"
@@ -132,6 +156,7 @@ function PorCobrar() {
           </div>
         )}
       </div>
+      )}
 
       <div className="mt-3 text-[11.5px] text-slate-400">
         El saldo no es un campo: se calcula como total facturado menos todo lo cobrado. Corregir un cobro
@@ -142,7 +167,142 @@ function PorCobrar() {
         <RegistrarCobroModal cuenta={cobrando} onClose={() => setCobrando(null)}
           onHecho={() => { cargar(); toast({ title: 'Cobro registrado', body: cobrando.clienteNombre }) }} />
       ) : null}
+
+      {reversando ? (
+        <ReversarCobroModal cobro={reversando} ccy="VES" onClose={() => setReversando(null)}
+          onHecho={() => { cargar(); toast({ title: 'Cobro reversado', body: reversando.documentoNumero }) }} />
+      ) : null}
     </div>
+  )
+}
+
+/* HistorialCobros — el espejo de HistorialPagos del lado de las cuentas por
+ * cobrar. Existía el reverso en el servidor (append-only, con su asiento) y la
+ * pantalla ya decía «corregir un cobro mal registrado se hace con su reverso»,
+ * pero no había dónde: los cobros no se veían ni se podían reversar. Registrar
+ * un abono en la factura equivocada era definitivo.
+ */
+function HistorialCobros({ cobros, ccy, rol, onReversar, reversando }) {
+  if (cobros === null) return <div className="p-4"><TableSkeleton rows={3} cols={5} /></div>
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
+      {cobros.length === 0 ? (
+        <Empty icon={<Icon.Banknote size={22} />} title="Aún no se han registrado cobros"
+          body="Cuando registres el abono de una factura a crédito desde la pestaña Saldos, aparecerá aquí con su método y referencia." />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60">
+                <th className="py-2.5 px-3 font-medium">Fecha</th>
+                <th className="py-2.5 pr-3 font-medium">Cliente</th>
+                <th className="py-2.5 pr-3 font-medium">Factura</th>
+                <th className="py-2.5 pr-3 font-medium">Método</th>
+                <th className="py-2.5 pr-3 font-medium">Referencia</th>
+                <th className="py-2.5 pr-3 font-medium text-right">Monto</th>
+                <th className="py-2.5 pr-3 font-medium text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cobros.map((c) => {
+                // Un cobro ya reversado no se puede reversar otra vez. El servidor
+                // lo impide igual; acá se evita ofrecer un botón que va a fallar.
+                const yaReversado = cobros.some((x) => x.reverso && x.refCobroId === c.id)
+                return (
+                  <tr key={c.id} className={`border-b border-slate-100 dark:border-slate-800/70 ${c.reverso ? 'bg-red-50/40 dark:bg-red-950/20' : ''}`}>
+                    <td className="py-2.5 px-3 text-[12.5px] text-slate-500 num">{fmtDate(c.fecha)}</td>
+                    <td className="py-2.5 pr-3 text-[13px]">
+                      <div className="font-medium">{c.clienteNombre || 'Sin cliente'}</div>
+                      {c.reverso ? <Badge size="sm" color="red">reverso</Badge> : null}
+                      {c.motivo ? <div className="text-[11px] text-slate-400 mt-0.5">{c.motivo}</div> : null}
+                    </td>
+                    <td className="py-2.5 pr-3 mono text-[12px] text-slate-500">{c.documentoNumero || '—'}</td>
+                    <td className="py-2.5 pr-3 text-[12.5px] text-slate-500">{metodoLabelProveedor(c.metodo)}</td>
+                    <td className="py-2.5 pr-3 mono text-[12px] text-slate-500">{c.referencia || '—'}</td>
+                    <td className={`py-2.5 pr-3 text-right num font-medium private-mask ${c.reverso ? 'text-[#B3362C] dark:text-red-400' : ''}`}>
+                      {c.reverso ? '-' : ''}{fmtCurrency(Math.abs(c.montoBs), ccy)}
+                      {c.moneda && c.moneda !== 'VES' ? (
+                        <div className="text-[11px] text-slate-400">{fmtNum(Math.abs(c.monto), 2)} {c.moneda}</div>
+                      ) : null}
+                    </td>
+                    <td className="py-2.5 pr-3 text-right">
+                      {c.reverso || yaReversado ? (
+                        <span className="text-[11.5px] text-slate-400">{yaReversado ? 'reversado' : '—'}</span>
+                      ) : puedeCobrar(rol) ? (
+                        <Button size="sm" variant="destructive" icon={<Icon.Refresh size={13} />}
+                          loading={reversando === c.id} onClick={() => onReversar(c)}>
+                          Reversar
+                        </Button>
+                      ) : null}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* El reverso PIDE MOTIVO —el servidor lo exige— y por eso es un modal y no un
+ * confirm: un motivo genérico escrito por la aplicación no le sirve a nadie
+ * después, y este es justo el rastro que la contadora va a leer en seis meses. */
+function ReversarCobroModal({ cobro, ccy, onClose, onHecho }) {
+  const [motivo, setMotivo] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [touched, setTouched] = useState(false)
+
+  const errMotivo = !motivo.trim() ? 'Escribe por qué se reversa: queda en el histórico y en la auditoría.' : ''
+
+  const confirmar = async () => {
+    setTouched(true)
+    if (errMotivo) return
+    setBusy(true); setError('')
+    try {
+      await api.reversarCobro(cobro.id, motivo.trim())
+      onHecho()
+      onClose()
+    } catch (e) {
+      setError(e?.message || 'No se pudo reversar.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} size="sm" icon={<Icon.Refresh size={18} />}
+      title="Reversar cobro" sub={`${cobro.clienteNombre || 'Sin cliente'} · ${cobro.documentoNumero || ''}`}
+      footer={<>
+        <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+        <Button variant="destructive" onClick={confirmar} loading={busy} icon={<Icon.Refresh size={16} />}>
+          Reversar cobro
+        </Button>
+      </>}>
+      <div className="space-y-3.5">
+        <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3.5 py-3 space-y-1.5 text-[12.5px]">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-500">Monto cobrado</span>
+            <span className="num font-semibold private-mask">{fmtCurrency(Math.abs(cobro.montoBs), ccy)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-slate-500">Fecha</span><span className="num">{fmtDate(cobro.fecha)}</span>
+          </div>
+        </div>
+        <div className="flex items-start gap-2 text-[12.5px] text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/60 rounded-lg px-3 py-2.5">
+          <Icon.CircleAlert size={15} className="mt-0.5 shrink-0" />
+          <span>El cobro original <strong>no se borra</strong>: se anexa un reverso que lo anula, con su
+            asiento. El saldo de la factura vuelve a subir por ese monto.</span>
+        </div>
+        <Field label="Motivo del reverso" required error={touched ? errMotivo : ''}>
+          <Input value={motivo} autoFocus placeholder="Ej: se registró en la factura equivocada"
+            onChange={(e) => setMotivo(e.target.value)} onBlur={() => setTouched(true)}
+            invalid={touched && !!errMotivo} />
+        </Field>
+        {error ? <div className="text-[12px] text-red-600 dark:text-red-400">{error}</div> : null}
+      </div>
+    </Modal>
   )
 }
 
