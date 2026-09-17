@@ -149,6 +149,7 @@ func (s *Server) handleImportarProductos(c *fiber.Ctx) error {
 			Precio            float64 `json:"precio"`
 			Moneda            string  `json:"moneda"`
 			ExentoIVA         bool    `json:"exentoIva"`
+			AlicuotaCodigo    string  `json:"alicuotaCodigo"`
 			CodigoBarras      string  `json:"codigoBarras"`
 			ExistenciaInicial float64 `json:"existenciaInicial"`
 		} `json:"filas"`
@@ -161,7 +162,8 @@ func (s *Server) handleImportarProductos(c *fiber.Ctx) error {
 		filas = append(filas, application.FilaImportacionProducto{
 			SKU: f.SKU, Nombre: f.Nombre, Rubro: f.Rubro, Unidad: f.Unidad,
 			TipoVenta: f.TipoVenta, Precio: f.Precio, Moneda: f.Moneda,
-			ExentoIVA: f.ExentoIVA, CodigoBarras: f.CodigoBarras, ExistenciaInicial: f.ExistenciaInicial,
+			ExentoIVA: f.ExentoIVA, AlicuotaCodigo: f.AlicuotaCodigo,
+			CodigoBarras: f.CodigoBarras, ExistenciaInicial: f.ExistenciaInicial,
 		})
 	}
 	res, err := s.svc.ImportarProductos(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c), filas, in.Confirmar)
@@ -206,7 +208,7 @@ func (s *Server) handleActualizarProducto(c *fiber.Ctx) error {
 		Nombre: in.Nombre, Rubro: in.Rubro, TipoVenta: in.TipoVenta, UnidadBase: in.UnidadBase,
 		Precio: in.Precio, Moneda: in.Moneda,
 		CodigoBarras: in.CodigoBarras, ExentoIVA: in.ExentoIVA, AlicuotaCodigo: in.AlicuotaCodigo,
-		Activo: in.Activo,
+		Activo:  in.Activo,
 		EsCombo: in.EsCombo, Componentes: in.Componentes,
 		EsPlato: in.EsPlato, Receta: in.Receta, EsInsumo: in.EsInsumo,
 		ComanderaID: in.ComanderaID,

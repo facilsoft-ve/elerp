@@ -8,7 +8,7 @@ import { useData, useTasa } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
 import { useSesionCaja, AbrirCajaModal, SinCajaAbierta, BarraTurno } from './Caja.jsx'
-import { RejillaProductos, DisponibilidadModal } from '../components/producto.jsx'
+import { RejillaProductos, DisponibilidadModal, EtiquetaAlicuota } from '../components/producto.jsx'
 import { TasaModal, fechaCortaVE } from '../components/tasa.jsx'
 import { precioEnBs, monedaDe, porCodigo } from '../lib/precio.js'
 import { CobroModal, VentaEmitida } from './Cobro.jsx'
@@ -159,6 +159,11 @@ export function POS({ onModoCaja }) {
     searchRef.current?.focus()
   }
 
+  // fichaDe: el producto del catálogo detrás de un renglón del carrito. El
+  // renglón guarda solo `exento`; la clasificación (reducida, suntuaria) vive en
+  // la ficha y se lee acá para ANOTARLA, sin tocar lo que se envía al servidor.
+  const fichaDe = (sku) => productos.find((p) => p.sku === sku)
+
   const setLinea = (sku, k, v) => setCart((c) => c.map((l) => (l.sku === sku ? { ...l, [k]: v } : l)))
   const rmLinea = (sku) => setCart((c) => c.filter((l) => l.sku !== sku))
 
@@ -241,7 +246,7 @@ export function POS({ onModoCaja }) {
                         <div className="text-[11px] text-slate-400 num">
                           {p.sku}
                           {p.codigoBarras ? ` · ${p.codigoBarras}` : ''}
-                          {p.exentoIva ? ' · exento' : ''}
+                          <EtiquetaAlicuota producto={p} />
                         </div>
                       </div>
                       <div className="num text-[12.5px] font-medium">
@@ -294,7 +299,8 @@ export function POS({ onModoCaja }) {
                           <div className="font-medium text-[13px]">{l.nombre}</div>
                           <div className="text-[11px] text-slate-400 num">
                             {l.sku}
-                            {l.exento ? <span className="ml-1.5 text-slate-500">exento de IVA</span> : null}
+                            <EtiquetaAlicuota producto={fichaDe(l.sku)} exento={l.exento}
+                              prefijo="" className="ml-1.5 text-slate-500" />
                             {l.monedaOriginal === 'USD' ? <span className="ml-1.5 text-slate-500">precio en US$</span> : null}
                           </div>
                         </td>

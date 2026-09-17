@@ -13,6 +13,7 @@ import { explotarCombo } from '../lib/combo.js'
 import { NuevoClienteModal, puedeCrearCliente } from './POS.jsx'
 import { CobroModal } from './Cobro.jsx'
 import { ComprobanteModal, comprobanteDeCotizacion } from '../components/ComprobantePDF.jsx'
+import { EtiquetaAlicuota } from '../components/producto.jsx'
 
 /* Ventas (forma libre). El ciclo es de tres etapas, y el vocabulario lo respeta:
  *
@@ -518,6 +519,10 @@ function FormCotizacion({ cotizacion, onVolver, onSaved, toast }) {
     }
   }
 
+  // fichaDe: el producto detrás de un renglón. La línea guarda solo `exento`; la
+  // clasificación (reducida, suntuaria) está en la ficha y se lee para anotarla.
+  const fichaDe = (sku) => productos.find((p) => p.sku === sku)
+
   const setLinea = (sku, k, v) => setLineas((c) => c.map((l) => (l.sku === sku ? { ...l, [k]: v } : l)))
   const rmLinea = (sku) => setLineas((c) => c.filter((l) => l.sku !== sku))
 
@@ -768,7 +773,7 @@ function FormCotizacion({ cotizacion, onVolver, onSaved, toast }) {
                       <span className="truncate">{p.nombre}</span>
                       {p.esCombo ? <Badge size="sm" color="huberp">Combo</Badge> : null}
                     </div>
-                    <div className="text-[11px] text-slate-400 num">{p.sku}{p.esCombo ? ` · ${(p.componentes || []).length} ítems` : (p.exentoIva ? ' · exento' : '')}</div>
+                    <div className="text-[11px] text-slate-400 num">{p.sku}{p.esCombo ? ` · ${(p.componentes || []).length} ítems` : <EtiquetaAlicuota producto={p} />}</div>
                   </div>
                   <div className="num text-[12.5px] font-medium">{fmtCurrency(p.precio, monedaDe(p, monedaEmpresa))}</div>
                 </button>
@@ -801,7 +806,7 @@ function FormCotizacion({ cotizacion, onVolver, onSaved, toast }) {
                   <tr key={l.sku} className="border-b border-slate-100 dark:border-slate-800/70">
                     <td className="py-2 px-3 align-top">
                       <div className="font-medium text-[13px]">{l.nombre}</div>
-                      <div className="text-[11px] text-slate-400 num">{l.sku}{l.exento ? <span className="ml-1.5 text-slate-500">exento de IVA</span> : null}</div>
+                      <div className="text-[11px] text-slate-400 num">{l.sku}<EtiquetaAlicuota producto={fichaDe(l.sku)} exento={l.exento} prefijo="" className="ml-1.5 text-slate-500" /></div>
                     </td>
                     <td className="py-2 pr-3">
                       <input type="text" value={l.descripcion} onChange={(e) => setLinea(l.sku, 'descripcion', e.target.value)}
@@ -989,7 +994,7 @@ function DetalleCotizacion({ cot, gestiona, onVolver, onConfirmar, onFacturar, o
               {(cot.lineas || []).map((l, i) => (
                 <div key={i} className="flex items-center gap-3 px-3 py-2">
                   <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-medium truncate">{l.nombre || l.sku}{l.exento ? <span className="ml-1.5 text-[11px] text-slate-400">exento</span> : null}</div>
+                    <div className="text-[13px] font-medium truncate">{l.nombre || l.sku}<EtiquetaAlicuota producto={(db.PRODUCTOS || []).find((p) => p.sku === l.sku)} exento={l.exento} prefijo="" className="ml-1.5 text-[11px] text-slate-400" /></div>
                     <div className="text-[11px] text-slate-400 num">{fmtNum(l.cantidad)} × {fmtCurrency(l.precioUnitario, ccy)}</div>
                   </div>
                   <div className="num text-[13px] font-medium private-mask">{fmtCurrency(l.total, ccy)}</div>

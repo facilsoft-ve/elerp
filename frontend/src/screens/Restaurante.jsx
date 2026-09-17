@@ -11,6 +11,7 @@ import { api } from '../lib/api.js'
 import { TurnosSalon } from './TurnosSalon.jsx'
 import { SelectorModelo, NotaCatalogo } from '../components/dispositivo.jsx'
 import { precioEnBs, monedaDe } from '../lib/precio.js'
+import { EtiquetaAlicuota } from '../components/producto.jsx'
 import { fmtCurrency } from '../lib/format.js'
 
 /* Módulo Restaurante — Fase 0: el MAPA DE MESAS (editor de arrastrar y soltar) y
@@ -1050,7 +1051,7 @@ function MenuProductos({ productos, monedaEmpresa, onAgregar, onClose }) {
             <button key={p.sku} onClick={() => onAgregar(p)}
               className="text-left rounded-xl border border-slate-200 dark:border-slate-800 px-3.5 py-3 min-h-[4.5rem] hover:border-elerp-400 hover:bg-elerp-50/40 dark:hover:bg-elerp-900/20 active:scale-[0.98] transition-all">
               <div className="text-[15px] font-semibold leading-snug line-clamp-2">{p.nombre}</div>
-              <div className="text-[13px] text-slate-500 mt-1">{fmtCurrency(p.precio, monedaDe(p, monedaEmpresa))}{p.exentoIva ? ' · exento' : ''}</div>
+              <div className="text-[13px] text-slate-500 mt-1">{fmtCurrency(p.precio, monedaDe(p, monedaEmpresa))}<EtiquetaAlicuota producto={p} /></div>
             </button>
           ))}
           {lista.length === 0 ? <div className="text-[12.5px] text-slate-400 col-span-2 py-4 text-center">Sin resultados.</div> : null}

@@ -7,7 +7,7 @@ import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
 import { SelectorAlicuota, codigoEfectivo, useAlicuotas, etiquetaAlicuota } from '../components/alicuota.jsx'
 import { PrecioDual, fechaCortaVE } from '../components/tasa.jsx'
-import { ImagenProducto } from '../components/producto.jsx'
+import { ImagenProducto, EtiquetaAlicuota } from '../components/producto.jsx'
 import { monedaDe, precioEnMoneda, precioEnBs } from '../lib/precio.js'
 
 // round2: redondeo a 2 decimales (misma regla que el backend) para el prorrateo y
@@ -905,7 +905,7 @@ function EtiquetaProducto({ producto, monedaEmpresa, onClose }) {
           {producto.tipoVenta === 'peso' ? <span className="text-[14px] font-normal text-slate-500"> /kg</span> : null}
         </div>
         <div className="mono text-[15px] tracking-[0.18em] mt-2">{producto.codigoBarras || producto.sku}</div>
-        <div className="text-[10.5px] text-slate-500 mt-1">{producto.sku}{producto.exentoIva ? ' · exento de IVA' : ''}</div>
+        <div className="text-[10.5px] text-slate-500 mt-1">{producto.sku}<EtiquetaAlicuota producto={producto} /></div>
       </div>
       <div className="mt-3 text-[11.5px] text-slate-500">
         Falta el gráfico de barras: se dibuja con el módulo de impresión, que es el que habla con la
@@ -964,17 +964,21 @@ function filasDeCSV(texto) {
     sku: get(row, 'sku'), nombre: get(row, 'nombre'), rubro: get(row, 'rubro'),
     unidad: get(row, 'unidad'), tipoVenta: get(row, 'tipoventa'),
     precio: numeroCSV(get(row, 'precio')), moneda: get(row, 'moneda'),
-    exentoIva: boolCSV(get(row, 'exentoiva')), codigoBarras: get(row, 'codigobarras'),
+    exentoIva: boolCSV(get(row, 'exentoiva')),
+    // Columna OPCIONAL: si viene, manda ella sobre exentoIva (el servidor la
+    // valida contra el maestro). Si no viene, se importa como siempre.
+    alicuotaCodigo: get(row, 'alicuotacodigo'),
+    codigoBarras: get(row, 'codigobarras'),
     existenciaInicial: numeroCSV(get(row, 'existenciainicial')),
   }))
   return { filas, error: '' }
 }
 
 function descargarPlantillaProductos() {
-  const headers = ['sku', 'nombre', 'rubro', 'unidad', 'tipoVenta', 'precio', 'moneda', 'exentoIva', 'codigoBarras', 'existenciaInicial']
+  const headers = ['sku', 'nombre', 'rubro', 'unidad', 'tipoVenta', 'precio', 'moneda', 'exentoIva', 'alicuotaCodigo', 'codigoBarras', 'existenciaInicial']
   const ejemplos = [
-    ['TOR-034', 'Tornillo 3/4" (100u)', 'Ferretería', 'caja', 'unidad', '5.50', 'VES', 'no', '', '30'],
-    ['CEM-42', 'Cemento gris 42,5 kg', 'Construcción', 'kg', 'unidad', '120', 'VES', 'no', '7501234567890', '40'],
+    ['TOR-034', 'Tornillo 3/4" (100u)', 'Ferretería', 'caja', 'unidad', '5.50', 'VES', 'no', 'general', '', '30'],
+    ['CEM-42', 'Cemento gris 42,5 kg', 'Construcción', 'kg', 'unidad', '120', 'VES', 'no', 'general', '7501234567890', '40'],
   ]
   const enc = (c) => (/[",;\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c)
   const csv = [headers, ...ejemplos].map((r) => r.map(enc).join(',')).join('\r\n')
@@ -992,6 +996,9 @@ const ESTADO_IMPORT = {
 }
 
 function ModalCargaMasiva({ unidades, onClose, onSaved, toast }) {
+  // El maestro de impuestos se lee para poder DECIR qué códigos acepta la columna
+  // opcional; la validación de verdad la hace el servidor.
+  const alicuotas = useAlicuotas()
   const [filas, setFilas] = useState(null)
   const [nombreArch, setNombreArch] = useState('')
   const [parseErr, setParseErr] = useState('')
@@ -1055,7 +1062,7 @@ function ModalCargaMasiva({ unidades, onClose, onSaved, toast }) {
         {/* Paso 1: plantilla + archivo */}
         <div className="flex items-start gap-2 text-[12.5px] text-slate-500 bg-slate-50 dark:bg-slate-800/60 rounded-lg px-3 py-2.5">
           <Icon.CircleAlert size={15} className="mt-0.5 shrink-0" />
-          <span>Es <strong>UPSERT</strong>: un SKU que ya existe se <strong>actualiza</strong> (te pediremos confirmarlo). La <strong>unidad</strong> debe existir en el maestro. La <strong>existencia inicial</strong> sólo se carga en productos nuevos, como ajuste auditado.</span>
+          <span>Es <strong>UPSERT</strong>: un SKU que ya existe se <strong>actualiza</strong> (te pediremos confirmarlo). La <strong>unidad</strong> debe existir en el maestro. La <strong>existencia inicial</strong> sólo se carga en productos nuevos, como ajuste auditado. La columna <strong>alicuotaCodigo</strong> es opcional y manda sobre <strong>exentoIva</strong>; si no la pones, el archivo se importa como siempre y un producto que ya existía conserva su clasificación.</span>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -1069,6 +1076,10 @@ function ModalCargaMasiva({ unidades, onClose, onSaved, toast }) {
 
         {simbolos.length ? (
           <div className="text-[11.5px] text-slate-400">Unidades válidas del maestro: <span className="num text-slate-500">{simbolos.join(', ')}</span></div>
+        ) : null}
+
+        {alicuotas.length ? (
+          <div className="text-[11.5px] text-slate-400">Alícuotas válidas (columna <span className="num">alicuotaCodigo</span>): <span className="num text-slate-500">{alicuotas.map((a) => a.codigo).join(', ')}</span></div>
         ) : null}
 
         {parseErr ? (

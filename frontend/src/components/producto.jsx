@@ -4,6 +4,7 @@ import { Modal, Badge } from './primitives.jsx'
 import { fmtCurrency, fmtNum } from '../lib/format.js'
 import { api } from '../lib/api.js'
 import { monedaDe, precioEnMoneda } from '../lib/precio.js'
+import { useAlicuotas, codigoEfectivo } from './alicuota.jsx'
 
 /* Tarjeta de producto de la rejilla del punto de venta.
  *
@@ -201,4 +202,52 @@ export function RejillaProductos({ productos, existenciaDe, onAgregar, onInfo, c
       ))}
     </div>
   )
+}
+
+/* CÓMO SE ANOTA LA ALÍCUOTA EN UN RENGLÓN DE VENTA
+ *
+ * El punto de venta, las cotizaciones y la comandera escribían «exento» leyendo
+ * el booleano `exentoIva`. Con el maestro de alícuotas eso se quedó corto: un
+ * producto SUNTUARIO paga 16 % + 15 % y hasta que no se factura se ve idéntico a
+ * uno general — quien cobra no tiene cómo saberlo.
+ *
+ * Lo que se escribe, pensado para no mover lo que ya funciona:
+ *
+ *   · exento                → «exento», igual que siempre;
+ *   · general sin recargo   → NADA, igual que siempre. Es lo que todo el mundo
+ *     asume, y repetirlo en cada renglón sería ruido en una pantalla de cobro;
+ *   · reducida o suntuaria  → la tasa, que es justo lo que hoy no se ve.
+ *
+ * COMPATIBILIDAD: un producto sin clasificar (catálogo viejo, no migrado) cae en
+ * `codigoEfectivo` — su booleano — y se ve exactamente como antes. Si el maestro
+ * todavía no cargó, tampoco se inventa nada: se vuelve al booleano.
+ */
+const pctAlicuota = (f) => `${Math.round((f || 0) * 10000) / 100}%`
+
+export function textoAlicuota(producto, alicuotas) {
+  const cod = codigoEfectivo(producto)
+  const a = (alicuotas || []).find((x) => x.codigo === cod)
+  // Sin maestro (o con un código que ya no está vigente) no se clasifica nada:
+  // se dice lo mismo que se decía antes de que existieran las alícuotas.
+  if (!a) return cod === 'exento' ? 'exento' : ''
+  if (a.tipo === 'exento') return 'exento'
+  // El recargo suntuario se muestra SUMANDO, no como un 31 % de una pieza: así
+  // es como se declara y como hay que entenderlo.
+  if (a.adicional > 0) return `IVA ${pctAlicuota(a.porcentaje)} + ${pctAlicuota(a.adicional)}`
+  if (a.tipo === 'general') return ''
+  return `IVA ${pctAlicuota(a.porcentaje)}`
+}
+
+/* EtiquetaAlicuota escribe eso al lado del código del producto.
+ *
+ * `producto` es la ficha del catálogo. `exento` es el respaldo para los renglones
+ * ya guardados (carrito, líneas de una cotización), que solo llevan ese booleano:
+ * si el renglón dice exento manda el renglón — es lo que ese documento cobra—, y
+ * si no, se lee la clasificación de la ficha. */
+export function EtiquetaAlicuota({ producto, exento = false, prefijo = ' · ', className = '' }) {
+  const alicuotas = useAlicuotas()
+  const ficha = exento ? { exentoIva: true } : producto
+  const texto = textoAlicuota(ficha, alicuotas)
+  if (!texto) return null
+  return <span className={className}>{prefijo}{texto}</span>
 }

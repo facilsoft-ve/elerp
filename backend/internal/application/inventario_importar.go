@@ -24,6 +24,14 @@ import (
 //   - La existencia inicial sólo se carga en productos NUEVOS (ajuste auditado
 //     "carga inicial"); en un producto existente se ignora para no duplicar stock
 //     —el ajuste de existencia de un producto ya cargado se hace por su Kardex—.
+//   - La ALÍCUOTA es opcional y manda sobre el booleano. La columna `exentoIva`
+//     sola solo sabe distinguir exento de general: un catálogo con bienes
+//     suntuarios o con tasa reducida entraba entero mal clasificado. Si la fila
+//     trae `alicuotaCodigo` se valida contra el maestro VIGENTE (un código que no
+//     existe es error de fila, no un producto facturando a la tasa de respaldo en
+//     silencio) y se aplica; si NO la trae, se conserva exactamente el
+//     comportamiento anterior: manda `exentoIva`, y en un producto que ya existía
+//     su clasificación NO se toca.
 
 // Estados por fila del resultado de importación.
 const (
@@ -35,14 +43,17 @@ const (
 // FilaImportacionProducto es una fila cruda de la carga masiva (ya parseada del
 // CSV por el adaptador HTTP). Los strings llegan sin normalizar.
 type FilaImportacionProducto struct {
-	SKU               string
-	Nombre            string
-	Rubro             string
-	Unidad            string // símbolo del maestro; vacío ⇒ unidad por defecto
-	TipoVenta         string // "" | unidad | peso
-	Precio            float64
-	Moneda            string // "" ⇒ moneda principal de la empresa
-	ExentoIVA         bool
+	SKU       string
+	Nombre    string
+	Rubro     string
+	Unidad    string // símbolo del maestro; vacío ⇒ unidad por defecto
+	TipoVenta string // "" | unidad | peso
+	Precio    float64
+	Moneda    string // "" ⇒ moneda principal de la empresa
+	ExentoIVA bool
+	// AlicuotaCodigo es el código del maestro de impuestos ("general",
+	// "reducida", "suntuario", "exento"). Vacío ⇒ no se declaró: manda ExentoIVA.
+	AlicuotaCodigo    string
 	CodigoBarras      string
 	ExistenciaInicial float64
 }
@@ -73,6 +84,7 @@ type filaPreparada struct {
 	sku, nombre, rubro, unidad, moneda, tipoVenta string
 	precio, existencia                            float64
 	exento                                        bool
+	alicuota                                      string // "" ⇒ no declarada
 	codigoBarras                                  string
 	existe                                        bool
 	valida                                        bool
@@ -166,6 +178,19 @@ func (s *Service) ImportarProductos(empresaID, sedeID, actor, origen string, fil
 			}
 		}
 
+		// Alícuota: opcional, pero si se declara tiene que existir y regir hoy. Se
+		// valida acá —en la vista previa— para que el archivo se corrija antes de
+		// aplicar nada, no a mitad de la carga.
+		alicuota := strings.ToLower(strings.TrimSpace(f.AlicuotaCodigo))
+		if fr.Estado != FilaImportError && alicuota != "" {
+			cod, err := s.validarAlicuotaProducto(empresaID, alicuota)
+			if err != nil {
+				fail(fmt.Sprintf("La alícuota %q no está en el maestro de impuestos vigente.", f.AlicuotaCodigo))
+			} else {
+				alicuota = cod
+			}
+		}
+
 		cb := strings.TrimSpace(f.CodigoBarras)
 		if fr.Estado != FilaImportError && cb != "" {
 			if j, dup := cbEnLote[strings.ToLower(cb)]; dup {
@@ -197,7 +222,7 @@ func (s *Service) ImportarProductos(empresaID, sedeID, actor, origen string, fil
 			prep[i] = filaPreparada{
 				sku: sku, nombre: nombre, rubro: strings.TrimSpace(f.Rubro),
 				unidad: unidad, moneda: moneda, tipoVenta: tipoVenta, precio: f.Precio,
-				existencia: f.ExistenciaInicial, exento: f.ExentoIVA,
+				existencia: f.ExistenciaInicial, exento: f.ExentoIVA, alicuota: alicuota,
 				codigoBarras: cb, existe: existe, valida: true,
 			}
 		}
@@ -224,6 +249,12 @@ func (s *Service) ImportarProductos(empresaID, sedeID, actor, origen string, fil
 				ExentoIVA:    boolPtr(p.exento),
 				CodigoBarras: strPtr(p.codigoBarras),
 			}
+			// Sin columna de alícuota se deja en nil: el PATCH no toca la
+			// clasificación que el producto ya tenía. Reimportar un catálogo viejo
+			// no degrada a «general» lo que alguien clasificó a mano.
+			if p.alicuota != "" {
+				cambios.AlicuotaCodigo = strPtr(p.alicuota)
+			}
 			if _, err := s.ActualizarProducto(empresaID, actor, origen, p.sku, cambios); err != nil {
 				res.Filas[i].Estado = FilaImportError
 				res.Filas[i].Mensaje = err.Error()
@@ -236,6 +267,7 @@ func (s *Service) ImportarProductos(empresaID, sedeID, actor, origen string, fil
 		nuevo := inventario.Producto{
 			SKU: p.sku, Nombre: p.nombre, Rubro: p.rubro, UnidadBase: p.unidad, TipoVenta: p.tipoVenta,
 			Precio: p.precio, Moneda: p.moneda, ExentoIVA: p.exento, CodigoBarras: p.codigoBarras,
+			AlicuotaCodigo: p.alicuota,
 		}
 		if _, err := s.CrearProducto(empresaID, actor, origen, nuevo); err != nil {
 			res.Filas[i].Estado = FilaImportError
