@@ -200,6 +200,18 @@ function MapaMesas() {
     return () => { vivo = false }
   }, [])
 
+  /* AVISO AL SALIR con el plano sin guardar. Dibujar un salón son veinte
+   * gestos que no viven en ningún lado hasta tocar «Guardar plano»: perderlos
+   * por recargar la pestaña es de las cosas que hacen que alguien no vuelva a
+   * usar el editor. El navegador muestra su propio diálogo; no se puede
+   * redactar el texto, pero sí decidir que aparezca. */
+  useEffect(() => {
+    if (!dirty) return undefined
+    const avisar = (e) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', avisar)
+    return () => window.removeEventListener('beforeunload', avisar)
+  }, [dirty])
+
   const wrapRef = useRef(null)
   const [ancho, setAncho] = useState(720)
   useEffect(() => {
@@ -449,9 +461,21 @@ function MapaMesas() {
     finally { setBusy(false) }
   }
 
+  /* integrarMesa mete en el editor la mesa que devolvió el servidor, SIN
+   * recargar el salón. Recargar era lo que hacía antes la ficha al guardar, y
+   * se llevaba por delante todo lo que el plano tuviera sin guardar: mesas
+   * movidas, áreas dibujadas, paredes marcadas. Guardar un nombre no puede
+   * costar media hora de trabajo. */
+  const integrarMesa = (guardada) => {
+    if (!guardada?.id) return
+    setMesas((ms) => (ms || []).map((m) => (m.id === guardada.id ? { ...m, ...guardada } : m)))
+  }
+
   const eliminar = async (m) => {
     if (!(await confirm({ title: '¿Eliminar esta mesa?', body: `La mesa «${m.nombre}» se quitará del salón.`, confirmLabel: 'Eliminar', tone: 'danger' }))) return
-    try { await api.eliminarMesa(m.id); setSel(null); await cargar(); reload(); toast({ title: 'Mesa eliminada' }) }
+    // Se quita en local por el mismo motivo: recargar borraría el avance del
+    // plano que todavía no se guardó.
+    try { await api.eliminarMesa(m.id); setSel(null); setMesas((ms) => (ms || []).filter((x) => x.id !== m.id)); reload(); toast({ title: 'Mesa eliminada' }) }
     catch (e) { toast({ title: 'No se pudo eliminar', body: e?.message || 'Error', kind: 'error' }) }
   }
 
@@ -495,7 +519,16 @@ function MapaMesas() {
           ) : null}
         </div>
         {puedeEditar ? (
-          <Button size="sm" loading={busy} disabled={!dirty} icon={<Icon.Check size={15} />} onClick={guardar}>Guardar plano</Button>
+          <div className="flex items-center gap-2.5">
+            {/* Decirlo en la pantalla y no solo con el botón habilitado: quien
+                dibujó diez mesas tiene que ver que todavía no están guardadas. */}
+            {dirty ? (
+              <span className="inline-flex items-center gap-1.5 text-[12px] text-amber-700 dark:text-amber-400">
+                <Icon.CircleAlert size={14} /> Cambios sin guardar
+              </span>
+            ) : null}
+            <Button size="sm" loading={busy} disabled={!dirty} icon={<Icon.Check size={15} />} onClick={guardar}>Guardar plano</Button>
+          </div>
         ) : null}
       </div>
       <div className="flex items-center gap-3 flex-wrap text-[11.5px] mb-2 text-slate-500">
@@ -656,7 +689,7 @@ function MapaMesas() {
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-3.5">
           {mesaSel ? (
             <PanelMesa key={mesaSel.id} mesa={mesaSel} puedeEditar={puedeEditar}
-              onGuardado={async () => { await cargar(); reload() }} onEliminar={() => eliminar(mesaSel)} toast={toast} />
+              onGuardado={(guardada) => { integrarMesa(guardada); reload() }} onEliminar={() => eliminar(mesaSel)} toast={toast} />
           ) : areaSel ? (
             <PanelArea key={areaSel.id} area={areaSel} puedeEditar={puedeEditar}
               onCambio={(p) => editarDelPlano('area', areaSel.id, p)} onQuitar={() => quitarDelPlano('area', areaSel.id)} />
@@ -839,8 +872,13 @@ function PanelMesa({ mesa, puedeEditar, onGuardado, onEliminar, toast }) {
   const guardar = async () => {
     setBusy(true)
     try {
-      await api.actualizarMesa(mesa.id, { nombre: f.nombre, zona: f.zona, capacidad: Number(f.capacidad) || 0, forma: f.forma, columna: mesa.columna, fila: mesa.fila, anchoCeldas: f.anchoCeldas, altoCeldas: f.altoCeldas })
-      await onGuardado(); toast({ title: 'Mesa actualizada', body: f.nombre })
+      const guardada = await api.actualizarMesa(mesa.id, { nombre: f.nombre, zona: f.zona, capacidad: Number(f.capacidad) || 0, forma: f.forma, columna: mesa.columna, fila: mesa.fila, anchoCeldas: f.anchoCeldas, altoCeldas: f.altoCeldas })
+      // Se devuelve la mesa guardada para que el editor la INTEGRE. Antes esto
+      // disparaba una recarga completa del salón y se llevaba por delante todo
+      // lo que el plano tuviera sin guardar: mesas movidas, áreas dibujadas,
+      // paredes marcadas. Guardar un nombre no puede costar media hora de
+      // trabajo.
+      await onGuardado(guardada); toast({ title: 'Mesa actualizada', body: f.nombre })
     } catch (e) { toast({ title: 'No se pudo guardar', body: e?.message || 'Error', kind: 'error' }) }
     finally { setBusy(false) }
   }
