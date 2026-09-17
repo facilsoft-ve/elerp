@@ -288,3 +288,55 @@ func TestDemoRestaurante_LosPostresDeLaCasaSonRecetas(t *testing.T) {
 		t.Error("un postre comprado hecho no lleva receta")
 	}
 }
+
+/* --- Catálogo de comanderas ----------------------------------------------- */
+
+// Elegir un modelo del catálogo tiene que dejar la ficha resuelta: la grafía
+// canónica (para que el maestro no se llene de variantes de lo mismo) y el ancho
+// de papel del equipo, que es lo que nadie en la cocina sabe de memoria.
+func TestComanderas_ModeloDelCatalogoPrecargaElAncho(t *testing.T) {
+	svc, _ := servicioComanderas(t)
+	imp, err := svc.GuardarImpresora(empSalon, sedeSalon, actorA, origenTst, application.ImpresoraBody{
+		Nombre: "Barra", Marca: "xprinter", Modelo: "xp-58iih",
+		Conexion: "local", Activa: true,
+	})
+	if err != nil {
+		t.Fatalf("guardar: %v", err)
+	}
+	if imp.Marca != "Xprinter" || imp.Modelo != "XP-58IIH" {
+		t.Errorf("no normalizó a la grafía del catálogo: %q / %q", imp.Marca, imp.Modelo)
+	}
+	if imp.AnchoMM != 58 {
+		t.Errorf("la XP-58IIH es de 58 mm, quedó en %d", imp.AnchoMM)
+	}
+}
+
+// El ancho elegido a mano gana sobre el del catálogo: hay quien le mete rollo de
+// 58 a un equipo de 80 y la comanda tiene que salir como el local la imprime.
+func TestComanderas_AnchoExplicitoGanaAlCatalogo(t *testing.T) {
+	svc, _ := servicioComanderas(t)
+	imp, err := svc.GuardarImpresora(empSalon, sedeSalon, actorA, origenTst, application.ImpresoraBody{
+		Nombre: "Postres", Marca: "Epson", Modelo: "TM-T20III",
+		AnchoMM: 58, Conexion: "local", Activa: true,
+	})
+	if err != nil {
+		t.Fatalf("guardar: %v", err)
+	}
+	if imp.AnchoMM != 58 {
+		t.Errorf("el catálogo pisó el ancho elegido: %d", imp.AnchoMM)
+	}
+}
+
+// Una comandera sin marca sigue siendo válida: el catálogo ayuda, no obliga.
+func TestComanderas_SinMarcaSigueSiendoValida(t *testing.T) {
+	svc, _ := servicioComanderas(t)
+	imp, err := svc.GuardarImpresora(empSalon, sedeSalon, actorA, origenTst, application.ImpresoraBody{
+		Nombre: "Plancha", Conexion: "local", Activa: true,
+	})
+	if err != nil {
+		t.Fatalf("una comandera sin marca debe aceptarse: %v", err)
+	}
+	if imp.AnchoMM != 80 {
+		t.Errorf("sin modelo, el ancho por defecto debe seguir siendo 80 mm, fue %d", imp.AnchoMM)
+	}
+}

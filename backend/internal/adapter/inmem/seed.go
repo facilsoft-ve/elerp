@@ -85,6 +85,11 @@ type Store struct {
 	Impresoras       *ImpresoraRepo
 	Cuentas          *CuentaRepo
 	Reservas         *ReservaRepo
+	Mesoneros        *MesoneroRepo
+	Turnos           *TurnoRepo
+	Alicuotas        *AlicuotaRepo
+	ConceptosISLR    *ConceptoISLRRepo
+	Horarios         *HorarioRepo
 }
 
 // IDs fijos del seed demo (facilitan que el frontend seleccione contexto).
@@ -129,6 +134,11 @@ func New() *Store {
 		Impresoras:   NewImpresoraRepo(),
 		Cuentas:      NewCuentaRepo(),
 		Reservas:     NewReservaRepo(),
+		Mesoneros:    NewMesoneroRepo(),
+		Turnos:       NewTurnoRepo(),
+		Alicuotas:    NewAlicuotaRepo(),
+		ConceptosISLR: NewConceptoISLRRepo(),
+		Horarios:     NewHorarioRepo(),
 	}
 	s.seedDemo()
 	// Demos por RUBRO (restaurante, ferretería, farmacia): ver seed_nichos.go.
@@ -305,6 +315,19 @@ func (s *Store) seedDemo() {
 	// Productos que se venden POR PESO (balanza): precio Bs/kg, existencia en kg.
 	// La forma de venta fija su unidad base en "kg" (misma regla que el servicio).
 	pesoSKUs := map[string]bool{"QUE-KG": true, "JAM-KG": true, "QAM-KG": true, "CAR-KG": true, "TOM-KG": true}
+	// Clasificación fiscal de DEMOSTRACIÓN, para que las tres alícuotas
+	// venezolanas se vean en uso desde el primer minuto: general 16%, reducida 8%
+	// y suntuaria (16% + 15% adicional). Lo que NO está acá queda en general, y
+	// lo marcado como exento se clasifica solo.
+	//
+	// OJO: es una clasificación DE EJEMPLO, no una fuente legal. Qué bien va en
+	// cada alícuota lo define el reglamento y lo decide la contadora.
+	alicuotaSKU := map[string]string{
+		"PAN-001": fiscal.CodReducida,   // panadería
+		"LEC-001": fiscal.CodReducida,   // fórmula láctea
+		"ELE-TV":  fiscal.CodSuntuario,  // electrónica de gama alta
+		"CAL-001": fiscal.CodSuntuario,  // calzado de marca
+	}
 	for _, c := range catalogo {
 		costoPorSKU[c.sku] = c.costo
 		pres := c.pres
@@ -318,6 +341,7 @@ func (s *Store) seedDemo() {
 		p := s.Productos.Create(inventario.Producto{
 			EmpresaID: demoEmpID, SKU: c.sku, Nombre: c.nombre, Rubro: c.rubro,
 			UnidadBase: unidad, TipoVenta: tipoVenta, Precio: c.precio, Moneda: c.moneda, ExentoIVA: c.exento,
+			AlicuotaCodigo: alicuotaDemo(c.sku, c.exento, alicuotaSKU),
 			CodigoBarras: c.codigo,
 			Activo:       c.activo, Presentaciones: pres,
 		})
@@ -397,14 +421,14 @@ func (s *Store) seedDemo() {
 	// Clientes que cubren los CUATRO tipos de documento (V, E, J, G) más el caso
 	// sin teléfono y el de nombre largo.
 	for _, c := range []cliente.Cliente{
-		{Nombre: "Inversiones El Molino, C.A.", TipoDocumento: cliente.DocJ, Documento: "40123456-9", Telefono: "0212-5551234", NombreComercial: "El Molino", Contacto: "Ana Torres"},
-		{Nombre: "María Alejandra Rodríguez Pérez", TipoDocumento: cliente.DocV, Documento: "12345678", Telefono: "0414-1234567", Email: "maria.rodriguez@correo.com"},
-		{Nombre: "Giuseppe Antonio Barbieri", TipoDocumento: cliente.DocE, Documento: "84512399", Telefono: ""},
-		{Nombre: "Alcaldía del Municipio Chacao", TipoDocumento: cliente.DocG, Documento: "20000123-2", Telefono: "0212-2088111"},
+		{Nombre: "Inversiones El Molino, C.A.", TipoDocumento: cliente.DocJ, Documento: "40123456-9", Telefono: "0212-5551234", Direccion: "Av. Francisco de Miranda, Torre Europa, Piso 4, Chacao, Caracas", NombreComercial: "El Molino", Contacto: "Ana Torres"},
+		{Nombre: "María Alejandra Rodríguez Pérez", TipoDocumento: cliente.DocV, Documento: "12345678", Telefono: "0414-1234567", Direccion: "Calle Los Cedros, Res. Aurora, Apto. 3-B, El Cafetal, Caracas", Email: "maria.rodriguez@correo.com"},
+		{Nombre: "Giuseppe Antonio Barbieri", TipoDocumento: cliente.DocE, Documento: "84512399", Telefono: "", Direccion: "Av. Bolívar Norte, C.C. Camoruco, Local 12, Valencia, Carabobo"},
+		{Nombre: "Alcaldía del Municipio Chacao", TipoDocumento: cliente.DocG, Documento: "20000123-2", Telefono: "0212-2088111", Direccion: "Av. Francisco de Miranda con Av. Mohedano, Chacao, Caracas"},
 		// Ejemplo de cliente IMPORTADO desde otro CRM/ERP: conserva su procedencia
 		// (Odoo + id externo) para una futura sincronización bidireccional.
-		{Nombre: "Distribuidora de Alimentos y Bebidas del Centro Occidente, C.A.", TipoDocumento: cliente.DocJ, Documento: "31122334-7", Telefono: "0251-2334455", Origen: cliente.OrigenOdoo, SistemaExterno: "odoo", IdExterno: "res.partner:1042"},
-		{Nombre: "Pedro Luis Salas", TipoDocumento: cliente.DocV, Documento: "9876543", Telefono: "0424-9998877"},
+		{Nombre: "Distribuidora de Alimentos y Bebidas del Centro Occidente, C.A.", TipoDocumento: cliente.DocJ, Documento: "31122334-7", Telefono: "0251-2334455", Direccion: "Zona Industrial III, Galpón 7, Barquisimeto, Lara", Origen: cliente.OrigenOdoo, SistemaExterno: "odoo", IdExterno: "res.partner:1042"},
+		{Nombre: "Pedro Luis Salas", TipoDocumento: cliente.DocV, Documento: "9876543", Telefono: "0424-9998877", Direccion: "Calle 5 con Carrera 8, Casa 22, San Cristóbal, Táchira"},
 	} {
 		c.EmpresaID = demoEmpID
 		c.Activo = true
@@ -1150,4 +1174,19 @@ func (s *Store) Snapshot() Snapshot {
 		Tasas:      s.Tasas.Historial("", 0),
 		Contadores: s.Numerador.Estado(),
 	}
+}
+
+// alicuotaDemo resuelve la clasificación fiscal de un producto sembrado: lo
+// exento se clasifica solo, lo listado toma su alícuota y el resto queda en
+// general. Se deja EXPLÍCITA en el catálogo demo —y no vacía— para que el
+// selector de la ficha de producto se vea poblado y no como si nadie hubiera
+// clasificado nada.
+func alicuotaDemo(sku string, exento bool, porSKU map[string]string) string {
+	if exento {
+		return fiscal.CodExento
+	}
+	if cod, ok := porSKU[sku]; ok {
+		return cod
+	}
+	return fiscal.CodGeneral
 }

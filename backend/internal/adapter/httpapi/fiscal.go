@@ -92,6 +92,18 @@ func (s *Server) registerFiscal(r fiber.Router) {
 	// Configuración › Dispositivos fiscales. Igual gate que métodos de pago: los
 	// ve quien accede a Ajustes; solo Dueña/Desarrollador los administran. El
 	// enlace real con la impresora lo hace el agente fiscal local (fuera del backend).
+	// El CATÁLOGO precargado (marcas/modelos del mercado venezolano) es dato de
+	// referencia, no del tenant: lo consume tanto esta pantalla como la de
+	// comanderas del módulo Restaurante. Va antes que "/dispositivos/:id" por
+	// claridad; no colisiona porque aquel es PATCH.
+	// Configuración › Impuestos y alícuotas. El MAESTRO de tasas de IVA con su
+	// vigencia. Lo VE quien accede a Ajustes (la Contadora incluida: es su
+	// herramienta); solo Dueña/Desarrollador lo modifican.
+	cfg.Get("/alicuotas", s.handleAlicuotas)
+	cfg.Post("/alicuotas", cfgAdmin, s.handleCrearAlicuota)
+	cfg.Patch("/alicuotas/:id", cfgAdmin, s.handleActualizarAlicuota)
+
+	cfg.Get("/dispositivos/catalogo", s.handleCatalogoDispositivos)
 	cfg.Get("/dispositivos", s.handleDispositivos)
 	cfg.Post("/dispositivos", cfgAdmin, s.handleCrearDispositivo)
 	cfg.Patch("/dispositivos/:id", cfgAdmin, s.handleActualizarDispositivo)
@@ -581,6 +593,10 @@ func (s *Server) handleEliminarMetodoPago(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
+func (s *Server) handleCatalogoDispositivos(c *fiber.Ctx) error {
+	return c.JSON(s.svc.CatalogoDispositivos())
+}
+
 func (s *Server) handleDispositivos(c *fiber.Ctx) error {
 	return c.JSON(s.svc.DispositivosFiscales(empresaIDOf(c)))
 }
@@ -642,4 +658,64 @@ func (s *Server) handleDesactivarDispositivo(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+/* --- Maestro de impuestos -------------------------------------------------- */
+
+func (s *Server) handleAlicuotas(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"alicuotas": s.svc.AlicuotasVista(empresaIDOf(c))})
+}
+
+func (s *Server) handleCrearAlicuota(c *fiber.Ctx) error {
+	var in struct {
+		Codigo string `json:"codigo"`
+		Nombre string `json:"nombre"`
+		Tipo   string `json:"tipo"`
+		// Porcentaje y Adicional viajan en FRACCIÓN (0.16 = 16 %), igual que se
+		// guardan: convertir en la pantalla y no en el transporte evita que el
+		// mismo número signifique dos cosas distintas según por dónde entre.
+		Porcentaje   float64 `json:"porcentaje"`
+		Adicional    float64 `json:"adicional"`
+		VigenteDesde string  `json:"vigenteDesde"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.CrearAlicuota(empresaIDOf(c), principalOf(c).UserID, origen(c), fiscal.Alicuota{
+		Codigo: in.Codigo, Nombre: in.Nombre, Tipo: in.Tipo,
+		Porcentaje: in.Porcentaje, Adicional: in.Adicional, VigenteDesde: in.VigenteDesde,
+	})
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+func (s *Server) handleActualizarAlicuota(c *fiber.Ctx) error {
+	// Punteros: lo que no venga no cambia. Y que Porcentaje/Adicional sean
+	// punteros es lo que permite distinguir «renombrar» (edita la fila) de
+	// «cambiar la tasa» (abre una vigencia nueva) — con valores planos, renombrar
+	// mandaría un 0 y partiría el histórico sin que nadie lo pidiera.
+	var in struct {
+		Nombre       *string  `json:"nombre"`
+		Activa       *bool    `json:"activa"`
+		Porcentaje   *float64 `json:"porcentaje"`
+		Adicional    *float64 `json:"adicional"`
+		VigenteDesde string   `json:"vigenteDesde"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.ActualizarAlicuota(empresaIDOf(c), principalOf(c).UserID, origen(c), c.Params("id"),
+		application.CambiosAlicuota{
+			Nombre: in.Nombre, Activa: in.Activa,
+			Porcentaje: in.Porcentaje, Adicional: in.Adicional, VigenteDesde: in.VigenteDesde,
+		})
+	if err != nil {
+		if errors.Is(err, application.ErrAlicuotaNoExiste) {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
 }

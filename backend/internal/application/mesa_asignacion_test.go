@@ -288,3 +288,58 @@ func TestAceptarInvitacion_LaPersonaPoneSuContrasena(t *testing.T) {
 		t.Error("el token de invitación no debe poder reusarse")
 	}
 }
+
+/* --- Aforo contra tamaño de la mesa --------------------------------------- */
+
+// LA regla del constructor: cada cuadro admite 4 personas. Para sentar a más hay
+// que AMPLIAR la mesa. Se valida en el servidor y no solo en la pantalla, porque
+// es lo que mantiene coherente el plano con el aforo declarado.
+func TestCrearMesa_ElAforoNoPuedeExcederElTamano(t *testing.T) {
+	svc, _ := servicioSalon(t)
+	_, err := svc.CrearMesa(empSalon, sedeSalon, actorA, origenTst, mesa.Mesa{
+		Nombre: "Grande", Forma: mesa.FormaCuadrada, Capacidad: 8,
+		AnchoCeldas: 1, AltoCeldas: 1, // un cuadro: máximo 4
+	})
+	if !errors.Is(err, application.ErrAforoExcedeTamano) {
+		t.Fatalf("se esperaba ErrAforoExcedeTamano, se obtuvo: %v", err)
+	}
+}
+
+// Ampliar la mesa es lo que habilita el aforo mayor.
+func TestCrearMesa_AmpliarHabilitaMasAforo(t *testing.T) {
+	svc, _ := servicioSalon(t)
+	m, err := svc.CrearMesa(empSalon, sedeSalon, actorA, origenTst, mesa.Mesa{
+		Nombre: "Mesón", Forma: mesa.FormaRectangular, Capacidad: 8,
+		AnchoCeldas: 2, AltoCeldas: 1, Columna: 0, Fila: 0,
+	})
+	if err != nil {
+		t.Fatalf("dos cuadros admiten 8: %v", err)
+	}
+	if m.CapacidadMaxima() != 8 {
+		t.Errorf("capacidad máxima = %d, se esperaban 8", m.CapacidadMaxima())
+	}
+}
+
+// Dar de alta «mesa de 8» sin dimensionarla a mano tiene que funcionar: el
+// servidor le pone el tamaño mínimo que hace falta.
+func TestCrearMesa_SinTamanoSeDimensionaSola(t *testing.T) {
+	svc, _ := servicioSalon(t)
+	m, err := svc.CrearMesa(empSalon, sedeSalon, actorA, origenTst, mesa.Mesa{
+		Nombre: "Auto", Forma: mesa.FormaRectangular, Capacidad: 8, Columna: 0, Fila: 0,
+	})
+	if err != nil {
+		t.Fatalf("crear: %v", err)
+	}
+	if c, f := m.Dimension(); c*f*mesa.PersonasPorCelda < 8 {
+		t.Errorf("el tamaño automático debe alcanzar para 8, dio %d×%d", c, f)
+	}
+}
+
+func TestCrearMesa_RechazaTamanoAbsurdo(t *testing.T) {
+	svc, _ := servicioSalon(t)
+	if _, err := svc.CrearMesa(empSalon, sedeSalon, actorA, origenTst, mesa.Mesa{
+		Nombre: "Enorme", Forma: mesa.FormaCuadrada, Capacidad: 4, AnchoCeldas: 50, AltoCeldas: 1,
+	}); !errors.Is(err, application.ErrTamanoMesaInvalido) {
+		t.Fatalf("se esperaba ErrTamanoMesaInvalido, se obtuvo: %v", err)
+	}
+}

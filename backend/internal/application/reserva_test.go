@@ -26,14 +26,18 @@ func servicioReservas(t *testing.T) (*application.Service, *inmem.Store) {
 	return svc, st
 }
 
-func fechaDeHoy() string { return time.Now().Format("2006-01-02") }
+// fechaDeManana: las reservas de prueba se toman para MAÑANA, no para hoy.
+// Con "hoy a las 20:00" la suite pasaba por la mañana y fallaba de noche —una
+// reserva para una hora ya pasada se rechaza—, y eso hacía que el resultado
+// dependiera de a qué hora se corriera. Mañana siempre está en el futuro.
+func fechaDeManana() string { return time.Now().Add(24 * time.Hour).Format("2006-01-02") }
 
 // reservaBase arma una entrada válida para la sede del restaurante demo.
 func reservaBase(st *inmem.Store, t *testing.T, over func(*application.EntradaReserva)) application.EntradaReserva {
 	t.Helper()
 	in := application.EntradaReserva{
 		EmpresaID: empSalon, SedeID: sedeSalon,
-		Fecha: fechaDeHoy(), Hora: "20:00", Personas: 2,
+		Fecha: fechaDeManana(), Hora: "20:00", Personas: 2,
 		Nombre: "Ana Pérez", Documento: "V-12.345.678", Telefono: "04141234567",
 		Actor: "usr_meso", Origen: origenTst,
 	}
@@ -156,7 +160,7 @@ func TestReserva_SeEncuentraPorNombreOCedula(t *testing.T) {
 	})); err != nil {
 		t.Fatalf("crear 2: %v", err)
 	}
-	hoy := fechaDeHoy()
+	hoy := fechaDeManana()
 	casos := map[string]string{
 		"pérez":        "Ana Pérez",   // parte del nombre
 		"PEREZ":        "",            // sin acento NO coincide: es el dato tal como se tomó
@@ -289,7 +293,7 @@ func TestReserva_CancelarLiberaLaMesa(t *testing.T) {
 // vacío y el resto del sistema sigue igual.
 func TestReserva_SinModuloNoRompe(t *testing.T) {
 	svc, _ := servicioSalon(t) // sin ConReservas
-	if out := svc.ReservasDelDia(empSalon, sedeSalon, fechaDeHoy()); len(out) != 0 {
+	if out := svc.ReservasDelDia(empSalon, sedeSalon, fechaDeManana()); len(out) != 0 {
 		t.Errorf("sin reservas cableadas la agenda es vacía, dio %d", len(out))
 	}
 	if _, err := svc.CrearReserva(application.EntradaReserva{EmpresaID: empSalon}); !errors.Is(err, application.ErrReservasNoDisponible) {

@@ -16,6 +16,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/inventario"
 	"github.com/mornix/elerp/internal/domain/mesa"
+	"github.com/mornix/elerp/internal/domain/mesonero"
 	"github.com/mornix/elerp/internal/domain/organizacion"
 	"github.com/mornix/elerp/internal/domain/proveedor"
 	"github.com/mornix/elerp/internal/domain/sede"
@@ -245,10 +246,16 @@ func (s *Store) seedEmpresaNicho(e especNicho) {
 	}
 
 	for i, c := range e.clientes {
+		// La dirección fiscal NO es decorativa: la factura la exige al cliente
+		// identificado, así que un cliente demo sin ella no se podría facturar y
+		// la demostración quedaría trancada justo en el paso principal. Se compone
+		// a partir de la zona de la propia empresa, que es lo verosímil para una
+		// cartera local.
 		s.Clientes.Create(cliente.Cliente{
 			EmpresaID: e.empID, Nombre: c.nombre, TipoDocumento: c.tipoDoc,
 			Documento: c.doc, Telefono: c.telefono, Activo: true,
-			Notas: fmt.Sprintf("cliente de demostración %d", i+1),
+			Direccion: fmt.Sprintf("Sector %d, cerca de %s", i+1, e.direccion),
+			Notas:     fmt.Sprintf("cliente de demostración %d", i+1),
 		})
 	}
 
@@ -319,6 +326,16 @@ type SnapshotEmpresa struct {
 	CuentasMesa  []cuenta.Cuenta
 	Asignaciones []mesa.Asignacion
 	Comanderas   []cocina.Impresora
+	// Mesoneros son las credenciales de turno (MS-) del salón. Sin ellas, la
+	// pantalla de Turnos arranca vacía en una base con Mongo y no se entiende
+	// para qué sirve.
+	Mesoneros []mesonero.Mesonero
+	// Horarios es el patrón semanal de cada mesonero y ConfigSalon el horario de
+	// ATENCIÓN de la sede. Sin ellos, en una base con Mongo el turno no tendría
+	// hora de salida y las reservas nunca avisarían «fuera de horario».
+	Horarios    []mesonero.Horario
+	ConfigSalon mesa.ConfigSalon
+	TieneConfig bool
 	// Contadores es el estado del numerador fiscal de ESTA empresa tras sembrar
 	// ("empresa|sede|serie" → último folio). Sin ellos, la primera factura real del
 	// prospecto reiniciaría en 1 y colisionaría con un folio sembrado.
@@ -330,6 +347,7 @@ func (s *Store) SnapshotNicho(n NichoDemo) SnapshotEmpresa {
 	org, _ := s.Organizaciones.ByID(n.OrgID)
 	emp, _ := s.Empresas.ByID(n.EmpresaID)
 	plano, tiene := s.Planos.Get(n.EmpresaID, n.SedeID)
+	cfgSalon, tieneCfg := s.ConfigSalon.Get(n.EmpresaID, n.SedeID)
 
 	// Los usuarios y sus credenciales se derivan de las membresías de la empresa: el
 	// repositorio de usuarios es global (no lleva empresaID).
@@ -376,6 +394,9 @@ func (s *Store) SnapshotNicho(n NichoDemo) SnapshotEmpresa {
 		CuentasMesa:  s.Cuentas.Abiertas(n.EmpresaID, n.SedeID),
 		Asignaciones: s.Asignaciones.List(n.EmpresaID, n.SedeID),
 		Comanderas:   s.Impresoras.List(n.EmpresaID, n.SedeID),
+		Mesoneros:    s.Mesoneros.List(n.EmpresaID),
+		Horarios:     s.Horarios.List(n.EmpresaID, n.SedeID),
+		ConfigSalon:  cfgSalon, TieneConfig: tieneCfg,
 		Contadores:   contadores,
 	}
 }

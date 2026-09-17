@@ -56,26 +56,82 @@ export function Login() {
         <div className="relative flex items-center">
           <Wordmark size={30} mono />
         </div>
+
         <div className="relative">
-          <div className="font-display font-bold text-[34px] leading-[1.2] max-w-[400px]">El ERP que habla venezolano.</div>
-          <div className="mt-7 flex flex-col gap-4 text-[15px]" style={{ color: '#C7D4E8' }}>
-            <div className="flex gap-3 items-start"><Icon.CircleCheck size={20} className="shrink-0 mt-0.5" /><span>Factura legal SENIAT en tres modalidades, sin ser contador</span></div>
-            <div className="flex gap-3 items-start"><Icon.EyeOff size={20} className="shrink-0 mt-0.5" /><span>¿Se fue el internet? Sigues facturando en modo contingencia</span></div>
-            <div className="flex gap-3 items-start"><Icon.Book size={20} className="shrink-0 mt-0.5" /><span>Tu contabilidad se lleva sola, asiento por asiento</span></div>
+          {/* Rótulo de la web: NO es la píldora de cualquier landing, es la BARRA
+              sólida del wordmark —el bloque morado que corta la palabra— con el
+              texto en mono. La barra es la misma figura del logo, a otra escala. */}
+          <div className="flex items-center gap-2.5 mb-5">
+            <span className="block rounded-sm" style={{ width: 26, height: 5, background: '#fff' }} />
+            <span className="num text-[11.5px] font-semibold uppercase" style={{ letterSpacing: '.14em', color: '#D0BEF9' }}>
+              ERP web para PyMEs venezolanas
+            </span>
+          </div>
+
+          {/* El acento va SUBRAYADO, no en otro color: sobre fondo de marca un
+              segundo color compite con el logo. Es el mismo recurso del sitio
+              (resaltador al 84% de la altura de la línea). */}
+          <h1 className="font-display font-bold text-[34px] leading-[1.2] max-w-[420px] m-0">
+            Vende, factura y lleva tu contabilidad{' '}
+            <span style={{ background: 'linear-gradient(180deg, transparent 84%, rgba(255,255,255,.28) 84%)' }}>
+              sin pelear con el sistema.
+            </span>
+          </h1>
+
+          {/* En vez de tres promesas en viñetas, SE MUESTRA el producto: es la
+              tarjeta del hero de la web, y dice más que cualquier lista. */}
+          <div className="mt-8 rounded-2xl p-[18px] max-w-[360px]"
+            style={{ background: 'rgba(255,255,255,.07)', border: '1px solid rgba(255,255,255,.12)', backdropFilter: 'blur(2px)' }}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="font-display font-bold text-[14px]">Punto de Venta</span>
+              <span className="text-[11px] font-semibold rounded-full px-2.5 py-[3px]"
+                style={{ background: 'rgba(255,255,255,.16)', color: '#fff' }}>Caja abierta</span>
+            </div>
+            {[
+              ['Harina de maíz 1 kg × 2', 'Bs 96,00'],
+              ['Café molido 250 g', 'Bs 84,00'],
+              ['Refresco 2 L', 'Bs 149,00'],
+            ].map(([k, v]) => (
+              <div key={k} className="flex items-center justify-between py-2 text-[13px]"
+                style={{ borderTop: '1px solid rgba(255,255,255,.10)', color: '#D0BEF9' }}>
+                <span>{k}</span><span className="num" style={{ color: '#fff' }}>{v}</span>
+              </div>
+            ))}
+            <div className="flex items-center justify-between pt-2.5 mt-1 text-[14px] font-semibold"
+              style={{ borderTop: '1px solid rgba(255,255,255,.22)' }}>
+              <span>Total con IVA</span><span className="num">Bs 382,84</span>
+            </div>
+          </div>
+
+          <div className="mt-5 text-[12.5px] max-w-[360px]" style={{ color: '#B295F4' }}>
+            Pensado para conectividad hostil: un corte de luz o de internet no detiene la caja.
           </div>
         </div>
-        <div className="relative text-[12.5px]" style={{ color: '#8FA5C6' }}>ERP web multi-empresa para Venezuela · por Mornix</div>
+
+        <div className="relative text-[12.5px]" style={{ color: '#8D5FF0' }}>
+          ERP web multi-empresa para Venezuela · por Mornix
+        </div>
       </div>
 
       {/* Formulario (derecha) */}
-      <div className="flex-1 flex items-center justify-center px-5 py-7">
+      {/* El fondo es el del hero de la web: un halo de marca arriba a la derecha
+          sobre blanco. Blanco plano al lado de un panel morado profundo se lee
+          como un formulario suelto, no como la misma pieza. */}
+      <div className="flex-1 flex items-center justify-center px-5 py-7 bg-hero-elerp">
         <div className="w-full max-w-[420px] fadein">
           <div className="lg:hidden mb-6 flex items-center">
             <Wordmark size={28} />
           </div>
 
-          <div className="font-display font-bold text-[24px] text-slate-900 dark:text-slate-100">Hola de nuevo</div>
-          <div className="text-slate-500 mt-1">Entra para seguir facturando.</div>
+          {/* Mismo rótulo de barra que el panel de marca, en su versión sobre
+              claro: es la figura del logo, no un adorno distinto por pantalla. */}
+          <div className="flex items-center gap-2.5 mb-3">
+            <span className="block rounded-sm bg-elerp-500" style={{ width: 26, height: 5 }} />
+            <span className="num text-[11px] font-semibold uppercase text-elerp-700 dark:text-elerp-300"
+              style={{ letterSpacing: '.14em' }}>Acceso</span>
+          </div>
+          <div className="font-display font-bold text-[26px] text-slate-900 dark:text-slate-100 leading-tight">Hola de nuevo</div>
+          <div className="text-slate-500 mt-1.5 text-[14.5px]">Entra para seguir facturando.</div>
 
           {/* SSO de Hubmy: es el camino principal para un usuario real, así que va
               primero. Lleva la línea gráfica de Hubmy, no la de ElERP: un botón

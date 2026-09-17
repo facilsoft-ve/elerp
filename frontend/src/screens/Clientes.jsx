@@ -132,13 +132,17 @@ export function EditarClienteModal({ cliente, onClose, onSaved, toast }) {
   const errs = {
     nombre: !f.nombre.trim() ? 'Ingresa el nombre.' : '',
     documento: !f.documento.trim() ? 'Ingresa el documento.' : !rifCheck.valid ? rifCheck.msg : '',
+    // La dirección fiscal es requisito de la factura: sin ella el servidor NO
+    // deja emitirle a este cliente. Se pide acá para que el problema aparezca
+    // al darlo de alta y no en el mostrador, con el cliente esperando.
+    direccion: !f.direccion.trim() ? 'La factura exige el domicilio fiscal del cliente.' : '',
     email: emailOk ? '' : 'El correo no tiene un formato válido.',
   }
-  const valid = !errs.nombre && !errs.documento && !errs.email
+  const valid = !errs.nombre && !errs.documento && !errs.direccion && !errs.email
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }))
 
   const save = async () => {
-    setTouched({ nombre: true, documento: true, email: true })
+    setTouched({ nombre: true, documento: true, direccion: true, email: true })
     if (!valid) return
     setBusy(true)
     try {
@@ -185,7 +189,13 @@ export function EditarClienteModal({ cliente, onClose, onSaved, toast }) {
               <Input value={f.email} onChange={set('email')} onBlur={() => setTouched((t) => ({ ...t, email: true }))} invalid={touched.email && !!errs.email} type="email" placeholder="correo@dominio.com" />
             </Field>
           </div>
-          <Field label="Dirección" hint="opcional"><Input value={f.direccion} onChange={set('direccion')} /></Field>
+          <Field label="Dirección fiscal" required
+            error={touched.direccion ? errs.direccion : ''}
+            hint="la factura la exige">
+            <Input value={f.direccion} invalid={touched.direccion && !!errs.direccion}
+              onBlur={() => setTouched((t) => ({ ...t, direccion: true }))}
+              onChange={set('direccion')} placeholder="Av., calle, edificio, ciudad" />
+          </Field>
         </div>
 
         {/* Información ampliada (CRM) */}

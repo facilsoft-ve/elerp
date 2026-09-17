@@ -7,7 +7,9 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/mornix/elerp/internal/application"
+	"github.com/mornix/elerp/internal/domain/aplicacion"
 	"github.com/mornix/elerp/internal/domain/mesa"
+	"github.com/mornix/elerp/internal/domain/mesonero"
 	"github.com/mornix/elerp/internal/domain/usuario"
 )
 
@@ -300,13 +302,19 @@ type mesaBody struct {
 	Forma     string `json:"forma"`
 	Columna   int    `json:"columna"`
 	Fila      int    `json:"fila"`
-	Activa    *bool  `json:"activa"`
+	// AnchoCeldas y AltoCeldas son el tamaño de la mesa en cuadros del plano.
+	// Cada cuadro admite 4 personas, así que ampliar la mesa es lo que habilita
+	// un aforo mayor. 0 = que el servidor le ponga el mínimo que haga falta.
+	AnchoCeldas int   `json:"anchoCeldas"`
+	AltoCeldas  int   `json:"altoCeldas"`
+	Activa      *bool `json:"activa"`
 }
 
 func (b mesaBody) modelo() mesa.Mesa {
 	return mesa.Mesa{
 		Nombre: b.Nombre, Zona: b.Zona, Capacidad: b.Capacidad, Forma: b.Forma,
 		Columna: b.Columna, Fila: b.Fila,
+		AnchoCeldas: b.AnchoCeldas, AltoCeldas: b.AltoCeldas,
 	}
 }
 
@@ -434,13 +442,18 @@ func (s *Server) handleConfigSalon(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleGuardarConfigSalon(c *fiber.Ctx) error {
+	// Los DOS ajustes son punteros: lo que no venga en el cuerpo no se toca. La
+	// ficha se guarda entera, así que con un bool normal mandar solo el modo de
+	// horario apagaría la asignación estricta sin que nadie lo pidiera.
 	var in struct {
-		AsignacionEstricta bool `json:"asignacionEstricta"`
+		AsignacionEstricta *bool   `json:"asignacionEstricta"`
+		HorarioModo        *string `json:"horarioModo"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
-	out, err := s.svc.GuardarConfigSalon(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c), in.AsignacionEstricta)
+	out, err := s.svc.GuardarConfigSalonCompleta(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c),
+		in.AsignacionEstricta, in.HorarioModo)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -486,6 +499,252 @@ func (s *Server) handleCancelarPrefactura(c *fiber.Ctx) error {
 	out, err := s.svc.CancelarPrefacturasCuenta(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+/* --- Turnos del salón ------------------------------------------------------
+ *
+ * Credenciales de mesonero (MS-) y sus turnos. Reglas que impone el servidor y
+ * que la pantalla solo refleja: un turno lo valida un supervisor con su PIN, y
+ * sin turno abierto un mesonero no toma mesas (ver application/mesonero.go).
+ *
+ * Gate de MÓDULO además del de rol: los turnos son del módulo Restaurante, que
+ * se comercializa aparte. Sin él activo, 403.
+ */
+
+// registerTurnosSalon monta los turnos. `verTurnos` incluye al mesonero porque
+// la grilla de entrada es SU pantalla; administrar credenciales y forzar cierres
+// es de la Dueña/Desarrollador.
+func (s *Server) registerTurnosSalon(r fiber.Router) {
+	modulo := s.requireModulo(aplicacion.ModRestaurante)
+	ver := s.requireRoles(usuario.RolDueno, usuario.RolDesarrollador, usuario.RolVendedor,
+		usuario.RolCajero, usuario.RolContadora, usuario.RolMesonero)
+	admin := s.requireRoles(usuario.RolDueno, usuario.RolDesarrollador)
+
+	g := r.Group("/restaurante/salon", modulo, ver)
+	g.Get("/mesoneros", s.handleMesoneros)
+	g.Post("/mesoneros", admin, s.handleCrearMesonero)
+	g.Patch("/mesoneros/:id", admin, s.handleActualizarMesonero)
+	// Fijar el PIN NO es de administración: lo hace la propia persona en la
+	// tablet, con un supervisor autorizando con el suyo. Por eso pasa con `ver`.
+	g.Post("/mesoneros/:id/pin", s.handleFijarPinMesonero)
+
+	g.Get("/turnos", s.handleTurnosVivos)
+	g.Get("/turnos/historial", admin, s.handleHistorialTurnos)
+	g.Post("/turnos", s.handleIniciarTurno)
+	g.Post("/turnos/:id/finalizar", s.handleFinalizarTurno)
+	g.Get("/turnos/:id/relevos", admin, s.handleCandidatosRelevo)
+	// Tiempo extra: lo aprueba un supervisor con su PIN. Pasa con `ver` porque se
+	// pide desde la tablet del salón, no desde una pantalla de administración.
+	g.Post("/turnos/:id/extender", s.handleExtenderTurno)
+	// Horarios: los fija quien administra.
+	g.Get("/horarios", admin, s.handleHorarios)
+	g.Put("/mesoneros/:id/horario", admin, s.handleGuardarHorario)
+	g.Post("/turnos/:id/forzar-cierre", admin, s.handleForzarCierreTurno)
+}
+
+// estadoTurnoError traduce los errores del turno al código HTTP correcto: un PIN
+// equivocado es 403, un relevo mal elegido es 409 (conflicto de estado) y lo
+// demás 400. Que el cliente pueda distinguirlos es lo que permite a la pantalla
+// reaccionar distinto ante «PIN incorrecto» y ante «elige a quién le pasas las
+// mesas».
+//
+// 403 y NO 401 para el PIN, por dos razones: acá la sesión SÍ es válida (lo que
+// falló es una autorización puntual), y el cliente trata el 401 como sesión
+// caída —ni siquiera lee el cuerpo—, así que un 401 se tragaría el mensaje. Es
+// el mismo criterio que ya usa /api/cajas/autorizar.
+func estadoTurnoError(err error) int {
+	switch {
+	case errors.Is(err, application.ErrPinMesoneroInvalido),
+		errors.Is(err, application.ErrPinSupervisorInvalido):
+		return fiber.StatusForbidden
+	case errors.Is(err, application.ErrSinTurnoAbierto),
+		errors.Is(err, application.ErrTurnoCerrandoSinMesas):
+		return fiber.StatusForbidden
+	case errors.Is(err, application.ErrRelevoRequerido),
+		errors.Is(err, application.ErrRelevoInvalido),
+		errors.Is(err, application.ErrTurnoYaAbierto),
+		errors.Is(err, application.ErrTurnoNoVivo):
+		return fiber.StatusConflict
+	case errors.Is(err, application.ErrMesoneroNoExiste),
+		errors.Is(err, application.ErrTurnoNoExiste):
+		return fiber.StatusNotFound
+	}
+	return fiber.StatusBadRequest
+}
+
+func (s *Server) handleMesoneros(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"mesoneros": s.svc.ListarMesoneros(empresaIDOf(c), sedeIDOf(c))})
+}
+
+func (s *Server) handleCrearMesonero(c *fiber.Ctx) error {
+	var in struct {
+		Nombre    string `json:"nombre"`
+		SedeID    string `json:"sedeId"`
+		UsuarioID string `json:"usuarioId"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	sede := in.SedeID
+	if sede == "" {
+		sede = sedeIDOf(c)
+	}
+	out, err := s.svc.CrearMesonero(empresaIDOf(c), principalOf(c).UserID, origen(c), sede, in.Nombre, in.UsuarioID)
+	if err != nil {
+		return c.Status(estadoTurnoError(err)).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+func (s *Server) handleActualizarMesonero(c *fiber.Ctx) error {
+	var in struct {
+		Nombre *string `json:"nombre"`
+		SedeID *string `json:"sedeId"`
+		Activo *bool   `json:"activo"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.ActualizarMesonero(empresaIDOf(c), principalOf(c).UserID, origen(c), c.Params("id"),
+		application.CambiosMesonero{Nombre: in.Nombre, SedeID: in.SedeID, Activo: in.Activo})
+	if err != nil {
+		return c.Status(estadoTurnoError(err)).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleFijarPinMesonero(c *fiber.Ctx) error {
+	var in struct {
+		Pin           string `json:"pin"`
+		PinSupervisor string `json:"pinSupervisor"`
+		Reiniciar     bool   `json:"reiniciar"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	if err := s.svc.FijarPinMesonero(empresaIDOf(c), principalOf(c).UserID, origen(c),
+		c.Params("id"), in.Pin, in.PinSupervisor, in.Reiniciar); err != nil {
+		return c.Status(estadoTurnoError(err)).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+func (s *Server) handleTurnosVivos(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"turnos": s.svc.TurnosVivos(empresaIDOf(c), sedeIDOf(c))})
+}
+
+func (s *Server) handleHistorialTurnos(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"turnos": s.svc.HistorialTurnos(empresaIDOf(c), sedeIDOf(c))})
+}
+
+// codigoPresencia traduce los fallos de presencia a un código estable. Vacío
+// cuando el error no es de presencia.
+func codigoPresencia(err error) string {
+	switch {
+	case errors.Is(err, application.ErrPresenciaSinUbicacion):
+		return "sin_ubicacion"
+	case errors.Is(err, application.ErrFueraDeSede):
+		return "fuera_de_sede"
+	}
+	return ""
+}
+
+func (s *Server) handleIniciarTurno(c *fiber.Ctx) error {
+	var in struct {
+		MesoneroID    string `json:"mesoneroId"`
+		Pin           string `json:"pin"`
+		PinSupervisor string `json:"pinSupervisor"`
+		// Pos es la ubicación que reportó el navegador. Opcional: solo se exige
+		// cuando la empresa declaró ese rol como de PRESENCIA ESTRICTA.
+		Pos *application.Posicion `json:"pos"`
+		// ExcepcionMotivo lo declara el supervisor cuando el GPS no colabora (sin
+		// permiso, bajo techo, sin señal). No es un atajo: queda auditado con su
+		// nombre y su motivo, que es lo que permite ver después a quién le hace
+		// falta la excepción todas las noches.
+		ExcepcionMotivo string `json:"excepcionMotivo"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.IniciarTurnoConPresencia(empresaIDOf(c), principalOf(c).UserID, origen(c),
+		in.MesoneroID, in.Pin, in.PinSupervisor, in.Pos, in.ExcepcionMotivo)
+	if err != nil {
+		// `codigo` es legible por la máquina: la pantalla tiene que distinguir «no
+		// hay ubicación» (ofrecer la excepción del supervisor) de «estás fuera del
+		// local» (rechazo), y comparar textos traducibles sería frágil.
+		if cod := codigoPresencia(err); cod != "" {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error(), "codigo": cod})
+		}
+		return c.Status(estadoTurnoError(err)).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+func (s *Server) handleFinalizarTurno(c *fiber.Ctx) error {
+	out, err := s.svc.FinalizarTurno(empresaIDOf(c), principalOf(c).UserID, origen(c), c.Params("id"))
+	if err != nil {
+		return c.Status(estadoTurnoError(err)).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleCandidatosRelevo(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"relevos": s.svc.CandidatosRelevo(empresaIDOf(c), c.Params("id"))})
+}
+
+func (s *Server) handleForzarCierreTurno(c *fiber.Ctx) error {
+	var in struct {
+		RelevoMesoneroID string `json:"relevoMesoneroId"`
+		PinSupervisor    string `json:"pinSupervisor"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.CerrarTurnoForzado(empresaIDOf(c), principalOf(c).UserID, origen(c),
+		c.Params("id"), in.RelevoMesoneroID, in.PinSupervisor)
+	if err != nil {
+		return c.Status(estadoTurnoError(err)).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleHorarios(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
+		"horarios": s.svc.Horarios(empresaIDOf(c), sedeIDOf(c)),
+		// El modo viaja con la lista: la pantalla necesita decir si al vencer se
+		// avisa o se cierra solo, y pedirlo aparte sería una llamada de más.
+		"modo": s.svc.ModoHorario(empresaIDOf(c), sedeIDOf(c)),
+	})
+}
+
+func (s *Server) handleGuardarHorario(c *fiber.Ctx) error {
+	var in struct {
+		Franjas []mesonero.Franja `json:"franjas"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.GuardarHorario(empresaIDOf(c), principalOf(c).UserID, origen(c), c.Params("id"), in.Franjas)
+	if err != nil {
+		return c.Status(estadoTurnoError(err)).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleExtenderTurno(c *fiber.Ctx) error {
+	var in struct {
+		Minutos       int    `json:"minutos"`
+		PinSupervisor string `json:"pinSupervisor"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.ExtenderTurno(empresaIDOf(c), principalOf(c).UserID, origen(c),
+		c.Params("id"), in.Minutos, in.PinSupervisor)
+	if err != nil {
+		return c.Status(estadoTurnoError(err)).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(out)
 }

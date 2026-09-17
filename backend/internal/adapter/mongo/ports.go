@@ -15,6 +15,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/inventario"
 	"github.com/mornix/elerp/internal/domain/listaprecio"
 	"github.com/mornix/elerp/internal/domain/organizacion"
+	"github.com/mornix/elerp/internal/domain/mesonero"
 	"github.com/mornix/elerp/internal/domain/promocion"
 	"github.com/mornix/elerp/internal/domain/proveedor"
 	"github.com/mornix/elerp/internal/domain/sede"
@@ -67,4 +68,9 @@ var (
 	_ unidadmedida.Repository      = (*UnidadMedidaRepo)(nil)
 	_ almacen.Repository           = (*AlmacenRepo)(nil)
 	_ aplicacion.Repository        = (*ModuloRepo)(nil)
+	_ mesonero.Repository          = (*MesoneroRepo)(nil)
+	_ mesonero.TurnoRepository     = (*TurnoRepo)(nil)
+	_ mesonero.HorarioRepository   = (*HorarioRepo)(nil)
+	_ fiscal.AlicuotaRepo          = (*AlicuotaRepo)(nil)
+	_ fiscal.ConceptoISLRRepo      = (*ConceptoISLRRepo)(nil)
 )

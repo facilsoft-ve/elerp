@@ -390,3 +390,69 @@ func rolesMatrix() map[string]map[string]string {
 		usuario.RolMesonero:      {"label": "Mesonero", "resumen": "Comandera del restaurante (una sede)"},
 	}
 }
+
+
+/* --- Presencia estricta (geolocalización) ----------------------------------
+ *
+ * Dos ajustes de PLATAFORMA que sostienen la verificación de presencia (ver
+ * application/presencia.go): dónde está cada sede y qué roles tienen que estar
+ * ahí para empezar a trabajar. Solo Dueña/Desarrollador.
+ */
+
+// registerPresencia monta la configuración de presencia estricta. Se llama
+// desde server.go junto al resto de rutas de tenencia.
+// Los dos ajustes viven en PLANOS distintos y por eso se registran por separado:
+//
+//   - la ubicación es administración de la EMPRESA y va por :id, SIN contexto de
+//     tenant, como el resto de las rutas de sede. Tiene que registrarse ANTES de
+//     que se cree el grupo `data`: ese grupo monta `empresaContext` sobre el
+//     mismo prefijo, así que todo lo que se registre después lo hereda y la ruta
+//     empezaría a exigir el header X-Empresa-ID que no usa.
+//   - los roles son configuración del tenant ya resuelto (grupo `data`).
+func (s *Server) registerPresenciaSedes(api fiber.Router) {
+	api.Put("/empresas/:id/sedes/:sedeId/ubicacion", s.handleUbicacionSede)
+}
+
+func (s *Server) registerPresenciaConfig(data fiber.Router) {
+	data.Put("/empresa/config/presencia", s.requireRoles(usuario.RolDueno, usuario.RolDesarrollador), s.handleRolesPresencia)
+}
+
+// handleUbicacionSede fija (o borra, con lat/lon en cero) las coordenadas del
+// local y su radio de tolerancia. Va por :id de empresa —no por el header de
+// tenant— porque se configura desde la administración de la empresa, igual que
+// el resto de los ajustes de sede.
+func (s *Server) handleUbicacionSede(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if !s.puedeAdministrar(c, id) {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "sin permiso"})
+	}
+	var in struct {
+		Lat    float64 `json:"lat"`
+		Lon    float64 `json:"lon"`
+		RadioM int     `json:"radioM"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.FijarUbicacionSede(id, c.Params("sedeId"), principalOf(c).UserID, origen(c), in.Lat, in.Lon, in.RadioM)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+// handleRolesPresencia define qué roles exigen estar en la sede. Lista vacía =
+// ninguno, que es el comportamiento por defecto.
+func (s *Server) handleRolesPresencia(c *fiber.Ctx) error {
+	var in struct {
+		Roles []string `json:"roles"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.FijarRolesPresencia(empresaIDOf(c), principalOf(c).UserID, origen(c), in.Roles)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"rolesPresenciaEstricta": out.RolesPresenciaEstricta})
+}

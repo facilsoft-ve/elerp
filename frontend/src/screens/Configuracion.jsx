@@ -9,6 +9,8 @@ import { useData, useTasa } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
+import { invalidarMaestro } from '../components/alicuota.jsx'
+import { SelectorModelo, NotaCatalogo } from '../components/dispositivo.jsx'
 import { fechaCortaVE, explicarFallo } from '../components/tasa.jsx'
 import { monedaLabel, monedaNombre, monedaSimbolo, permiteFuenteBcv } from '../lib/precio.js'
 import { Promociones } from './Promociones.jsx'
@@ -1019,11 +1021,13 @@ function Impuestos() {
   }
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-3xl space-y-4">
+      <MaestroAlicuotas puedeEditar={puedeEditar} />
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4 space-y-3.5">
+        <div className="text-[13px] font-semibold">Tasas generales de la empresa</div>
         <div className="text-[12.5px] text-slate-500 dark:text-slate-400">
-          Las alícuotas de <strong>IVA</strong> e <strong>IGTF</strong> son configurables por empresa: así una nueva
-          providencia del SENIAT se aplica sin actualizar el sistema. Se guardan en fracción y se editan en porcentaje.
+          El <strong>IGTF</strong> y la tasa de IVA de respaldo. La de IVA solo se usa para productos que no tienen
+          clasificación en el maestro de arriba; lo normal es clasificar el producto y no tocar esto.
         </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Alícuota de IVA (%)" required
@@ -1084,6 +1088,242 @@ function Impuestos() {
         </div>
       ) : null}
     </div>
+  )
+}
+
+/* --- Maestro de impuestos -------------------------------------------------
+ *
+ * Las alícuotas que la empresa puede aplicar, CON VIGENCIA. La vigencia no es
+ * adorno: cuando una providencia cambia una tasa, la fila vieja no se pisa — se
+ * cierra y se abre otra. Así un documento de hace seis meses se sigue
+ * explicando con la tasa de su día, que es lo que exige el Art. 177. La regla la
+ * hace cumplir el servidor; acá solo se presenta.
+ */
+
+const TIPOS_ALICUOTA = [
+  { id: 'general', label: 'General' },
+  { id: 'reducida', label: 'Reducida' },
+  { id: 'adicional', label: 'Adicional (recargo)' },
+  { id: 'exento', label: 'Exento' },
+]
+
+// pctDe / fracDe convierten entre lo que se guarda (0.16) y lo que se edita (16).
+const pctDe = (frac) => Math.round((frac || 0) * 10000) / 100
+const fracDe = (pct) => Math.round(Number(pct) * 100) / 10000
+
+function MaestroAlicuotas({ puedeEditar }) {
+  const toast = useToast()
+  const [filas, setFilas] = useState(null)
+  const [error, setError] = useState('')
+  const [form, setForm] = useState(null) // null | {} (nueva) | alícuota (editar)
+
+  const cargar = useCallback(() => {
+    setError('')
+    api.alicuotas()
+      .then((r) => setFilas(r?.alicuotas || []))
+      .catch((e) => { setFilas([]); setError(e?.message || 'No se pudo cargar el maestro de impuestos.') })
+  }, [])
+  useEffect(() => { cargar() }, [cargar])
+
+  const recargar = () => { invalidarMaestro(); cargar() }
+
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <div className="text-[13px] font-semibold">Maestro de impuestos</div>
+          <div className="text-[12.5px] text-slate-500 dark:text-slate-400 mt-0.5">
+            Las alícuotas que puedes asignarle a un producto. Cambiar una tasa <strong>no borra la anterior</strong>:
+            se cierra su vigencia y se abre una nueva, para que los documentos ya emitidos se sigan explicando con
+            la tasa de su día.
+          </div>
+        </div>
+        {puedeEditar ? (
+          <Button size="sm" icon={<Icon.Plus size={15} />} onClick={() => setForm({})}>Nueva alícuota</Button>
+        ) : null}
+      </div>
+
+      <div className="rounded-lg bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-900/40 px-3 py-2.5 text-[12px] text-amber-900 dark:text-amber-200 flex gap-2.5 items-start mb-3">
+        <Icon.CircleAlert size={15} className="mt-0.5 shrink-0" />
+        <span>
+          La <strong>suntuaria</strong> (bienes de lujo) es <strong>16 % + 15 % adicional</strong>, no una tasa
+          del 31 %. Se cargan por separado porque el SENIAT las declara en columnas distintas del libro de
+          ventas: si pones 31 en el porcentaje general, la declaración sale mal.
+        </span>
+      </div>
+
+      {error ? (
+        <Empty icon={<Icon.CircleAlert size={22} />} title="No se pudo cargar el maestro" body={error}
+          cta={<Button onClick={cargar} icon={<Icon.Refresh size={15} />}>Reintentar</Button>} />
+      ) : filas === null ? (
+        <TableSkeleton rows={4} cols={5} />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                <th className="py-2 pr-3 font-medium">Código</th>
+                <th className="py-2 pr-3 font-medium">Nombre</th>
+                <th className="py-2 pr-3 font-medium">Tipo</th>
+                <th className="py-2 pr-3 font-medium text-right">IVA</th>
+                <th className="py-2 pr-3 font-medium text-right">Adicional</th>
+                <th className="py-2 pr-3 font-medium">Vigencia</th>
+                {puedeEditar ? <th className="py-2 pr-3 font-medium text-right">Acciones</th> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map((a) => (
+                <tr key={a.id} className={`border-b border-slate-100 dark:border-slate-800/70 ${a.vigente ? '' : 'opacity-55'}`}>
+                  <td className="py-2 pr-3 num text-[12.5px] font-medium">{a.codigo}</td>
+                  <td className="py-2 pr-3 text-[12.5px]">{a.nombre}</td>
+                  <td className="py-2 pr-3 text-[12px] text-slate-500">
+                    {TIPOS_ALICUOTA.find((t) => t.id === a.tipo)?.label || a.tipo}
+                  </td>
+                  <td className="py-2 pr-3 text-right num text-[12.5px]">
+                    {a.tipo === 'exento' ? <span className="text-slate-400">—</span> : `${pctDe(a.porcentaje)} %`}
+                  </td>
+                  <td className="py-2 pr-3 text-right num text-[12.5px]">
+                    {a.adicional > 0
+                      ? <span className="text-amber-700 dark:text-amber-400">+{pctDe(a.adicional)} %</span>
+                      : <span className="text-slate-400">—</span>}
+                  </td>
+                  <td className="py-2 pr-3 text-[11.5px] text-slate-500 num whitespace-nowrap">
+                    {a.vigenteDesde}{a.vigenteHasta ? ` → ${a.vigenteHasta}` : ''}
+                    {a.vigente ? <Badge size="sm" color="teal" className="ml-1.5">rige hoy</Badge> : null}
+                  </td>
+                  {puedeEditar ? (
+                    <td className="py-2 pr-3 text-right whitespace-nowrap">
+                      <Button size="sm" variant="ghost" icon={<Icon.Pencil size={14} />}
+                        onClick={() => setForm(a)}>Editar</Button>
+                    </td>
+                  ) : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {form ? (
+        <AlicuotaForm alicuota={form.id ? form : null} onCerrar={() => setForm(null)}
+          onGuardado={(msg) => { setForm(null); recargar(); toast({ title: 'Maestro actualizado', body: msg }) }} />
+      ) : null}
+    </div>
+  )
+}
+
+function AlicuotaForm({ alicuota, onCerrar, onGuardado }) {
+  const edicion = !!alicuota
+  const [f, setF] = useState(() => ({
+    codigo: alicuota?.codigo || '',
+    nombre: alicuota?.nombre || '',
+    tipo: alicuota?.tipo || 'general',
+    porcentaje: String(pctDe(alicuota?.porcentaje)),
+    adicional: String(pctDe(alicuota?.adicional)),
+    vigenteDesde: alicuota?.vigenteDesde || new Date().toISOString().slice(0, 10),
+  }))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const set = (k, v) => { setF((s) => ({ ...s, [k]: v })); setError('') }
+  const esExento = f.tipo === 'exento'
+
+  // Cambiar la TASA abre una vigencia nueva; renombrar no. Se le dice a quien
+  // edita, porque el resultado en la tabla es distinto y si no parecería un error.
+  const cambiaTasa = edicion && (
+    fracDe(f.porcentaje) !== (alicuota.porcentaje || 0) || fracDe(f.adicional) !== (alicuota.adicional || 0))
+
+  const guardar = async () => {
+    if (!edicion && !f.codigo.trim()) { setError('El código es obligatorio.'); return }
+    setBusy(true); setError('')
+    try {
+      if (edicion) {
+        await api.actualizarAlicuota(alicuota.id, {
+          nombre: f.nombre.trim(),
+          // Solo se mandan las tasas cuando cambian: enviarlas siempre haría que
+          // un simple renombre abriera una vigencia nueva.
+          ...(cambiaTasa ? { porcentaje: fracDe(f.porcentaje), adicional: esExento ? 0 : fracDe(f.adicional), vigenteDesde: f.vigenteDesde } : {}),
+        })
+        onGuardado(cambiaTasa ? `${f.nombre} rige desde ${f.vigenteDesde}` : `${f.nombre} actualizada`)
+      } else {
+        await api.crearAlicuota({
+          codigo: f.codigo.trim().toLowerCase(), nombre: f.nombre.trim(), tipo: f.tipo,
+          porcentaje: esExento ? 0 : fracDe(f.porcentaje),
+          adicional: esExento ? 0 : fracDe(f.adicional),
+          vigenteDesde: f.vigenteDesde,
+        })
+        onGuardado(`${f.nombre || f.codigo} creada`)
+      }
+    } catch (e) {
+      setError(e?.message || 'No se pudo guardar.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onCerrar} size="sm" icon={<Icon.Receipt size={18} />}
+      title={edicion ? `Alícuota «${alicuota.codigo}»` : 'Nueva alícuota'}
+      sub="Las tasas se escriben en porcentaje; se guardan en fracción"
+      footer={<>
+        <Button variant="ghost" onClick={onCerrar}>Cancelar</Button>
+        <Button onClick={guardar} loading={busy} icon={<Icon.Check size={16} />}>Guardar</Button>
+      </>}>
+      <div className="space-y-3.5">
+        {!edicion ? (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Código" required hint="lo guarda el producto">
+              <Input value={f.codigo} placeholder="suntuario" autoFocus
+                onChange={(e) => set('codigo', e.target.value)} />
+            </Field>
+            <Field label="Tipo" required>
+              <Select value={f.tipo} onChange={(e) => set('tipo', e.target.value)}>
+                {TIPOS_ALICUOTA.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </Select>
+            </Field>
+          </div>
+        ) : null}
+        <Field label="Nombre" hint="lo que se lee en la ficha del producto">
+          <Input value={f.nombre} placeholder="General (16%)" onChange={(e) => set('nombre', e.target.value)} />
+        </Field>
+        {!esExento ? (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="IVA (%)" required>
+              <Input type="number" min="0" max="100" step="0.01" value={f.porcentaje}
+                onChange={(e) => set('porcentaje', e.target.value)} className="num" />
+            </Field>
+            <Field label="Adicional (%)" hint="recargo suntuario · 0 si no lleva">
+              <Input type="number" min="0" max="100" step="0.01" value={f.adicional}
+                onChange={(e) => set('adicional', e.target.value)} className="num" />
+            </Field>
+          </div>
+        ) : (
+          <div className="text-[12px] text-slate-500 rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5">
+            Una alícuota exenta no causa impuesto. Su base <strong>sí</strong> se declara, en su propia columna.
+          </div>
+        )}
+        {!esExento && Number(f.adicional) > 0 ? (
+          <div className="text-[11.5px] text-amber-700 dark:text-amber-400">
+            Este producto pagará <strong>{Number(f.porcentaje) || 0} % + {Number(f.adicional) || 0} %</strong> —
+            las dos porciones van separadas en la factura y en el libro.
+          </div>
+        ) : null}
+        {!edicion || cambiaTasa ? (
+          <Field label="Rige desde" required
+            hint={cambiaTasa ? 'se cierra la vigencia anterior el día antes' : ''}>
+            <Input type="date" value={f.vigenteDesde} onChange={(e) => set('vigenteDesde', e.target.value)} />
+          </Field>
+        ) : null}
+        {cambiaTasa ? (
+          <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 px-3 py-2.5 text-[12px] text-slate-600 dark:text-slate-300 flex gap-2.5 items-start">
+            <Icon.Shield size={15} className="mt-0.5 shrink-0 text-slate-400" />
+            <span>
+              Estás cambiando la <strong>tasa</strong>: se creará una alícuota nueva desde esa fecha y la actual
+              quedará cerrada el día anterior. Los documentos ya emitidos conservan la suya.
+            </span>
+          </div>
+        ) : null}
+        {error ? <div className="text-[12px] text-red-600 dark:text-red-400">{error}</div> : null}
+      </div>
+    </Modal>
   )
 }
 
@@ -3501,16 +3741,18 @@ function DispositivoForm({ dispositivo, sedes, onClose, onSaved }) {
             </Select>
           </Field>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Marca" hint="opcional">
-            <Input value={f.marca} placeholder="Ej. The Factory HKA"
-              onChange={(e) => setF((s) => ({ ...s, marca: e.target.value }))} />
-          </Field>
-          <Field label="Modelo" hint="opcional">
-            <Input value={f.modelo} placeholder="Ej. PP-9"
-              onChange={(e) => setF((s) => ({ ...s, modelo: e.target.value }))} />
-          </Field>
-        </div>
+        {/* Marca y modelo salen del catálogo precargado del mercado venezolano.
+            Elegir un modelo conocido PRECARGA la conexión (en la balanza, el
+            protocolo y el puerto: el dato que nadie en el mostrador se sabe). */}
+        <SelectorModelo tipo={f.tipo}
+          marca={f.marca} modelo={f.modelo}
+          onChange={({ marca, modelo }, ficha) => setF((s) => ({
+            ...s, marca, modelo,
+            // El catálogo SUGIERE: solo rellena lo que está en blanco, nunca
+            // pisa lo que la persona ya escribió a mano.
+            puerto: ficha && !s.puerto ? (ficha.puerto || '') : s.puerto,
+            protocolo: ficha && !s.protocolo ? (ficha.protocolo || '') : s.protocolo,
+          }))} />
         {esBalanza ? (
           <div className="grid grid-cols-2 gap-3">
             <Field label="Puerto" hint="opcional — dónde la ve el equipo">
@@ -3531,6 +3773,7 @@ function DispositivoForm({ dispositivo, sedes, onClose, onSaved }) {
           </Field>
         )}
         {error && f.nombre.trim() ? <div className="text-[12px] text-red-600 dark:text-red-400">{error}</div> : null}
+        <NotaCatalogo tipo={f.tipo} />
       </div>
     </Modal>
   )

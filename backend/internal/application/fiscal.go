@@ -84,6 +84,10 @@ var (
 	// documento (RIF/cédula) debe ser válido. El consumidor final (sin cliente) no
 	// lleva documento y queda permitido para la venta minorista.
 	ErrReceptorDocumentoInvalido = errors.New("el documento del cliente (receptor) no es válido para facturar")
+	// ErrReceptorSinDireccion: la factura venezolana exige el domicilio fiscal del
+	// receptor. Se pide con el mismo criterio que el RIF —solo al cliente
+	// identificado— porque al consumidor final tampoco se le pide RIF.
+	ErrReceptorSinDireccion = errors.New("el cliente no tiene dirección fiscal y la factura la exige")
 	ErrDocumentoNoExiste         = errors.New("documento no existe")
 	ErrYaAnulado                 = errors.New("el documento ya fue anulado")
 	ErrNotaCreditoVacia          = errors.New("la nota de crédito no acredita ninguna cantidad")
@@ -290,6 +294,11 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 	}
 
 	// Líneas desde el catálogo.
+	// Desglose por alícuota: una fila por tasa aplicada. Es lo que el libro de
+	// ventas declara en columnas separadas y lo que la suma `IVA` ya no permite
+	// descomponer.
+	desglose := map[string]*fiscal.DocumentoImpuesto{}
+	ordenDesglose := []string{}
 	for _, l := range in.Lineas {
 		p, ok := s.productos.BySKU(empresaID, l.SKU)
 		if !ok {
@@ -319,22 +328,27 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 			}
 		}
 		total := precio * l.Cantidad
+		// Clasificación fiscal del renglón, resuelta contra el maestro con la
+		// vigencia del DÍA de emisión y SELLADA en la línea.
+		al := s.alicuotaDeProducto(empresaID, p, doc.Fecha)
 		doc.Lineas = append(doc.Lineas, fiscal.Linea{
 			ProductoID: p.ID, SKU: p.SKU, Nombre: p.Nombre,
 			Cantidad: l.Cantidad, PrecioUnitario: precio, Total: total,
-			Exento: p.ExentoIVA,
+			Exento:         !al.Grava(),
+			AlicuotaCodigo: al.Codigo, Alicuota: al.Porcentaje, AlicuotaAdicional: al.Adicional,
 			// Snapshot de la receta si es un plato: el inventario descontará sus
 			// insumos, no el plato. Vacío para un producto normal.
 			Insumos: s.recetaSnapshot(empresaID, p),
 		})
 		doc.Subtotal += total
 		// El IVA sale solo de lo gravado: la cesta básica venezolana está exenta
-		// y la factura tiene que separar las dos bases.
-		if p.ExentoIVA {
+		// y la factura tiene que separar las bases.
+		if !al.Grava() {
 			doc.BaseExenta += total
 		} else {
 			doc.BaseImponible += total
 		}
+		acumularImpuesto(desglose, &ordenDesglose, al, total)
 	}
 	doc.BaseImponible = round2(doc.BaseImponible)
 	doc.BaseExenta = round2(doc.BaseExenta)
@@ -348,7 +362,10 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 	// (nota de crédito, base de IGTF) las leen de aquí, no de la config de mañana.
 	doc.AlicuotaIVA = s.alicuotaIVA(empresaID)
 	doc.AlicuotaIGTF = s.alicuotaIGTF(empresaID)
-	doc.IVA = round2(doc.BaseImponible * doc.AlicuotaIVA)
+	// El IVA es la SUMA del desglose, no una base por una tasa: con varias
+	// alícuotas conviviendo (16%, 8% y el recargo suntuario) multiplicar la base
+	// total por una sola tasa daría cualquier cosa.
+	doc.Impuestos, doc.IVA = cerrarDesglose(desglose, ordenDesglose)
 
 	// Pagos + IGTF sobre la porción en divisas (cobrado en Bs, impuesto separado).
 	// Multimoneda: cada pago se convierte con la tasa de SU divisa (USD, EUR, …),
@@ -430,9 +447,17 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 		if err := fiscal.ValidarDocumento(cl.TipoDocumento, cl.Documento); err != nil {
 			return fiscal.Documento{}, fmt.Errorf("%w: %v", ErrReceptorDocumentoInvalido, err)
 		}
+		// El domicilio fiscal es requisito de la factura, y se exige con el MISMO
+		// criterio que el RIF: solo cuando hay un cliente identificado. Al
+		// consumidor final no se le pide ni RIF ni dirección — sería trabar la
+		// venta de mostrador, que es la mayoría del volumen de una bodega.
+		if strings.TrimSpace(cl.Direccion) == "" {
+			return fiscal.Documento{}, fmt.Errorf("%w: «%s»", ErrReceptorSinDireccion, cl.Nombre)
+		}
 		doc.ClienteID = cl.ID
 		doc.ClienteNombre = cl.Nombre
 		doc.ClienteDocumento = cl.TipoDocumento + "-" + cl.Documento
+		doc.ClienteDireccion = strings.TrimSpace(cl.Direccion)
 	}
 	if doc.ClienteNombre == "" {
 		doc.ClienteNombre = "Consumidor final"
@@ -545,6 +570,7 @@ func (s *Service) AnularDocumento(empresaID, sedeID, actor, origen, refID, motiv
 	rev := fiscal.Documento{
 		EmpresaID: empresaID, SedeID: sedeID, Tipo: fiscal.TipoAnulacion, Modalidad: orig.Modalidad,
 		ClienteID: orig.ClienteID, ClienteNombre: orig.ClienteNombre, ClienteDocumento: orig.ClienteDocumento,
+		ClienteDireccion: orig.ClienteDireccion,
 		Lineas: orig.Lineas, Subtotal: -orig.Subtotal, IVA: -orig.IVA, IGTF: -orig.IGTF, Total: -orig.Total,
 		// Las dos bases también se revierten: los libros fiscales se cuadran por
 		// base imponible y base exenta, no solo por el total.
@@ -633,6 +659,7 @@ func (s *Service) EmitirNotaCredito(empresaID, sedeID, actor, origen, refID, mot
 	nc := fiscal.Documento{
 		EmpresaID: empresaID, SedeID: sedeID, Tipo: fiscal.TipoNotaCredito, Modalidad: orig.Modalidad,
 		ClienteID: orig.ClienteID, ClienteNombre: orig.ClienteNombre, ClienteDocumento: orig.ClienteDocumento,
+		ClienteDireccion: orig.ClienteDireccion,
 		// La nota hereda la tasa del original: acredita la misma operación con la
 		// misma conversión. Usar la tasa de hoy descuadraría el asiento.
 		Moneda: orig.Moneda, TasaCambio: orig.TasaCambio, TasaFuente: orig.TasaFuente,
@@ -803,6 +830,7 @@ func (s *Service) EmitirNotaDebito(empresaID, sedeID, actor, origen, refID strin
 	nd := fiscal.Documento{
 		EmpresaID: empresaID, SedeID: sedeID, Tipo: fiscal.TipoNotaDebito, Modalidad: orig.Modalidad,
 		ClienteID: orig.ClienteID, ClienteNombre: orig.ClienteNombre, ClienteDocumento: orig.ClienteDocumento,
+		ClienteDireccion: orig.ClienteDireccion,
 		// La nota hereda la tasa del original: carga sobre la misma operación con la
 		// misma conversión. Usar la tasa de hoy descuadraría contra la factura.
 		Moneda: orig.Moneda, TasaCambio: orig.TasaCambio, TasaFuente: orig.TasaFuente,
@@ -1036,4 +1064,95 @@ func partesDeVuelto(d fiscal.Documento) []fiscal.VueltoParte {
 		Moneda: moneda, Metodo: metodo, Monto: d.Vuelto, MontoBs: montoBs,
 		Banco: d.VueltoBanco, Cedula: d.VueltoCedula, Telefono: d.VueltoTelefono,
 	}}
+}
+
+/* --- Maestro de impuestos: resolución y desglose --------------------------- */
+
+// alicuotaDeProducto resuelve qué alícuota le toca a un producto EN UNA FECHA.
+//
+// Cae con gracia, en este orden: el código del producto contra el maestro
+// vigente ese día; si el producto no tiene código (catálogo anterior al
+// maestro), su viejo booleano `ExentoIVA`; y si tampoco hay maestro cargado, la
+// tasa configurada de la empresa. Ninguna empresa puede quedarse sin poder
+// facturar porque el maestro no esté sembrado.
+func (s *Service) alicuotaDeProducto(empresaID string, p inventario.Producto, fecha string) fiscal.Alicuota {
+	codigo := strings.TrimSpace(p.AlicuotaCodigo)
+	if codigo == "" {
+		// Catálogo viejo: el booleano sigue mandando.
+		if p.ExentoIVA {
+			codigo = fiscal.CodExento
+		} else {
+			codigo = fiscal.CodGeneral
+		}
+	}
+	if s.alicuotas != nil {
+		if a, ok := fiscal.VigenteEn(s.alicuotas.List(empresaID), codigo, fecha); ok && a.Activa {
+			return a
+		}
+	}
+	// Sin maestro: se reconstruye la clasificación mínima con la tasa de la
+	// empresa, que es exactamente como se comportaba antes de todo esto.
+	if codigo == fiscal.CodExento {
+		return fiscal.Alicuota{Codigo: fiscal.CodExento, Nombre: "Exento", Tipo: fiscal.TipoExento, Activa: true}
+	}
+	return fiscal.Alicuota{
+		Codigo: fiscal.CodGeneral, Nombre: "General", Tipo: fiscal.TipoGeneral,
+		Porcentaje: s.alicuotaIVA(empresaID), Activa: true,
+	}
+}
+
+// acumularImpuesto suma una base al desglose. Una alícuota suntuaria produce DOS
+// filas sobre la MISMA base —la general y su recargo—, porque el libro de ventas
+// las declara en columnas separadas y guardarlas juntas como un 31% haría
+// imposible llenarlo.
+func acumularImpuesto(desglose map[string]*fiscal.DocumentoImpuesto, orden *[]string, al fiscal.Alicuota, base float64) {
+	sumar := func(clave, nombre, tipo string, pct float64) {
+		f, ok := desglose[clave]
+		if !ok {
+			f = &fiscal.DocumentoImpuesto{Codigo: al.Codigo, Nombre: nombre, Tipo: tipo, Porcentaje: pct}
+			desglose[clave] = f
+			*orden = append(*orden, clave)
+		}
+		f.Base += base
+	}
+	if !al.Grava() {
+		sumar(al.Codigo+"|exento", al.Nombre, fiscal.TipoExento, 0)
+		return
+	}
+	sumar(al.Codigo+"|base", al.Nombre, al.Tipo, al.Porcentaje)
+	if al.Adicional > 0 {
+		sumar(al.Codigo+"|adicional", al.Nombre+" · adicional", fiscal.TipoAdicional, al.Adicional)
+	}
+}
+
+// cerrarDesglose redondea cada fila y devuelve el total de impuesto. El monto se
+// calcula POR FILA y después se suma: redondear al final sobre una base mezclada
+// daría un céntimo distinto del que declara el libro, y el asiento de venta —que
+// arma el Haber con estas cifras— descuadraría.
+func cerrarDesglose(desglose map[string]*fiscal.DocumentoImpuesto, orden []string) ([]fiscal.DocumentoImpuesto, float64) {
+	out := make([]fiscal.DocumentoImpuesto, 0, len(orden))
+	var total float64
+	for _, k := range orden {
+		f := desglose[k]
+		f.Base = round2(f.Base)
+		f.Monto = round2(f.Base * f.Porcentaje)
+		total = round2(total + f.Monto)
+		out = append(out, *f)
+	}
+	return out, total
+}
+
+// ConAlicuotas cablea el maestro de impuestos. Opcional: sin él el motor usa la
+// tasa única configurada en la empresa, que es como funcionaba antes.
+func (s *Service) ConAlicuotas(r fiscal.AlicuotaRepo) *Service {
+	s.alicuotas = r
+	return s
+}
+
+// Alicuotas devuelve el maestro de impuestos de la empresa.
+func (s *Service) Alicuotas(empresaID string) []fiscal.Alicuota {
+	if s.alicuotas == nil {
+		return []fiscal.Alicuota{}
+	}
+	return s.alicuotas.List(empresaID)
 }

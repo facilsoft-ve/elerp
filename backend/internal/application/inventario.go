@@ -10,6 +10,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/almacen"
 	"github.com/mornix/elerp/internal/domain/auditoria"
 	"github.com/mornix/elerp/internal/domain/empresa"
+	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/inventario"
 )
 
@@ -205,6 +206,16 @@ func (s *Service) Productos(empresaID string) []inventario.Producto {
 
 // CrearProducto da de alta un producto validando SKU único por empresa.
 func (s *Service) CrearProducto(empresaID, actor, origen string, p inventario.Producto) (inventario.Producto, error) {
+	// Misma validación que en la edición: un código que el maestro no conoce
+	// dejaría el producto facturando a la tasa de respaldo en silencio.
+	cod, err := s.validarAlicuotaProducto(empresaID, p.AlicuotaCodigo)
+	if err != nil {
+		return inventario.Producto{}, err
+	}
+	p.AlicuotaCodigo = cod
+	if cod != "" {
+		p.ExentoIVA = cod == fiscal.CodExento
+	}
 	if _, ok := s.productos.BySKU(empresaID, p.SKU); ok {
 		return inventario.Producto{}, ErrSKUDuplicado
 	}
@@ -321,7 +332,10 @@ type CambiosProducto struct {
 	Moneda       string
 	CodigoBarras *string
 	ExentoIVA    *bool
-	Activo       *bool
+	// AlicuotaCodigo es *string: nil = no se toca; "" vuelve al comportamiento
+	// heredado (manda ExentoIVA).
+	AlicuotaCodigo *string
+	Activo         *bool
 	EsCombo      *bool
 	Componentes  []inventario.ComboComponente
 	EsPlato      *bool
@@ -433,6 +447,35 @@ func (s *Service) ActualizarProducto(empresaID, actor, origen, sku string, cambi
 	// se pisan a false en un PATCH parcial); no-nil aplica el valor, incluido false.
 	if cambios.ExentoIVA != nil {
 		p.ExentoIVA = *cambios.ExentoIVA
+		// La sincronía va en LOS DOS SENTIDOS. Antes solo se propagaba de la
+		// alícuota al booleano, y eso dejaba un agujero silencioso: un producto
+		// clasificado «general» al que se le marcaba exento seguía cobrando IVA,
+		// porque al facturar el CÓDIGO le gana al booleano. Marcar exento dejaba
+		// de tener efecto sin decir nada, que es la peor forma de fallar en algo
+		// fiscal.
+		//
+		// Solo cuando el PATCH no trae también una clasificación explícita: si la
+		// trae, manda ella (se resuelve abajo).
+		if cambios.AlicuotaCodigo == nil && p.AlicuotaCodigo != "" {
+			if p.ExentoIVA {
+				p.AlicuotaCodigo = fiscal.CodExento
+			} else if p.AlicuotaCodigo == fiscal.CodExento {
+				p.AlicuotaCodigo = fiscal.CodGeneral
+			}
+		}
+	}
+	if cambios.AlicuotaCodigo != nil {
+		cod, err := s.validarAlicuotaProducto(empresaID, *cambios.AlicuotaCodigo)
+		if err != nil {
+			return inventario.Producto{}, err
+		}
+		p.AlicuotaCodigo = cod
+		// `ExentoIVA` se mantiene en sincronía con la clasificación elegida: media
+		// aplicación (POS, cotizaciones, comandera) todavía lee ese booleano, y si
+		// quedara desfasado un producto exento se cobraría con IVA en el mostrador.
+		if p.AlicuotaCodigo != "" {
+			p.ExentoIVA = p.AlicuotaCodigo == fiscal.CodExento
+		}
 	}
 	if cambios.Activo != nil {
 		p.Activo = *cambios.Activo

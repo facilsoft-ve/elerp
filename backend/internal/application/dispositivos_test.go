@@ -171,3 +171,104 @@ func TestAsignarDispositivoACaja(t *testing.T) {
 		t.Fatalf("CrearCaja con una impresora fiscal debe funcionar: %v", err)
 	}
 }
+
+/* --- Catálogo precargado -------------------------------------------------- */
+
+// Lo que hace útil al catálogo no es la lista en sí: es que elegir un modelo
+// conocido deje la ficha NORMALIZADA. Si esto no pasa, el maestro se ensucia
+// igual que si no existiera el catálogo.
+func TestCrearDispositivo_NormalizaGrafiaDelCatalogo(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	d, err := svc.CrearDispositivoFiscal(empDemo, actorA, origenTst, fiscal.DispositivoFiscal{
+		Nombre: "Caja 1", Tipo: fiscal.DispositivoImpresoraFiscal,
+		Marca: "  the factory hka  ", Modelo: "hka80",
+	})
+	if err != nil {
+		t.Fatalf("crear: %v", err)
+	}
+	if d.Marca != "The Factory HKA" || d.Modelo != "HKA80" {
+		t.Errorf("no normalizó a la grafía del catálogo: %q / %q", d.Marca, d.Modelo)
+	}
+}
+
+// Elegir una balanza catalogada tiene que bastar: el protocolo y el puerto los
+// pone el catálogo, que es justo el dato que nadie en el mostrador se sabe.
+func TestCrearDispositivo_BalanzaTomaProtocoloDelCatalogo(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	d, err := svc.CrearDispositivoFiscal(empDemo, actorA, origenTst, fiscal.DispositivoFiscal{
+		Nombre: "Balanza charcutería", Tipo: fiscal.DispositivoBalanza,
+		Marca: "Torrey", Modelo: "PCR-40T",
+	})
+	if err != nil {
+		t.Fatalf("crear: %v", err)
+	}
+	if d.Protocolo != "toledo" {
+		t.Errorf("protocolo sugerido no se aplicó: %q", d.Protocolo)
+	}
+	if d.Puerto == "" {
+		t.Error("puerto sugerido no se aplicó")
+	}
+}
+
+// El catálogo SUGIERE, no manda: lo que la persona escribió a mano gana siempre.
+func TestCrearDispositivo_CatalogoNoPisaLoQueSeEscribio(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	d, err := svc.CrearDispositivoFiscal(empDemo, actorA, origenTst, fiscal.DispositivoFiscal{
+		Nombre: "Balanza 2", Tipo: fiscal.DispositivoBalanza,
+		Marca: "Torrey", Modelo: "PCR-40T", Protocolo: "prt1", Puerto: "/dev/ttyUSB0",
+	})
+	if err != nil {
+		t.Fatalf("crear: %v", err)
+	}
+	if d.Protocolo != "prt1" || d.Puerto != "/dev/ttyUSB0" {
+		t.Errorf("el catálogo pisó lo elegido a mano: %q / %q", d.Protocolo, d.Puerto)
+	}
+}
+
+// Un modelo que no está en la lista NO puede bloquear ni ser reescrito: el
+// catálogo es una ayuda, y el mercado siempre va por delante de la lista.
+func TestCrearDispositivo_ModeloFueraDelCatalogoSeRespeta(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	d, err := svc.CrearDispositivoFiscal(empDemo, actorA, origenTst, fiscal.DispositivoFiscal{
+		Nombre: "Nueva", Tipo: fiscal.DispositivoImpresoraFiscal,
+		Marca: "Marca Nueva 2027", Modelo: "XZ-1",
+	})
+	if err != nil {
+		t.Fatalf("un modelo fuera del catálogo debe aceptarse: %v", err)
+	}
+	if d.Marca != "Marca Nueva 2027" || d.Modelo != "XZ-1" {
+		t.Errorf("alteró un modelo libre: %q / %q", d.Marca, d.Modelo)
+	}
+}
+
+// Editar también normaliza: si no, el maestro se ensucia por la puerta de atrás.
+func TestActualizarDispositivo_NormalizaGrafiaDelCatalogo(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	d := crearBalanza(t, svc, "Balanza deli", "BZ-9")
+	marca, modelo := "aclas", "os2x"
+	out, err := svc.ActualizarDispositivoFiscal(empDemo, actorA, origenTst, d.ID,
+		application.CambiosDispositivoFiscal{Marca: &marca, Modelo: &modelo})
+	if err != nil {
+		t.Fatalf("actualizar: %v", err)
+	}
+	if out.Marca != "Aclas" || out.Modelo != "OS2X" {
+		t.Errorf("no normalizó al editar: %q / %q", out.Marca, out.Modelo)
+	}
+}
+
+func TestCatalogoDispositivos_TraeLosTresTiposYSuFecha(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	cat := svc.CatalogoDispositivos()
+	if cat.Revisado == "" {
+		t.Error("el catálogo debe declarar cuándo se revisó")
+	}
+	tipos := map[string]int{}
+	for _, m := range cat.Modelos {
+		tipos[m.Tipo]++
+	}
+	for _, tipo := range []string{"impresora_fiscal", "balanza", "comandera"} {
+		if tipos[tipo] == 0 {
+			t.Errorf("el catálogo no trae ningún %q", tipo)
+		}
+	}
+}

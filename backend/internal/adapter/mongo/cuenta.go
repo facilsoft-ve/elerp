@@ -28,6 +28,15 @@ func (r *CuentaRepo) ByID(empresaID, id string) (cuenta.Cuenta, bool) {
 func (r *CuentaRepo) AbiertaDeMesa(empresaID, mesaID string) (cuenta.Cuenta, bool) {
 	return r.c.one(map[string]any{"empresaid": empresaID, "mesaid": mesaID, "estado": cuenta.EstadoAbierta})
 }
+// DeTurno son las cuentas del turno, en cualquier estado (el resumen se pliega
+// de acá). Un turnoID vacío no puede barrer las cuentas sin turno: devuelve nada.
+func (r *CuentaRepo) DeTurno(empresaID, turnoID string) []cuenta.Cuenta {
+	if turnoID == "" {
+		return []cuenta.Cuenta{}
+	}
+	return r.c.all(map[string]any{"empresaid": empresaID, "turnoid": turnoID})
+}
+
 func (r *CuentaRepo) Create(c cuenta.Cuenta) cuenta.Cuenta {
 	if c.ID == "" {
 		c.ID = newID("cta_")

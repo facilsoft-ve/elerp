@@ -41,6 +41,11 @@ async function request(path, opts = {}) {
     try { body = await res.json() } catch { body = null }
     const err = new Error((body && body.error) || `HTTP ${res.status}`)
     err.status = res.status
+    // `codigo` es el identificador estable del fallo cuando el servidor lo
+    // manda. La pantalla necesita distinguir casos que comparten código HTTP
+    // (p. ej. «sin ubicación» vs «fuera de la sede», ambos 403) y comparar los
+    // textos —que son para leer y se pueden reescribir— sería frágil.
+    if (body && body.codigo) err.codigo = body.codigo
     throw err
   }
   if (res.status === 204) return null
@@ -149,6 +154,12 @@ export const api = {
   retenciones: () => request('/api/fiscal/retenciones'),
   registrarRetencionRecibida: (docId, body) => request(`/api/fiscal/documentos/${encodeURIComponent(docId)}/retencion-recibida`, { method: 'POST', body: JSON.stringify(body) }),
   registrarRetencionEmitida: (facturaCompraId, body) => request(`/api/compras/facturas/${encodeURIComponent(facturaCompraId)}/retencion-emitida`, { method: 'POST', body: JSON.stringify(body) }),
+
+  // Documentos RELACIONADOS de un documento fiscal: su origen (la factura que
+  // corrige, si es una nota), lo que salió de él (notas y anulación) y sus
+  // comprobantes de retención. Solo lectura de vínculos que ya existen en el dato
+  // (`refDocumentoId`); permite recorrer la traza en los dos sentidos.
+  documentosRelacionados: (docId) => request(`/api/fiscal/documentos/${encodeURIComponent(docId)}/relacionados`),
 
   // Libros fiscales (Libro de Ventas / Libro de Compras): reportes DERIVADOS del
   // ledger, de solo lectura, por contribuyente (empresa) y período mensual —
@@ -403,6 +414,18 @@ export const api = {
   // real con la impresora la hace el agente fiscal local (binario aparte). Sin
   // borrado duro: se desactiva (Activo=false), reversible con el toggle.
   dispositivos: () => request('/api/config/dispositivos'),
+  // Catálogo precargado de marcas/modelos del mercado venezolano (impresoras
+  // fiscales, balanzas y comanderas). Dato de referencia, igual para todos los
+  // tenants: se pide una vez por carga (ver components/dispositivo.jsx).
+  catalogoDispositivos: () => request('/api/config/dispositivos/catalogo'),
+
+  // ---- Configuración › Maestro de impuestos ----
+  // Las alícuotas de IVA con su VIGENCIA. Las tasas viajan en fracción (0.16),
+  // igual que se guardan: convertir a porcentaje es cosa de la pantalla, no del
+  // transporte — si no, el mismo número significa dos cosas según por dónde entre.
+  alicuotas: () => request('/api/config/alicuotas'),
+  crearAlicuota: (body) => request('/api/config/alicuotas', { method: 'POST', body: JSON.stringify(body) }),
+  actualizarAlicuota: (id, body) => request(`/api/config/alicuotas/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   crearDispositivo: (body) => request('/api/config/dispositivos', { method: 'POST', body: JSON.stringify(body) }),
   actualizarDispositivo: (id, body) => request(`/api/config/dispositivos/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   desactivarDispositivo: (id) => request(`/api/config/dispositivos/${encodeURIComponent(id)}/desactivar`, { method: 'POST' }),
@@ -444,6 +467,37 @@ export const api = {
   guardarAsignacionMesas: (body) => request('/api/restaurante/asignaciones', { method: 'PUT', body: JSON.stringify(body) }),
   configSalon: () => request('/api/restaurante/config'),
   guardarConfigSalon: (body) => request('/api/restaurante/config', { method: 'PUT', body: JSON.stringify(body) }),
+  // ---- Restaurante › Turnos del salón ----
+  // Credenciales de mesonero (MS-) y sus turnos. El PIN del mesonero y el del
+  // supervisor viajan en el cuerpo y los valida el SERVIDOR: la pantalla nunca
+  // decide si un PIN sirve. Un PIN equivocado vuelve como 403 (403 y no 401: la
+  // sesión es válida, lo que falló es una autorización puntual).
+  mesonerosSalon: () => request('/api/restaurante/salon/mesoneros'),
+  crearMesoneroSalon: (body) => request('/api/restaurante/salon/mesoneros', { method: 'POST', body: JSON.stringify(body) }),
+  actualizarMesoneroSalon: (id, body) => request(`/api/restaurante/salon/mesoneros/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  fijarPinMesonero: (id, body) => request(`/api/restaurante/salon/mesoneros/${encodeURIComponent(id)}/pin`, { method: 'POST', body: JSON.stringify(body) }),
+  turnosSalon: () => request('/api/restaurante/salon/turnos'),
+  historialTurnos: () => request('/api/restaurante/salon/turnos/historial'),
+  iniciarTurno: (body) => request('/api/restaurante/salon/turnos', { method: 'POST', body: JSON.stringify(body) }),
+  finalizarTurno: (id) => request(`/api/restaurante/salon/turnos/${encodeURIComponent(id)}/finalizar`, { method: 'POST' }),
+  relevosTurno: (id) => request(`/api/restaurante/salon/turnos/${encodeURIComponent(id)}/relevos`),
+  forzarCierreTurno: (id, body) => request(`/api/restaurante/salon/turnos/${encodeURIComponent(id)}/forzar-cierre`, { method: 'POST', body: JSON.stringify(body) }),
+  // Horarios y tiempo extra. El horario AVISA o dispara el cierre suave según el
+  // modo de la sede (`horarioModo` en la config del salón); el tiempo extra lo
+  // aprueba un supervisor con su PIN y queda registrado.
+  horariosSalon: () => request('/api/restaurante/salon/horarios'),
+  guardarHorarioMesonero: (id, body) => request(`/api/restaurante/salon/mesoneros/${encodeURIComponent(id)}/horario`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  // ---- Presencia estricta (plataforma, la consume el salón) ----
+  // Las coordenadas viven en la SEDE y los roles que exigen presencia en la
+  // empresa: es capacidad de plataforma, no del módulo Restaurante (el cajero es
+  // el otro candidato natural).
+  fijarUbicacionSede: (empresaId, sedeId, body) =>
+    request(`/api/empresas/${encodeURIComponent(empresaId)}/sedes/${encodeURIComponent(sedeId)}/ubicacion`,
+      { method: 'PUT', body: JSON.stringify(body) }),
+  fijarRolesPresencia: (body) => request('/api/empresa/config/presencia', { method: 'PUT', body: JSON.stringify(body) }),
+  extenderTurno: (id, body) => request(`/api/restaurante/salon/turnos/${encodeURIComponent(id)}/extender`, { method: 'POST', body: JSON.stringify(body) }),
+
   impresorasComandas: () => request('/api/restaurante/impresoras'),
   guardarImpresora: (body) => request('/api/restaurante/impresoras', { method: 'PUT', body: JSON.stringify(body) }),
   eliminarImpresora: (id) => request(`/api/restaurante/impresoras/${encodeURIComponent(id)}`, { method: 'DELETE' }),

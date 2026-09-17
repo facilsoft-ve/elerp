@@ -98,6 +98,10 @@ func (s *Server) handleCrearProducto(c *fiber.Ctx) error {
 		// Código de barras propio del producto (R11) y condición de IVA.
 		CodigoBarras string `json:"codigoBarras"`
 		ExentoIVA    bool   `json:"exentoIva"`
+		// AlicuotaCodigo apunta al maestro de impuestos ("general", "reducida",
+		// "suntuario", "exento"). Vacío = como siempre: exento si ExentoIVA,
+		// general si no. Los catálogos ya cargados no se migran.
+		AlicuotaCodigo string `json:"alicuotaCodigo"`
 		// Combo (paquete de otros productos): esCombo marca el paquete y componentes
 		// lleva su receta (SKU + cantidad). El servicio valida y, si es combo, fuerza
 		// unidad/no-stock y sugiere el precio por defecto (suma de componentes).
@@ -118,7 +122,7 @@ func (s *Server) handleCrearProducto(c *fiber.Ctx) error {
 	p := inventario.Producto{
 		SKU: in.SKU, Nombre: in.Nombre, Rubro: in.Rubro, UnidadBase: in.UnidadBase,
 		TipoVenta: in.TipoVenta, Precio: in.Precio, Moneda: in.Moneda,
-		CodigoBarras: in.CodigoBarras, ExentoIVA: in.ExentoIVA,
+		CodigoBarras: in.CodigoBarras, ExentoIVA: in.ExentoIVA, AlicuotaCodigo: in.AlicuotaCodigo,
 		EsCombo: in.EsCombo, Componentes: in.Componentes,
 		EsPlato: in.EsPlato, Receta: in.Receta, EsInsumo: in.EsInsumo,
 		ComanderaID: in.ComanderaID,
@@ -182,7 +186,10 @@ func (s *Server) handleActualizarProducto(c *fiber.Ctx) error {
 		Moneda       string  `json:"moneda"`
 		CodigoBarras *string `json:"codigoBarras"`
 		ExentoIVA    *bool   `json:"exentoIva"`
-		Activo       *bool   `json:"activo"`
+		// AlicuotaCodigo es *string: nil = no enviado = no se toca; "" devuelve el
+		// producto al comportamiento heredado (manda ExentoIVA).
+		AlicuotaCodigo *string `json:"alicuotaCodigo"`
+		Activo         *bool   `json:"activo"`
 		// Combo: esCombo (nil = no cambiar) convierte/mantiene el paquete; componentes
 		// (nil = no se toca la receta) lleva la receta cuando se edita.
 		EsCombo     *bool                        `json:"esCombo"`
@@ -198,7 +205,8 @@ func (s *Server) handleActualizarProducto(c *fiber.Ctx) error {
 	out, err := s.svc.ActualizarProducto(empresaIDOf(c), principalOf(c).UserID, origen(c), c.Params("sku"), application.CambiosProducto{
 		Nombre: in.Nombre, Rubro: in.Rubro, TipoVenta: in.TipoVenta, UnidadBase: in.UnidadBase,
 		Precio: in.Precio, Moneda: in.Moneda,
-		CodigoBarras: in.CodigoBarras, ExentoIVA: in.ExentoIVA, Activo: in.Activo,
+		CodigoBarras: in.CodigoBarras, ExentoIVA: in.ExentoIVA, AlicuotaCodigo: in.AlicuotaCodigo,
+		Activo: in.Activo,
 		EsCombo: in.EsCombo, Componentes: in.Componentes,
 		EsPlato: in.EsPlato, Receta: in.Receta, EsInsumo: in.EsInsumo,
 		ComanderaID: in.ComanderaID,

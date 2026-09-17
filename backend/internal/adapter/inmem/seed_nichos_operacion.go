@@ -16,6 +16,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/inventario"
 	"github.com/mornix/elerp/internal/domain/mesa"
+	"github.com/mornix/elerp/internal/domain/mesonero"
 	"github.com/mornix/elerp/internal/domain/proveedor"
 	"github.com/mornix/elerp/internal/domain/tasa"
 	"github.com/mornix/elerp/internal/domain/usuario"
@@ -122,7 +123,37 @@ func (s *Store) seedOperacionNicho(e especNicho) {
 					Zonas: []string{e.zonasMesoneros[i]}, Mesas: []string{}, Actualizada: fecha,
 				})
 			}
+			// Credencial de TURNO (MS-), con su PIN ya fijado: así la pantalla de
+			// Turnos del salón se ve en uso desde el primer minuto y se puede probar
+			// el flujo completo (tocar el nombre → PIN → PIN de supervisor). Sin
+			// esto la grilla arranca vacía y no se entiende para qué sirve.
+			s.Mesoneros.Create(mesonero.Mesonero{
+				ID: "msn_" + slug + "_" + sufijo, EmpresaID: e.empID, SedeID: e.sedeID,
+				Codigo: fmt.Sprintf("MS-%03d", i+1), Nombre: nombre, UsuarioID: id,
+				PinHash: hashDemo(), Activo: true, Creado: fecha,
+			})
+			// Horario semanal: de martes a domingo, 18:00 a 01:00 (cruza
+			// medianoche, que es lo normal en un restaurante). Sin horario
+			// sembrado, el turno no tendría hora de salida y ni el cierre
+			// automático ni el tiempo extra se podrían ver funcionando.
+			s.Horarios.Upsert(mesonero.Horario{
+				EmpresaID: e.empID, SedeID: e.sedeID, MesoneroID: "msn_" + slug + "_" + sufijo,
+				Franjas: []mesonero.Franja{{
+					Dias: []int{2, 3, 4, 5, 6, 0}, Desde: "18:00", Hasta: "01:00",
+				}},
+				Actualizado: fecha,
+			})
 		}
+	}
+
+	// Horario de ATENCIÓN del salón: es contra lo que se avisa una reserva fuera
+	// de hora. Solo para el restaurante — una bodega no tiene salón.
+	if len(e.mesas) > 0 {
+		cfg, _ := s.ConfigSalon.Get(e.empID, e.sedeID)
+		cfg.EmpresaID, cfg.SedeID = e.empID, e.sedeID
+		cfg.HoraApertura, cfg.HoraCierre = "18:00", "01:00"
+		cfg.Actualizada = fecha
+		s.ConfigSalon.Upsert(cfg)
 	}
 
 	// --- Cuentas de cobro y métodos de pago ---

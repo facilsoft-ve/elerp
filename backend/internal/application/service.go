@@ -20,6 +20,8 @@ import (
 	"github.com/mornix/elerp/internal/domain/legal"
 	"github.com/mornix/elerp/internal/domain/listaprecio"
 	"github.com/mornix/elerp/internal/domain/mesa"
+	"github.com/mornix/elerp/internal/domain/mesonero"
+	"github.com/mornix/elerp/internal/domain/sede"
 	"github.com/mornix/elerp/internal/domain/plantilla"
 	"github.com/mornix/elerp/internal/domain/promocion"
 	"github.com/mornix/elerp/internal/domain/proveedor"
@@ -153,6 +155,27 @@ type Service struct {
 	// reservas son las RESERVACIONES del salón (módulo Restaurante). Opcional: sin
 	// cablear, las pantallas de reservas quedan apagadas y el resto funciona igual.
 	reservas reserva.Repository
+	// mesoneros son las CREDENCIALES de turno del salón y turnos sus JORNADAS
+	// (módulo Restaurante). Se cablean con ConMesoneros; ver mesonero.go. Sin
+	// cablear, el salón trabaja sin turnos —como antes— y el candado que exige
+	// tener uno para tomar mesas queda apagado.
+	mesoneros mesonero.Repository
+	turnos    mesonero.TurnoRepository
+	// horarios es el patrón semanal de cada mesonero. Se cablea con ConHorarios;
+	// sin él los turnos no tienen hora de salida prevista y nada vence.
+	horarios mesonero.HorarioRepository
+	// alicuotas es el MAESTRO DE IMPUESTOS por empresa (fiscal.Alicuota), con
+	// vigencia por fecha. Se cablea con ConAlicuotas; sin él, el motor cae a la
+	// tasa configurada de la empresa y se comporta como antes del maestro.
+	alicuotas fiscal.AlicuotaRepo
+	// conceptosISLR es el maestro de conceptos retenibles de ISLR con su tarifa y
+	// su sustraendo. Se cablea con ConConceptosISLR; sin él, el concepto y el
+	// porcentaje se siguen tecleando en cada comprobante (como antes).
+	conceptosISLR fiscal.ConceptoISLRRepo
+	// sedes da acceso a las COORDENADAS del local, para la presencia estricta
+	// (ver presencia.go). Se cablea con ConSedes; sin él la verificación de
+	// presencia no aplica y todo se comporta como antes.
+	sedes sede.Repository
 }
 
 // New construye el Service con sus puertos (el orden debe coincidir con cmd/api).

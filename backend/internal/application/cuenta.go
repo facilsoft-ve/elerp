@@ -116,7 +116,16 @@ func (s *Service) AbrirCuenta(in AperturaCuenta) (cuenta.Cuenta, error) {
 				"mesa "+nombre+" asignada a "+nombresDe(duenos)))
 		}
 	}
-	if ex, ok := s.cuentasMesa.AbiertaDeMesa(empresaID, mesaID); ok {
+	// El candado del turno se evalúa ANTES de entregar la cuenta ya abierta —igual
+	// que la asignación—, pero distinguiendo si la mesa YA ES SUYA: seguir
+	// atendiendo lo propio vale incluso en cerrando; tomar una mesa nueva, no.
+	// Eso es exactamente el cierre suave.
+	ex, hayAbierta := s.cuentasMesa.AbiertaDeMesa(empresaID, mesaID)
+	propia := hayAbierta && ex.MesoneroID == mesoneroID
+	if err := s.exigirTurnoParaAtender(empresaID, mesoneroID, in.RolActor, propia); err != nil {
+		return cuenta.Cuenta{}, err
+	}
+	if hayAbierta {
 		return ex, nil
 	}
 	if comensales < 0 {
@@ -126,6 +135,12 @@ func (s *Service) AbrirCuenta(in AperturaCuenta) (cuenta.Cuenta, error) {
 		EmpresaID: empresaID, SedeID: sedeID, MesaID: mesaID, MesaNombre: nombre,
 		Estado: cuenta.EstadoAbierta, MesoneroID: mesoneroID, MesoneroNombre: mesoneroNombre,
 		Comensales: comensales, Items: []cuenta.Item{}, Abierta: ahora(),
+	}
+	// Sello del turno: es lo que después permite plegar el resumen (mesas,
+	// personas, órdenes, ticket) en vez de llevar contadores. Vacío si quien abre
+	// no tiene turno (la dueña, el cajero).
+	if t, ok := s.turnoVivoDeUsuario(empresaID, mesoneroID); ok {
+		c.TurnoID = t.ID
 	}
 	out := s.cuentasMesa.Create(c)
 	s.syncMesaEstado(empresaID, mesaID, mesa.EstadoOcupada)
@@ -326,6 +341,11 @@ func (s *Service) CerrarCuenta(empresaID, cuentaID, actor, origen string) (cuent
 	}
 	s.syncMesaEstado(empresaID, c.MesaID, mesa.EstadoLibre)
 	s.audit.Append(evento(empresaID, actor, origen, "restaurante.cuenta.cerrar", out.ID, "mesa "+c.MesaNombre))
+	// Segunda mitad del cierre suave: si el mesonero venía cerrando y esta era su
+	// última mesa, su turno termina acá solo. Se mira por el responsable ACTUAL
+	// de la cuenta, no por el sello del turno: una mesa que heredó otro ya no lo
+	// retiene a él.
+	s.cerrarTurnoSiSeVacio(empresaID, c.MesoneroID, actor, origen)
 	return out, nil
 }
 

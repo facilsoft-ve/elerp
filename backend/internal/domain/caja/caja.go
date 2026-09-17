@@ -108,10 +108,15 @@ type Sesion struct {
 	ActorID  string `json:"actorId" bson:"actorid"`
 	Apertura string `json:"apertura" bson:"apertura"` // UTC RFC3339
 	Cierre   string `json:"cierre" bson:"cierre"`     // vacío mientras esté abierta
-	// FondoInicial es el efectivo en bolívares con el que el cajero abrió la
-	// gaveta (base de cambio para dar vuelto). Se fija al abrir y NO cambia al
-	// retomar el turno. El efectivo Bs esperado al cierre parte de aquí.
+	// FondoInicial es el efectivo en BOLÍVARES con el que se abrió la gaveta. Se
+	// conserva como campo propio porque los arqueos ya congelados lo llevan así;
+	// es el mismo valor que la entrada VES de Fondos.
 	FondoInicial float64 `json:"fondoInicial" bson:"fondoinicial"`
+	// Fondos es el efectivo de apertura POR MONEDA. Una gaveta venezolana tiene
+	// bolívares y divisas a la vez: si no se declara el fondo en dólares, esos
+	// billetes aparecen al cierre como un sobrante que no existe, y un faltante
+	// real en esa moneda queda tapado. Se fija al abrir y NO cambia al retomar.
+	Fondos []FondoCaja `json:"fondos" bson:"fondos"`
 	// Arqueo es el cuadre del turno, congelado al CERRAR. Nil mientras el turno
 	// está abierto. Una vez cerrado es inmutable (append-only): las correcciones
 	// se hacen con movimientos posteriores, nunca reescribiendo esta foto.
@@ -120,6 +125,50 @@ type Sesion struct {
 
 // Abierta indica si el turno sigue vigente.
 func (s Sesion) Abierta() bool { return s.Cierre == "" }
+
+// FondoCaja es el efectivo de apertura en UNA moneda.
+type FondoCaja struct {
+	Moneda string  `json:"moneda" bson:"moneda"`
+	Monto  float64 `json:"monto" bson:"monto"`
+}
+
+// FondoDe devuelve el fondo de apertura de una moneda (0 si no se declaró).
+// Cae a FondoInicial para el bolívar, que es como se guardaban los turnos antes
+// de que la gaveta admitiera varias monedas.
+func (s Sesion) FondoDe(moneda string) float64 {
+	for _, f := range s.Fondos {
+		if f.Moneda == moneda {
+			return f.Monto
+		}
+	}
+	if moneda == "VES" && len(s.Fondos) == 0 {
+		return s.FondoInicial
+	}
+	return 0
+}
+
+// ArqueoEfectivo es el cuadre de la GAVETA en UNA moneda: lo que había al abrir,
+// lo que entró y salió en efectivo, y lo que el cajero contó al cerrar.
+//
+// Existe una fila POR MONEDA y no un total convertido a bolívares a propósito:
+// el efectivo se cuenta en billetes, no en equivalentes. Convertir para cuadrar
+// escondería un faltante en dólares detrás de una tasa.
+type ArqueoEfectivo struct {
+	Moneda string `json:"moneda" bson:"moneda"`
+	// Fondo es el efectivo de apertura en esta moneda; Cobros lo recibido en
+	// efectivo y Vuelto lo entregado en efectivo, ambos en ESTA moneda.
+	Fondo  float64 `json:"fondo" bson:"fondo"`
+	Cobros float64 `json:"cobros" bson:"cobros"`
+	Vuelto float64 `json:"vuelto" bson:"vuelto"`
+	// Esperado = Fondo + Cobros − Vuelto.
+	Esperado float64 `json:"esperado" bson:"esperado"`
+	// Declarado indica si el cajero contó ESTA moneda. Sin conteo la diferencia
+	// no significa nada y queda en cero: un cero calculado sobre nada se leería
+	// como «cuadra», que es justo lo contrario de lo que pasó.
+	Declarado  bool    `json:"declarado" bson:"declarado"`
+	Contado    float64 `json:"contado" bson:"contado"`
+	Diferencia float64 `json:"diferencia" bson:"diferencia"` // contado − esperado
+}
 
 // ArqueoMetodo es el desglose ESPERADO de un método de pago en el arqueo del
 // turno: el monto en la moneda del método y su equivalente en bolívares. El
@@ -174,6 +223,10 @@ type Arqueo struct {
 	DiferenciaBs      float64 `json:"diferenciaBs" bson:"diferenciabs"`
 	// ContadoPorMetodo es el conteo declarado por método (opcional, para el acta).
 	ContadoPorMetodo []ArqueoConteo `json:"contadoPorMetodo,omitempty" bson:"contadopormetodo,omitempty"`
+	// Efectivo es el cuadre de la gaveta MONEDA POR MONEDA. Es lo que de verdad
+	// se cuenta al cerrar; los campos *Bs de arriba son la fila del bolívar,
+	// conservados aparte porque los arqueos ya congelados los llevan así.
+	Efectivo []ArqueoEfectivo `json:"efectivo,omitempty" bson:"efectivo,omitempty"`
 }
 
 // CajaRepo es el puerto de persistencia de cajas. Toda consulta se aísla por

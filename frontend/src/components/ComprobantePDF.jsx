@@ -56,7 +56,11 @@ export function comprobanteDeFactura(doc, empresa, cliente) {
     contraparte: {
       nombre: doc.clienteNombre || 'Consumidor final',
       documento: doc.clienteDocumento || cliente?.documento || '',
-      direccion: cliente?.direccion || '',
+      // La dirección SELLADA en el documento manda sobre la del maestro: si el
+      // cliente se mudó, la factura de hace dos años tiene que seguir mostrando
+      // el domicilio que se declaró ese día. Se cae al maestro solo para los
+      // documentos anteriores a que se sellara.
+      direccion: doc.clienteDireccion || cliente?.direccion || '',
       telefono: cliente?.telefono || '',
       email: cliente?.email || '',
     },

@@ -367,6 +367,14 @@ type Empresa struct {
 	// RequiereSupervisorPin: interruptor de seguridad de caja (flujo 2.4),
 	// desactivado por defecto.
 	RequiereSupervisorPin bool `json:"requiereSupervisorPin" bson:"requieresupervisorpin"`
+	// RolesPresenciaEstricta son los roles que solo pueden EMPEZAR A TRABAJAR
+	// estando físicamente en su sede (se verifica la ubicación del navegador
+	// contra las coordenadas de la sede). VACÍO = nadie, que es exactamente el
+	// comportamiento de siempre: las empresas ya creadas no necesitan migración.
+	//
+	// Es configuración de PLATAFORMA y no del módulo Restaurante a propósito: el
+	// cajero es tan candidato como el mesonero, y el cajero no es del salón.
+	RolesPresenciaEstricta []string `json:"rolesPresenciaEstricta" bson:"rolespresenciaestricta"`
 	// MonedaPrincipal es la moneda en la que la empresa captura sus precios
 	// (R10). Vacío se lee como VES: las empresas ya creadas no necesitan
 	// migración.
@@ -422,4 +430,37 @@ type Repository interface {
 	ByID(id string) (Empresa, bool)
 	Create(e Empresa) Empresa
 	Update(e Empresa) (Empresa, bool)
+}
+
+
+// NormalizarRolesPresencia limpia la lista de roles con presencia estricta:
+// recorta, pasa a minúsculas, descarta vacíos y deduplica. No valida contra el
+// catálogo de roles a propósito — este paquete no conoce `usuario`, y un rol que
+// no exista sencillamente no casa con nadie, que es inofensivo.
+func NormalizarRolesPresencia(in []string) []string {
+	out := make([]string, 0, len(in))
+	visto := map[string]bool{}
+	for _, r := range in {
+		r = strings.ToLower(strings.TrimSpace(r))
+		if r == "" || visto[r] {
+			continue
+		}
+		visto[r] = true
+		out = append(out, r)
+	}
+	return out
+}
+
+// ExigePresencia indica si ese rol tiene presencia estricta en esta empresa.
+func (e Empresa) ExigePresencia(rol string) bool {
+	rol = strings.ToLower(strings.TrimSpace(rol))
+	if rol == "" {
+		return false
+	}
+	for _, r := range e.RolesPresenciaEstricta {
+		if strings.ToLower(strings.TrimSpace(r)) == rol {
+			return true
+		}
+	}
+	return false
 }

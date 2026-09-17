@@ -8,6 +8,8 @@ import { RestauranteInicio } from './RestauranteInicio.jsx'
 import { Reservaciones } from './Reservaciones.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
+import { TurnosSalon } from './TurnosSalon.jsx'
+import { SelectorModelo, NotaCatalogo } from '../components/dispositivo.jsx'
 import { precioEnBs, monedaDe } from '../lib/precio.js'
 import { fmtCurrency } from '../lib/format.js'
 
@@ -83,6 +85,7 @@ const TABS = [
   { id: 'comandera', label: 'Comandera', icon: <Icon.ClipboardList size={15} />, mesonero: true },
   { id: 'reservas', label: 'Reservaciones', icon: <Icon.Users size={15} />, mesonero: true },
   { id: 'mesas', label: 'Mapa de mesas', icon: <Icon.Utensils size={15} /> },
+  { id: 'turnos', label: 'Turnos del salón', icon: <Icon.Clock size={15} />, mesonero: true },
   { id: 'mesoneros', label: 'Mesoneros y asignación', icon: <Icon.Users size={15} /> },
   { id: 'cocina', label: 'Cocina', icon: <Icon.Activity size={15} /> },
   { id: 'platos', label: 'Platos y recetas', icon: <Icon.Boxes size={15} /> },
@@ -97,6 +100,7 @@ const SUBTITULO = {
   comandera: 'Toma el pedido de cada mesa y envíalo a cocina. Cuando pidan la cuenta, prefactura y la caja cobra.',
   reservas: 'La agenda del salón: toma reservas y, cuando llegan, verifica por nombre o cédula y siéntalos (se abre su cuenta).',
   mesas: 'Diseña el salón sobre una grilla: ubica las mesas, bloquea los espacios donde no puede haber ninguna y fija cuántas personas caben.',
+  turnos: 'Quién entra a trabajar: toca tu nombre y teclea tu PIN. Cada turno lo autoriza un supervisor, y al terminar queda registrado con lo que atendiste.',
   mesoneros: 'Asigna a cada mesonero las mesas o las zonas que atiende. Sin asignar, cualquiera atiende cualquier mesa.',
   cocina: 'Las comandas entrantes en vivo, con su nota y su tiempo de espera. Marca cada plato listo cuando salga.',
   platos: 'Los platos con su receta (escandallo): al venderlos se descuentan sus insumos del inventario.',
@@ -123,6 +127,7 @@ export function Restaurante({ route }) {
       {tab === 'comandera' ? <Comandera /> : null}
       {tab === 'reservas' ? <Reservaciones /> : null}
       {tab === 'mesas' ? <MapaMesas /> : null}
+      {tab === 'turnos' ? <TurnosSalon /> : null}
       {tab === 'mesoneros' ? <MesonerosAsignacion /> : null}
       {tab === 'cocina' ? <Cocina /> : null}
       {tab === 'platos' ? <PlatosRecetas /> : null}
@@ -167,9 +172,50 @@ function MapaMesas() {
   }, [mesas])
   const cel = Math.max(46, Math.min(96, Math.floor(ancho / (plano.columnas || 8)))) // lado de celda en px
 
-  const mesaEn = (c, r) => (mesas || []).find((m) => (m.columna || 0) === c && (m.fila || 0) === r)
+  // Una mesa de más capacidad ocupa más celdas. La regla es ESPEJO de
+  // `mesa.Dimension` en el backend (mismo patrón que el dígito verificador del
+  // RIF): el servidor la vuelve a aplicar y rechaza los planos encimados, así
+  // que si las dos se separan, guardar falla.
+  //
+  // Se DERIVA de la capacidad y no se guarda: guardarla dejaría el tamaño viejo
+  // al cambiar la capacidad, y el mapa mentiría.
+  const dimension = (m) => dimensionDeMesa(m)
+  // El ancho se recorta al borde de la grilla: una mesa larga en la última
+  // columna se dibuja angosta en vez de desbordar el plano.
+  const dimensionVisible = (m) => {
+    const [dc, df] = dimension(m)
+    return [
+      Math.max(1, Math.min(dc, plano.columnas - (m.columna || 0))),
+      Math.max(1, Math.min(df, plano.filas - (m.fila || 0))),
+    ]
+  }
+  // Ocupa mira TODA la superficie, no solo la esquina: sin esto se podría soltar
+  // una mesa sobre la mitad de un mesón, que a simple vista parece celda libre.
+  const ocupa = (m, c, r) => {
+    const [dc, df] = dimensionVisible(m)
+    const mc = m.columna || 0, mf = m.fila || 0
+    return c >= mc && c < mc + dc && r >= mf && r < mf + df
+  }
+  const mesaEn = (c, r) => (mesas || []).find((m) => ocupa(m, c, r))
+  // La esquina (donde se dibuja la mesa) frente a una celda cubierta por ella.
+  const anclaEn = (c, r) => (mesas || []).find((m) => (m.columna || 0) === c && (m.fila || 0) === r)
   const bloqueada = (c, r) => (plano.bloqueadas || []).some((b) => b.columna === c && b.fila === r)
   const celdaLibre = (c, r) => c >= 0 && c < plano.columnas && r >= 0 && r < plano.filas && !mesaEn(c, r) && !bloqueada(c, r)
+  // superficieLibre: ¿cabe esta mesa con su esquina en (c, r)? Comprueba cada
+  // celda que ocuparía, ignorándose a sí misma (mover una mesa un paso no puede
+  // chocar consigo misma) y exigiendo que quepa entera dentro del plano.
+  const superficieLibre = (m, c, r) => {
+    const [dc, df] = dimension(m)
+    if (c < 0 || r < 0 || c + dc > plano.columnas || r + df > plano.filas) return false
+    for (let i = 0; i < dc; i++) {
+      for (let j = 0; j < df; j++) {
+        if (bloqueada(c + i, r + j)) return false
+        const otra = mesaEn(c + i, r + j)
+        if (otra && otra.id !== m?.id) return false
+      }
+    }
+    return true
+  }
 
   const setFilas = (n) => { const v = clamp(n, 1, 20); setPlano((p) => ({ ...p, filas: v, bloqueadas: (p.bloqueadas || []).filter((b) => b.fila < v) })); setDirty(true) }
   const setColumnas = (n) => { const v = clamp(n, 1, 20); setPlano((p) => ({ ...p, columnas: v, bloqueadas: (p.bloqueadas || []).filter((b) => b.columna < v) })); setDirty(true) }
@@ -207,7 +253,12 @@ function MapaMesas() {
     const rect = gridRef.current.getBoundingClientRect()
     const c = Math.floor((e.clientX - rect.left) / cel)
     const r = Math.floor((e.clientY - rect.top) / cel)
-    if (!celdaLibre(c, r)) return
+    // Se valida TODA la superficie que ocupará la mesa, no solo la celda donde
+    // se soltó: un mesón de 2×2 puede caer con su esquina en una celda libre y
+    // aun así pisar tres mesas. El servidor rechaza los planos encimados, así
+    // que sin esto el arrastre parecería funcionar y fallaría al guardar.
+    const arrastrada = (mesas || []).find((m) => m.id === d.id)
+    if (!superficieLibre(arrastrada, c, r)) return
     setMesas((ms) => ms.map((m) => m.id === d.id ? { ...m, columna: c, fila: r } : m))
     setDirty(true)
   }
@@ -270,17 +321,25 @@ function MapaMesas() {
         <div ref={wrapRef} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-3 overflow-auto">
           <div ref={gridRef} className="relative mx-auto select-none" style={{ width: cel * plano.columnas, display: 'grid', gridTemplateColumns: `repeat(${plano.columnas}, ${cel}px)`, gridTemplateRows: `repeat(${plano.filas}, ${cel}px)`, gap: 0 }}>
             {Array.from({ length: plano.filas }).flatMap((_, r) => Array.from({ length: plano.columnas }).map((_, c) => {
-              const m = mesaEn(c, r); const blk = bloqueada(c, r)
+              const cubierta = mesaEn(c, r); const m = anclaEn(c, r); const blk = bloqueada(c, r)
+              // Una celda TAPADA por una mesa grande (pero que no es su esquina)
+              // no se dibuja: la mesa ya la abarca con su span.
+              if (cubierta && !m) return null
+              const [dc, df] = m ? dimensionVisible(m) : [1, 1]
               const col = m ? colorEstado(m.estado) : null
               const activo = m && sel === m.id
               return (
                 <div key={c + '-' + r} onPointerDown={() => (m ? null : clicCelda(c, r))}
                   className="border border-slate-100 dark:border-slate-800 flex items-center justify-center"
-                  style={{ background: blk ? 'repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 4px,#cbd5e1 4px,#cbd5e1 7px)' : 'transparent', cursor: puedeEditar && !m ? 'pointer' : 'default' }}>
+                  style={{
+                    gridColumn: `${c + 1} / span ${dc}`, gridRow: `${r + 1} / span ${df}`,
+                    background: blk ? 'repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 4px,#cbd5e1 4px,#cbd5e1 7px)' : 'transparent',
+                    cursor: puedeEditar && !m ? 'pointer' : 'default',
+                  }}>
                   {m ? (
                     <div onPointerDown={(e) => onMesaDown(e, m)} onClick={() => setSel(m.id)}
                       className="flex flex-col items-center justify-center"
-                      style={{ width: cel - 8, height: cel - 8, background: col.bg, border: `2px solid ${activo ? '#6A2CF0' : col.border}`, borderRadius: m.forma === 'redonda' ? '50%' : 8, color: col.text, cursor: puedeEditar && modo === 'mesas' ? 'grab' : 'pointer', boxShadow: activo ? '0 0 0 3px rgba(106,44,240,.18)' : 'none' }}>
+                      style={{ width: cel * dc - 8, height: cel * df - 8, background: col.bg, border: `2px solid ${activo ? '#6A2CF0' : col.border}`, borderRadius: m.forma === 'redonda' ? '50%' : 8, color: col.text, cursor: puedeEditar && modo === 'mesas' ? 'grab' : 'pointer', boxShadow: activo ? '0 0 0 3px rgba(106,44,240,.18)' : 'none' }}>
                       <span className="font-display font-bold leading-none" style={{ fontSize: Math.max(12, cel * 0.24) }}>{m.nombre}</span>
                       <span className="inline-flex items-center gap-0.5 opacity-80" style={{ fontSize: Math.max(9, cel * 0.16) }}><Icon.Users size={Math.max(9, cel * 0.16)} /> {m.capacidad || 0}</span>
                     </div>
@@ -313,14 +372,88 @@ function MapaMesas() {
 }
 
 // Panel de edición de una mesa (datos; la posición/tamaño se editan arrastrando).
+/* CADA CUADRO DEL PLANO ADMITE 4 PERSONAS. Una mesa de 2, 3 o 4 ocupa un
+ * cuadro; para sentar a más hay que AMPLIARLA, y recién ahí se puede elegir un
+ * aforo mayor. Manda el tamaño y el aforo se acomoda — el plano es la realidad
+ * física del local, no al revés.
+ *
+ * Espejo de domain/mesa (PersonasPorCelda, Dimension, CapacidadMaxima): el
+ * servidor vuelve a validar y rechaza el aforo que no entra, así que si las dos
+ * reglas se separan, guardar falla en vez de dejar el plano incoherente. */
+const PERSONAS_POR_CUADRO = 4
+
+// dimensionDeMesa: el tamaño guardado manda; sin él (mesas anteriores al
+// redimensionado) se deriva de la capacidad, así los planos ya dibujados no
+// necesitan migración.
+function dimensionDeMesa(m) {
+  if (m?.anchoCeldas > 0 && m?.altoCeldas > 0) return [m.anchoCeldas, m.altoCeldas]
+  const celdas = Math.max(1, Math.ceil((m?.capacidad || 0) / PERSONAS_POR_CUADRO))
+  if (celdas <= 3) return [celdas, 1]
+  let ancho = 1
+  while (ancho * ancho < celdas) ancho++
+  return [ancho, Math.ceil(celdas / ancho)]
+}
+
+const aforoMaximo = (ancho, alto) => ancho * alto * PERSONAS_POR_CUADRO
+
+/* TamanoMesa son los controles de ampliación. Al agrandar sube el tope de aforo;
+ * al achicar, el aforo se recorta solo al nuevo tope — así nunca queda un número
+ * que el servidor va a rechazar al guardar. */
+function TamanoMesa({ ancho, alto, disabled, onCambio }) {
+  const paso = (dc, df) => {
+    const a = Math.min(6, Math.max(1, ancho + dc))
+    const b = Math.min(6, Math.max(1, alto + df))
+    onCambio(a, b)
+  }
+  const btn = (etiqueta, dc, df, titulo) => (
+    <button type="button" disabled={disabled} title={titulo} onClick={() => paso(dc, df)}
+      className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-700 text-[13px] font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40">
+      {etiqueta}
+    </button>
+  )
+  return (
+    <div>
+      <div className="text-[12px] font-medium text-slate-500 mb-1">Tamaño en cuadros</div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1">
+          {btn('−', -1, 0, 'Angostar')}
+          <span className="num text-[13px] w-6 text-center">{ancho}</span>
+          {btn('+', 1, 0, 'Ensanchar')}
+        </div>
+        <span className="text-slate-400 text-[12px]">×</span>
+        <div className="flex items-center gap-1">
+          {btn('−', 0, -1, 'Acortar')}
+          <span className="num text-[13px] w-6 text-center">{alto}</span>
+          {btn('+', 0, 1, 'Alargar')}
+        </div>
+        <span className="text-[11.5px] text-slate-400">
+          admite hasta <strong>{aforoMaximo(ancho, alto)}</strong> personas
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function PanelMesa({ mesa, puedeEditar, onGuardado, onEliminar, toast }) {
-  const [f, setF] = useState({ nombre: mesa.nombre, zona: mesa.zona || '', capacidad: mesa.capacidad || 0, forma: mesa.forma || 'cuadrada' })
+  const [dimA, dimB] = dimensionDeMesa(mesa)
+  const [f, setF] = useState({
+    nombre: mesa.nombre, zona: mesa.zona || '', capacidad: mesa.capacidad || 0,
+    forma: mesa.forma || 'cuadrada', anchoCeldas: dimA, altoCeldas: dimB,
+  })
   const [busy, setBusy] = useState(false)
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
+  const tope = aforoMaximo(f.anchoCeldas, f.altoCeldas)
+  // Al achicar la mesa el aforo se recorta solo: dejarlo por encima del tope
+  // haría que el servidor rechazara el guardado con un número que la pantalla
+  // mostraba como válido.
+  const cambiarTamano = (a, b) => setF((s) => ({
+    ...s, anchoCeldas: a, altoCeldas: b,
+    capacidad: Math.min(Number(s.capacidad) || 0, aforoMaximo(a, b)),
+  }))
   const guardar = async () => {
     setBusy(true)
     try {
-      await api.actualizarMesa(mesa.id, { nombre: f.nombre, zona: f.zona, capacidad: Number(f.capacidad) || 0, forma: f.forma, columna: mesa.columna, fila: mesa.fila })
+      await api.actualizarMesa(mesa.id, { nombre: f.nombre, zona: f.zona, capacidad: Number(f.capacidad) || 0, forma: f.forma, columna: mesa.columna, fila: mesa.fila, anchoCeldas: f.anchoCeldas, altoCeldas: f.altoCeldas })
       await onGuardado(); toast({ title: 'Mesa actualizada', body: f.nombre })
     } catch (e) { toast({ title: 'No se pudo guardar', body: e?.message || 'Error', kind: 'error' }) }
     finally { setBusy(false) }
@@ -330,8 +463,12 @@ function PanelMesa({ mesa, puedeEditar, onGuardado, onEliminar, toast }) {
       <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Mesa seleccionada</div>
       <Field label="Nombre / número"><Input value={f.nombre} disabled={!puedeEditar} onChange={(e) => set('nombre', e.target.value)} /></Field>
       <Field label="Zona / salón"><Input value={f.zona} disabled={!puedeEditar} onChange={(e) => set('zona', e.target.value)} placeholder="Salón principal, Terraza…" /></Field>
+      <TamanoMesa ancho={f.anchoCeldas} alto={f.altoCeldas} disabled={!puedeEditar} onCambio={cambiarTamano} />
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Capacidad"><Input type="number" min={0} value={f.capacidad} disabled={!puedeEditar} onChange={(e) => set('capacidad', e.target.value)} /></Field>
+        <Field label="Capacidad" hint={`máx. ${tope}`}>
+          <Input type="number" min={0} max={tope} value={f.capacidad} disabled={!puedeEditar}
+            onChange={(e) => set('capacidad', Math.min(Number(e.target.value) || 0, tope))} />
+        </Field>
         <Field label="Forma">
           <Select value={f.forma} disabled={!puedeEditar} onChange={(e) => set('forma', e.target.value)}>
             {FORMAS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
@@ -349,14 +486,19 @@ function PanelMesa({ mesa, puedeEditar, onGuardado, onEliminar, toast }) {
 }
 
 function NuevaMesaModal({ onClose, onCreada, toast, columna = 0, fila = 0 }) {
-  const [f, setF] = useState({ nombre: '', zona: '', capacidad: 4, forma: 'cuadrada' })
+  const [f, setF] = useState({ nombre: '', zona: '', capacidad: 4, forma: 'cuadrada', anchoCeldas: 1, altoCeldas: 1 })
   const [busy, setBusy] = useState(false)
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
+  const tope = aforoMaximo(f.anchoCeldas, f.altoCeldas)
+  const cambiarTamano = (a, b) => setF((s) => ({
+    ...s, anchoCeldas: a, altoCeldas: b,
+    capacidad: Math.min(Number(s.capacidad) || 0, aforoMaximo(a, b)),
+  }))
   const crear = async () => {
     if (!f.nombre.trim()) { toast({ title: 'Ponle un nombre o número a la mesa', kind: 'warn' }); return }
     setBusy(true)
     try {
-      const m = await api.crearMesa({ nombre: f.nombre.trim(), zona: f.zona.trim(), capacidad: Number(f.capacidad) || 0, forma: f.forma, columna, fila })
+      const m = await api.crearMesa({ nombre: f.nombre.trim(), zona: f.zona.trim(), capacidad: Number(f.capacidad) || 0, forma: f.forma, columna, fila, anchoCeldas: f.anchoCeldas, altoCeldas: f.altoCeldas })
       toast({ title: 'Mesa agregada', body: m.nombre }); onCreada(m)
     } catch (e) { toast({ title: 'No se pudo agregar', body: e?.message || 'Error', kind: 'error' }); setBusy(false) }
   }
@@ -366,8 +508,12 @@ function NuevaMesaModal({ onClose, onCreada, toast, columna = 0, fila = 0 }) {
       <div className="space-y-3">
         <Field label="Nombre / número"><Input autoFocus value={f.nombre} onChange={(e) => set('nombre', e.target.value)} placeholder="1, Terraza 3, Barra 2…" /></Field>
         <Field label="Zona / salón"><Input value={f.zona} onChange={(e) => set('zona', e.target.value)} placeholder="Salón principal, Terraza…" /></Field>
+        <TamanoMesa ancho={f.anchoCeldas} alto={f.altoCeldas} onCambio={cambiarTamano} />
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Capacidad"><Input type="number" min={0} value={f.capacidad} onChange={(e) => set('capacidad', e.target.value)} /></Field>
+          <Field label="Capacidad" hint={`máx. ${tope}`}>
+            <Input type="number" min={0} max={tope} value={f.capacidad}
+              onChange={(e) => set('capacidad', Math.min(Number(e.target.value) || 0, tope))} />
+          </Field>
           <Field label="Forma">
             <Select value={f.forma} onChange={(e) => set('forma', e.target.value)}>
               {FORMAS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
@@ -449,6 +595,9 @@ function ImpresoraComandas() {
                 </div>
                 <div className="text-[12.5px] text-slate-500 mt-0.5">
                   {imp.conexion === 'red' ? `Red · ${imp.host}:${imp.puerto}` : 'Local (agente del equipo)'} · {imp.anchoMm || 80} mm
+                  {[imp.marca, imp.modelo].filter(Boolean).length
+                    ? ` · ${[imp.marca, imp.modelo].filter(Boolean).join(' ')}`
+                    : ''}
                 </div>
                 <div className="text-[12.5px] text-slate-500 mt-1 flex flex-wrap items-center gap-1">
                   {(imp.rubros || []).length ? (
@@ -485,6 +634,7 @@ function ComanderaModal({ imp, rubros, hayOtras, onClose, onGuardado }) {
   const toast = useToast()
   const [f, setF] = useState({
     id: imp.id || '', nombre: imp.nombre || '', conexion: imp.conexion || 'local',
+    marca: imp.marca || '', modelo: imp.modelo || '',
     host: imp.host || '', puerto: imp.puerto || 9100, anchoMm: imp.anchoMm || 80,
     rubros: imp.rubros || [], predeterminada: !!imp.predeterminada || !hayOtras,
     activa: imp.activa !== undefined ? imp.activa : true,
@@ -504,7 +654,8 @@ function ComanderaModal({ imp, rubros, hayOtras, onClose, onGuardado }) {
     setBusy(true)
     try {
       await api.guardarImpresora({
-        id: f.id, nombre: f.nombre, conexion: f.conexion, host: f.host,
+        id: f.id, nombre: f.nombre, marca: f.marca, modelo: f.modelo,
+        conexion: f.conexion, host: f.host,
         puerto: Number(f.puerto) || 0, anchoMm: Number(f.anchoMm) || 80,
         rubros: f.rubros, predeterminada: !!f.predeterminada, activa: !!f.activa,
       })
@@ -528,6 +679,19 @@ function ComanderaModal({ imp, rubros, hayOtras, onClose, onGuardado }) {
           <Input value={f.nombre} onChange={(e) => set('nombre', e.target.value)} placeholder="Cocina, Barra, Postres…" />
         </Field>
 
+        {/* Qué EQUIPO es (distinto del puesto: el puesto es "Barra", el equipo es
+            una "Epson TM-T20III"). Elegirlo del catálogo precarga el ancho del
+            rollo y si se conecta por red o por el equipo — que es lo que a nadie
+            en una cocina le consta de memoria. */}
+        <SelectorModelo tipo="comandera" marca={f.marca} modelo={f.modelo}
+          onChange={({ marca, modelo }, ficha) => setF((s) => ({
+            ...s, marca, modelo,
+            // Solo en alta: en una comandera ya configurada, cambiar el modelo no
+            // puede reescribir un ancho o una conexión que ya funcionan.
+            anchoMm: ficha && !s.id ? (ficha.anchoMm || s.anchoMm) : s.anchoMm,
+            conexion: ficha && !s.id ? (ficha.conexion || s.conexion) : s.conexion,
+          }))} />
+
         <div>
           <div className="text-[13px] font-semibold mb-1.5 text-slate-700 dark:text-slate-300">Conexión</div>
           <Segmented value={f.conexion} onChange={(v) => set('conexion', v)}
@@ -550,6 +714,8 @@ function ComanderaModal({ imp, rubros, hayOtras, onClose, onGuardado }) {
           <Segmented value={String(f.anchoMm)} onChange={(v) => set('anchoMm', Number(v))}
             options={[{ value: '80', label: '80 mm' }, { value: '58', label: '58 mm' }]} />
         </div>
+
+        <NotaCatalogo tipo="comandera" />
 
         <Field label="¿Qué rubros imprime?" hint="Los productos de estos rubros salen por esta comandera.">
           {rubros.length === 0 ? (

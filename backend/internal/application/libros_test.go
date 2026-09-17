@@ -180,3 +180,193 @@ func sumaIVA(filas []application.LibroVentasFila) float64 {
 	// Redondeo a 2 decimales, igual que el servicio.
 	return float64(int64(s*100+0.5)) / 100
 }
+
+/* --- Lo que la contadora encontró en la primera revisión -------------------
+ *
+ * Tres columnas del libro salían SIEMPRE vacías aunque el dato existiera, y el
+ * libro declaraba una sola alícuota cuando en Venezuela conviven tres. */
+
+// El número de control es OBLIGATORIO en el libro de ventas. El documento
+// siempre lo llevó (se asigna al emitir), pero la fila del libro no lo copiaba y
+// la columna del archivo salía en blanco.
+func TestLibroVentas_LlevaElNumeroDeControl(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	abrirTurno(t, svc, actorA)
+	sku := primerSKU(t, svc)
+	doc, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{{SKU: sku, Cantidad: 1, PrecioUnitario: 100}},
+		Pagos:  []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 116, Moneda: "VES"}},
+	})
+	if err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+	if doc.NumeroControl == "" {
+		t.Fatal("el escenario necesita un documento CON número de control")
+	}
+	anio, mes := mesActual()
+	fila := filaVenta(t, svc.LibroVentas(empDemo, anio, mes), doc.NumeroCompleto)
+	if fila.NumeroControl != doc.NumeroControl {
+		t.Errorf("el libro debe declarar el nº de control %q, trae %q", doc.NumeroControl, fila.NumeroControl)
+	}
+}
+
+// filaVenta localiza una fila del libro de ventas por su número de documento.
+func filaVenta(t *testing.T, lv application.LibroVentasResult, numero string) application.LibroVentasFila {
+	t.Helper()
+	for _, f := range lv.Filas {
+		if f.NumeroCompleto == numero {
+			return f
+		}
+	}
+	t.Fatalf("no se encontró %s en el libro de ventas", numero)
+	return application.LibroVentasFila{}
+}
+
+// El SENIAT declara cada tasa en SU columna: el 16 %, el 8 % y el recargo
+// suntuario no se pueden sumar. Antes el libro traía una sola alícuota y era
+// imposible llenar la declaración de una empresa con productos de lujo.
+func TestLibroVentas_DesglosaPorAlicuota(t *testing.T) {
+	svc, _ := servicioConImpuestos(t)
+	productoConAlicuota(t, svc, "LIB-GEN", fiscal.CodGeneral, 100)
+	productoConAlicuota(t, svc, "LIB-RED", fiscal.CodReducida, 200)
+	productoConAlicuota(t, svc, "LIB-LUJO", fiscal.CodSuntuario, 300)
+
+	doc, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{
+			{SKU: "LIB-GEN", Cantidad: 1, PrecioUnitario: 100},
+			{SKU: "LIB-RED", Cantidad: 1, PrecioUnitario: 200},
+			{SKU: "LIB-LUJO", Cantidad: 1, PrecioUnitario: 300},
+		},
+		// Base 600 + IVA (64 general + 16 reducida + 45 recargo) = 725.
+		Pagos: []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 725, Moneda: "VES"}},
+	})
+	if err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+	anio, mes := mesActual()
+	f := filaVenta(t, svc.LibroVentas(empDemo, anio, mes), doc.NumeroCompleto)
+
+	// General: 100 (el suntuario también tributa general) + 300 = 400 al 16 %.
+	if !casi(f.BaseGeneral, 400) || !casi(f.IVAGeneral, 64) {
+		t.Errorf("general: base %v / IVA %v; se esperaban 400 y 64", f.BaseGeneral, f.IVAGeneral)
+	}
+	if !casi(f.BaseReducida, 200) || !casi(f.IVAReducida, 16) {
+		t.Errorf("reducida: base %v / IVA %v; se esperaban 200 y 16", f.BaseReducida, f.IVAReducida)
+	}
+	// El recargo suntuario va APARTE, sobre la base del artículo de lujo.
+	if !casi(f.BaseAdicional, 300) || !casi(f.IVAAdicional, 45) {
+		t.Errorf("adicional: base %v / IVA %v; se esperaban 300 y 45", f.BaseAdicional, f.IVAAdicional)
+	}
+	// Y el agregado sigue cuadrando con la suma de las porciones.
+	if !casi(f.IVADebito, f.IVAGeneral+f.IVAReducida+f.IVAAdicional) {
+		t.Errorf("el IVA agregado (%v) debe ser la suma del desglose", f.IVADebito)
+	}
+}
+
+// Un documento anterior al maestro de impuestos NO trae desglose. Si el libro no
+// lo respaldara, todo el histórico saldría en cero y dejaría de cuadrar.
+func TestLibroVentas_DocumentoSinDesgloseCaeAGeneral(t *testing.T) {
+	svc, _ := nuevoServicio(t) // sin maestro: el motor no sella Impuestos
+	abrirTurno(t, svc, actorA)
+	sku := primerSKU(t, svc)
+	doc, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{{SKU: sku, Cantidad: 1, PrecioUnitario: 100}},
+		Pagos:  []application.PagoEntrada{{Metodo: fiscal.PagoEfectivoBs, Monto: 116, Moneda: "VES"}},
+	})
+	if err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+	anio, mes := mesActual()
+	f := filaVenta(t, svc.LibroVentas(empDemo, anio, mes), doc.NumeroCompleto)
+	if !casi(f.BaseGeneral, doc.BaseImponible) || !casi(f.IVAGeneral, doc.IVA) {
+		t.Errorf("sin desglose, todo va a la general: base %v / IVA %v (doc: %v / %v)",
+			f.BaseGeneral, f.IVAGeneral, doc.BaseImponible, doc.IVA)
+	}
+	if !casi(f.BaseReducida, 0) || !casi(f.BaseAdicional, 0) {
+		t.Errorf("no puede inventar bases reducida (%v) ni adicional (%v)", f.BaseReducida, f.BaseAdicional)
+	}
+}
+
+// Lo que retuvo el cliente agente de retención es parte de la declaración del
+// período. Sin esta columna la contadora tenía que cruzarlo a mano contra los
+// comprobantes.
+func TestLibroVentas_DeclaraElIVAQueRetuvoElCliente(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	doc := ventaCreditoIVA100(t, svc) // IVA de 100
+	if _, err := svc.RegistrarRetencionRecibida(empDemo, actorA, origenTst, doc.ID, application.EntradaRetencion{
+		Impuesto: fiscal.ImpuestoIVA, NumeroComprobante: "20260900012345", Porcentaje: 75,
+	}); err != nil {
+		t.Fatalf("registrar retención recibida: %v", err)
+	}
+	anio, mes := mesActual()
+	lv := svc.LibroVentas(empDemo, anio, mes)
+	f := filaVenta(t, lv, doc.NumeroCompleto)
+	if !casi(f.IVARetenido, 75) {
+		t.Errorf("el libro debe declarar 75 de IVA retenido, trae %v", f.IVARetenido)
+	}
+	if !casi(lv.Totales.IVARetenido, 75) {
+		t.Errorf("el total de retenido debe sumar 75, es %v", lv.Totales.IVARetenido)
+	}
+}
+
+// La columna IVARetenido del libro de COMPRAS salía siempre vacía aunque el
+// comprobante existiera: es obligatoria para el contribuyente especial.
+func TestLibroCompras_DeclaraElIVARetenidoAlProveedor(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	sku := primerSKU(t, svc)
+	hoy := time.Now().UTC().Format("2006-01-02")
+	fc := ocFacturada(t, svc, sku, "F-00123", "00-0099887", hoy)
+	if _, err := svc.RegistrarRetencionEmitida(empDemo, actorA, origenTst, fc.ID, application.EntradaRetencion{
+		Impuesto: fiscal.ImpuestoIVA, Porcentaje: 75,
+	}); err != nil {
+		t.Fatalf("registrar retención emitida: %v", err)
+	}
+	anio, mes := mesActual()
+	lc := svc.LibroCompras(empDemo, anio, mes)
+	var f application.LibroComprasFila
+	for _, x := range lc.Filas {
+		if x.NumeroFactura == "F-00123" {
+			f = x
+		}
+	}
+	if f.NumeroFactura == "" {
+		t.Fatal("la factura de compra no apareció en el libro")
+	}
+	esperado := round2Test(fc.IVA * 0.75)
+	if !casi(f.IVARetenido, esperado) {
+		t.Errorf("el libro debe declarar %v de IVA retenido, trae %v", esperado, f.IVARetenido)
+	}
+	if !casi(lc.Totales.IVARetenido, esperado) {
+		t.Errorf("el total de retenido debe sumar %v, es %v", esperado, lc.Totales.IVARetenido)
+	}
+}
+
+// La alícuota del libro de compras sale de la PROPIA factura del proveedor, no
+// de la configurada por la empresa: si el proveedor facturó al 8 %, declarar el
+// 16 % sería declarar algo que no ocurrió.
+func TestLibroCompras_AlicuotaSaleDeLaFacturaNoDeLaEmpresa(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	sku := primerSKU(t, svc)
+	hoy := time.Now().UTC().Format("2006-01-02")
+	fc := ocFacturada(t, svc, sku, "F-00777", "00-0077777", hoy)
+	anio, mes := mesActual()
+	lc := svc.LibroCompras(empDemo, anio, mes)
+	for _, f := range lc.Filas {
+		if f.NumeroFactura != "F-00777" {
+			continue
+		}
+		if fc.BaseImponible <= 0 {
+			t.Skip("la factura del escenario no tiene base gravada")
+		}
+		efectiva := fc.IVA / fc.BaseImponible
+		if diff := f.Alicuota - efectiva; diff > 0.001 || diff < -0.001 {
+			t.Errorf("la alícuota debe derivarse de la factura (%.4f), trae %.4f", efectiva, f.Alicuota)
+		}
+		// Y la fila cae entera en la columna general con esa tasa.
+		if !casi(f.BaseGeneral, fc.BaseImponible) || !casi(f.IVAGeneral, fc.IVA) {
+			t.Errorf("la base debe declararse en la columna general: %v / %v", f.BaseGeneral, f.IVAGeneral)
+		}
+		return
+	}
+	t.Fatal("no se encontró la factura en el libro")
+}

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mornix/elerp/internal/domain/dispositivo"
 	"github.com/mornix/elerp/internal/domain/fiscal"
 )
 
@@ -55,6 +56,9 @@ func (s *Service) CrearDispositivoFiscal(empresaID, actor, origen string, d fisc
 	// pero no se validan: el agente fiscal local es quien sabe qué acepta.
 	d.Puerto = strings.TrimSpace(d.Puerto)
 	d.Protocolo = strings.TrimSpace(d.Protocolo)
+	d.Marca = strings.TrimSpace(d.Marca)
+	d.Modelo = strings.TrimSpace(d.Modelo)
+	d = normalizarDesdeCatalogo(d)
 	d.Activo = true
 	d.Creado = ahora()
 	out := s.dispositivos.Create(d)
@@ -99,10 +103,10 @@ func (s *Service) ActualizarDispositivoFiscal(empresaID, actor, origen, id strin
 		d.Tipo = *cambios.Tipo
 	}
 	if cambios.Marca != nil {
-		d.Marca = *cambios.Marca
+		d.Marca = strings.TrimSpace(*cambios.Marca)
 	}
 	if cambios.Modelo != nil {
-		d.Modelo = *cambios.Modelo
+		d.Modelo = strings.TrimSpace(*cambios.Modelo)
 	}
 	if cambios.Serie != nil {
 		if s.serieDispositivoDuplicada(empresaID, *cambios.Serie, id) {
@@ -119,6 +123,7 @@ func (s *Service) ActualizarDispositivoFiscal(empresaID, actor, origen, id strin
 	if cambios.Activo != nil {
 		d.Activo = *cambios.Activo
 	}
+	d = normalizarDesdeCatalogo(d)
 	out, ok := s.dispositivos.Update(d)
 	if !ok {
 		return fiscal.DispositivoFiscal{}, ErrDispositivoNoExiste
@@ -141,4 +146,41 @@ func (s *Service) DesactivarDispositivoFiscal(empresaID, actor, origen, id strin
 	}
 	s.audit.Append(evento(empresaID, actor, origen, "config.dispositivo.desactivar", id, ""))
 	return nil
+}
+
+// CatalogoDispositivosView es el catálogo precargado tal como lo consume la
+// interfaz: la lista de modelos conocidos más la fecha en que se revisó, para
+// que la pantalla pueda decir con honestidad de cuándo es (la homologación del
+// SENIAT es un trámite vivo; esta lista ayuda a elegir, no certifica nada).
+type CatalogoDispositivosView struct {
+	Revisado string               `json:"revisado"`
+	Modelos  []dispositivo.Modelo `json:"modelos"`
+}
+
+// CatalogoDispositivos devuelve el catálogo precargado de impresoras fiscales,
+// balanzas y comanderas del mercado venezolano. No depende del tenant: es dato
+// de referencia igual para todas las empresas.
+func (s *Service) CatalogoDispositivos() CatalogoDispositivosView {
+	return CatalogoDispositivosView{Revisado: dispositivo.Revisado, Modelos: dispositivo.Catalogo()}
+}
+
+// normalizarDesdeCatalogo deja la ficha con la GRAFÍA CANÓNICA del catálogo y le
+// rellena los datos de conexión que quedaron en blanco. Es lo que evita que el
+// maestro termine con "HKA80", "hka 80" y "The Factory HKA 80" como si fueran
+// tres máquinas distintas, y lo que hace que elegir un modelo conocido baste
+// para dejar la balanza configurada. Si el modelo NO está catalogado no toca
+// nada: marca y modelo son campos libres a propósito.
+func normalizarDesdeCatalogo(d fiscal.DispositivoFiscal) fiscal.DispositivoFiscal {
+	m, ok := dispositivo.Buscar(d.Tipo, d.Marca, d.Modelo)
+	if !ok {
+		return d
+	}
+	d.Marca, d.Modelo = m.Marca, m.Modelo
+	if d.Puerto == "" {
+		d.Puerto = m.Puerto
+	}
+	if d.Protocolo == "" {
+		d.Protocolo = m.Protocolo
+	}
+	return d
 }
