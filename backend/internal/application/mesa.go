@@ -231,11 +231,20 @@ func (s *Service) EliminarMesa(empresaID, id, actor, origen string) error {
 	return nil
 }
 
-// PosicionMesa es una reubicación de una mesa en la grilla (del guardado del editor).
+// PosicionMesa es una reubicación de una mesa en la grilla (del guardado del
+// editor). Lleva también el TAMAÑO porque en el plano se redimensiona
+// arrastrando los bordes: mover y agrandar son el mismo gesto para quien dibuja
+// el salón, y mandarlos por rutas distintas haría que un plano se guardara a
+// medias si una de las dos llamadas falla.
+//
+// AnchoCeldas/AltoCeldas en CERO significan «no lo toques», para que un cliente
+// viejo que solo manda posiciones no achique todas las mesas.
 type PosicionMesa struct {
-	ID      string `json:"id"`
-	Columna int    `json:"columna"`
-	Fila    int    `json:"fila"`
+	ID          string `json:"id"`
+	Columna     int    `json:"columna"`
+	Fila        int    `json:"fila"`
+	AnchoCeldas int    `json:"anchoCeldas,omitempty"`
+	AltoCeldas  int    `json:"altoCeldas,omitempty"`
 }
 
 // GuardarMapa aplica en lote las posiciones (celda de grilla) de varias mesas (lo
@@ -255,6 +264,18 @@ func (s *Service) GuardarMapa(empresaID, actor, origen string, pos []PosicionMes
 			continue
 		}
 		m.Columna, m.Fila = p.Columna, p.Fila
+		if p.AnchoCeldas > 0 && p.AltoCeldas > 0 {
+			if p.AnchoCeldas > maxCeldasMesa || p.AltoCeldas > maxCeldasMesa {
+				return fmt.Errorf("%w: «%s»", ErrTamanoMesaInvalido, m.Nombre)
+			}
+			m.AnchoCeldas, m.AltoCeldas = p.AnchoCeldas, p.AltoCeldas
+			// Al achicar, el aforo se recorta al nuevo tope. Rechazar el guardado
+			// sería peor: el plano ya se dibujó y quien lo hizo tendría que adivinar
+			// cuál de veinte mesas quedó con un número que ya no entra.
+			if max := m.CapacidadMaxima(); m.Capacidad > max {
+				m.Capacidad = max
+			}
+		}
 		nuevas[m.ID] = m
 	}
 	// El plano final es: las mesas movidas, más las que no se tocaron.

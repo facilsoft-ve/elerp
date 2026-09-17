@@ -8,6 +8,10 @@ import { RestauranteInicio } from './RestauranteInicio.jsx'
 import { Reservaciones } from './Reservaciones.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
+import {
+  dimensionDeMesa, aforoMaximo, ocupaCelda, cabeEn, tamanoAlArrastrar, aforoAjustado,
+  MAX_CELDAS_MESA,
+} from '../lib/plano.js'
 import { TurnosSalon } from './TurnosSalon.jsx'
 import { SelectorModelo, NotaCatalogo } from '../components/dispositivo.jsx'
 import { precioEnBs, monedaDe } from '../lib/precio.js'
@@ -192,32 +196,11 @@ function MapaMesas() {
   }
   // Ocupa mira TODA la superficie, no solo la esquina: sin esto se podría soltar
   // una mesa sobre la mitad de un mesón, que a simple vista parece celda libre.
-  const ocupa = (m, c, r) => {
-    const [dc, df] = dimensionVisible(m)
-    const mc = m.columna || 0, mf = m.fila || 0
-    return c >= mc && c < mc + dc && r >= mf && r < mf + df
-  }
-  const mesaEn = (c, r) => (mesas || []).find((m) => ocupa(m, c, r))
+  const mesaEn = (c, r) => (mesas || []).find((m) => ocupaCelda(m, c, r))
   // La esquina (donde se dibuja la mesa) frente a una celda cubierta por ella.
   const anclaEn = (c, r) => (mesas || []).find((m) => (m.columna || 0) === c && (m.fila || 0) === r)
   const bloqueada = (c, r) => (plano.bloqueadas || []).some((b) => b.columna === c && b.fila === r)
   const celdaLibre = (c, r) => c >= 0 && c < plano.columnas && r >= 0 && r < plano.filas && !mesaEn(c, r) && !bloqueada(c, r)
-  // superficieLibre: ¿cabe esta mesa con su esquina en (c, r)? Comprueba cada
-  // celda que ocuparía, ignorándose a sí misma (mover una mesa un paso no puede
-  // chocar consigo misma) y exigiendo que quepa entera dentro del plano.
-  const superficieLibre = (m, c, r) => {
-    const [dc, df] = dimension(m)
-    if (c < 0 || r < 0 || c + dc > plano.columnas || r + df > plano.filas) return false
-    for (let i = 0; i < dc; i++) {
-      for (let j = 0; j < df; j++) {
-        if (bloqueada(c + i, r + j)) return false
-        const otra = mesaEn(c + i, r + j)
-        if (otra && otra.id !== m?.id) return false
-      }
-    }
-    return true
-  }
-
   const setFilas = (n) => { const v = clamp(n, 1, 20); setPlano((p) => ({ ...p, filas: v, bloqueadas: (p.bloqueadas || []).filter((b) => b.fila < v) })); setDirty(true) }
   const setColumnas = (n) => { const v = clamp(n, 1, 20); setPlano((p) => ({ ...p, columnas: v, bloqueadas: (p.bloqueadas || []).filter((b) => b.columna < v) })); setDirty(true) }
 
@@ -238,29 +221,109 @@ function MapaMesas() {
     setNueva({ columna: c, fila: r })
   }
 
-  // Arrastre de una mesa a otra celda libre.
-  const drag = useRef(null)
+  /* ARRASTRE Y REDIMENSIONADO, en vivo.
+   *
+   * Antes el arrastre no mostraba nada hasta soltar: la mesa saltaba al final y
+   * un destino inválido simplemente no hacía nada, sin decir por qué. Dibujar el
+   * gesto MIENTRAS ocurre es lo que lo vuelve fluido — se ve a dónde va y si
+   * cabe, antes de soltar.
+   *
+   * El estado vivo va en `gesto` (React) y el puntero en un ref: el ref evita
+   * releer el estado en cada `pointermove`, y el estado es lo que pinta.
+   *
+   * `setPointerCapture` es lo que hace que el gesto NO se pierda al salir de la
+   * mesa —que es justo lo que pasa al agrandarla— sin tener que escuchar en
+   * window y limpiar a mano.
+   */
+  const gesto = useRef(null)
+  const [vista, setVista] = useState(null) // {id, tipo, c, r, dc, df, valido}
   const gridRef = useRef(null)
-  const onMesaDown = (e, m) => {
-    if (!puedeEditar || modo !== 'mesas') { setSel(m.id); return }
-    e.preventDefault(); e.stopPropagation(); setSel(m.id)
-    drag.current = { id: m.id }
-    window.addEventListener('pointerup', onUp)
-  }
-  const onUp = (e) => {
-    const d = drag.current; drag.current = null
-    window.removeEventListener('pointerup', onUp)
-    if (!d || !gridRef.current) return
+
+  // celdaDe traduce un punto de la pantalla a celda de la grilla.
+  const celdaDe = (e) => {
     const rect = gridRef.current.getBoundingClientRect()
-    const c = Math.floor((e.clientX - rect.left) / cel)
-    const r = Math.floor((e.clientY - rect.top) / cel)
-    // Se valida TODA la superficie que ocupará la mesa, no solo la celda donde
-    // se soltó: un mesón de 2×2 puede caer con su esquina en una celda libre y
-    // aun así pisar tres mesas. El servidor rechaza los planos encimados, así
-    // que sin esto el arrastre parecería funcionar y fallaría al guardar.
-    const arrastrada = (mesas || []).find((m) => m.id === d.id)
-    if (!superficieLibre(arrastrada, c, r)) return
-    setMesas((ms) => ms.map((m) => m.id === d.id ? { ...m, columna: c, fila: r } : m))
+    return {
+      c: Math.floor((e.clientX - rect.left) / cel),
+      r: Math.floor((e.clientY - rect.top) / cel),
+    }
+  }
+
+  // cabe: ¿esta superficie está libre, ignorando la propia mesa? Es la misma
+  // regla que el servidor aplica al guardar (rechaza planos encimados), así que
+  // sin ella el gesto parecería funcionar y fallaría al guardar.
+  const cabe = (id, c, r, dc, df) => cabeEn({ mesas: mesas || [], plano }, id, c, r, dc, df)
+
+  const onMesaDown = (e, m, tipo = 'mover') => {
+    if (!puedeEditar || modo !== 'mesas') { setSel(m.id); return }
+    e.preventDefault(); e.stopPropagation()
+    setSel(m.id)
+    const [dc, df] = dimension(m)
+    const origen = celdaDe(e)
+    gesto.current = {
+      id: m.id, tipo, dc, df,
+      // Desfase entre la esquina de la mesa y la celda donde se agarró: sin esto
+      // la mesa salta bajo el cursor al empezar a moverla, que es exactamente lo
+      // que se sentía tosco.
+      offC: origen.c - (m.columna || 0), offR: origen.r - (m.fila || 0),
+      col: m.columna || 0, fil: m.fila || 0,
+      movido: false,
+    }
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* sin captura, el gesto igual funciona */ }
+    const inicial = { id: m.id, tipo, c: m.columna || 0, r: m.fila || 0, dc, df, valido: true }
+    gesto.current.v = inicial
+    setVista(inicial)
+  }
+
+  const onMesaMove = (e) => {
+    const g = gesto.current
+    if (!g || !gridRef.current) return
+    const { c, r } = celdaDe(e)
+    let v
+    if (g.tipo === 'mover') {
+      const nc = c - g.offC, nr = r - g.offR
+      v = { id: g.id, tipo: g.tipo, c: nc, r: nr, dc: g.dc, df: g.df }
+    } else {
+      // Redimensionar: la esquina se queda quieta y el lado sigue al cursor. El
+      // mínimo es un cuadro —una mesa de cero no existe— y el máximo, el mismo
+      // que acota el servidor.
+      const [dc, df] = tamanoAlArrastrar({ tipo: g.tipo, col: g.col, fila: g.fil, dc: g.dc, df: g.df }, c, r)
+      v = { id: g.id, tipo: g.tipo, c: g.col, r: g.fil, dc, df }
+    }
+    // Se repinta solo cuando cambia de celda: un setState por píxel haría
+    // justo lo contrario de fluido.
+    setVista((prev) => {
+      if (prev && prev.c === v.c && prev.r === v.r && prev.dc === v.dc && prev.df === v.df) return prev
+      g.movido = true
+      const siguiente = { ...v, valido: cabe(g.id, v.c, v.r, v.dc, v.df) }
+      g.v = siguiente
+      return siguiente
+    })
+  }
+
+  const onMesaUp = () => {
+    const g = gesto.current
+    gesto.current = null
+    // Se lee del ref, no del estado: al soltar, el último `setVista` puede no
+    // haber repintado todavía y se aplicaría la posición anterior.
+    const v = g?.v
+    setVista(null)
+    if (!g || !v) return
+    // Un toque sin desplazamiento es una selección, no un movimiento.
+    if (!g.movido) return
+    if (!v.valido) {
+      toast({ title: 'Ahí no cabe', body: 'La mesa se sale del plano o pisa otra mesa.', kind: 'warn' })
+      return
+    }
+    setMesas((ms) => ms.map((m) => {
+      if (m.id !== g.id) return m
+      // Al achicar, el aforo se recorta al nuevo tope: dejarlo por encima haría
+      // que el servidor rechazara el guardado con un número que la pantalla
+      // mostraba como válido.
+      return {
+        ...m, columna: v.c, fila: v.r, anchoCeldas: v.dc, altoCeldas: v.df,
+        capacidad: aforoAjustado(m.capacidad, v.dc, v.df),
+      }
+    }))
     setDirty(true)
   }
 
@@ -269,7 +332,13 @@ function MapaMesas() {
     try {
       const ms = (mesas || []).map((m) => ({ ...m, columna: clamp(m.columna || 0, 0, plano.columnas - 1), fila: clamp(m.fila || 0, 0, plano.filas - 1) }))
       await api.guardarPlanoSalon({ filas: plano.filas, columnas: plano.columnas, bloqueadas: plano.bloqueadas })
-      await api.guardarMapaMesas(ms.map((m) => ({ id: m.id, columna: m.columna, fila: m.fila })))
+      // El tamaño viaja junto con la posición: en el plano se redimensiona
+      // arrastrando, así que mover y agrandar son el mismo gesto y tienen que
+      // guardarse en la misma llamada o el plano queda a medias.
+      await api.guardarMapaMesas(ms.map((m) => {
+        const [dc, df] = dimensionDeMesa(m)
+        return { id: m.id, columna: m.columna, fila: m.fila, anchoCeldas: dc, altoCeldas: df }
+      }))
       setMesas(ms); setDirty(false); reload()
       toast({ title: 'Plano guardado' })
     } catch (e) { toast({ title: 'No se pudo guardar', body: e?.message || 'Error', kind: 'error' }) }
@@ -329,6 +398,9 @@ function MapaMesas() {
               const [dc, df] = m ? dimensionVisible(m) : [1, 1]
               const col = m ? colorEstado(m.estado) : null
               const activo = m && sel === m.id
+              // La mesa que se está arrastrando se atenúa: lo que se mira es la
+              // vista previa, y dos copias opacas a la vez confunden.
+              const arrastrandoEsta = !!(m && vista && vista.id === m.id && vista.tipo === 'mover')
               return (
                 <div key={c + '-' + r} onPointerDown={() => (m ? null : clicCelda(c, r))}
                   className="border border-slate-100 dark:border-slate-800 flex items-center justify-center"
@@ -338,11 +410,24 @@ function MapaMesas() {
                     cursor: puedeEditar && !m ? 'pointer' : 'default',
                   }}>
                   {m ? (
-                    <div onPointerDown={(e) => onMesaDown(e, m)} onClick={() => setSel(m.id)}
-                      className="flex flex-col items-center justify-center"
-                      style={{ width: cel * dc - 8, height: cel * df - 8, background: col.bg, border: `2px solid ${activo ? '#6A2CF0' : col.border}`, borderRadius: m.forma === 'redonda' ? '50%' : 8, color: col.text, cursor: puedeEditar && modo === 'mesas' ? 'grab' : 'pointer', boxShadow: activo ? '0 0 0 3px rgba(106,44,240,.18)' : 'none' }}>
+                    <div onPointerDown={(e) => onMesaDown(e, m)} onPointerMove={onMesaMove}
+                      onPointerUp={onMesaUp} onPointerCancel={onMesaUp} onClick={() => setSel(m.id)}
+                      className="relative flex flex-col items-center justify-center touch-none"
+                      style={{ width: cel * dc - 8, height: cel * df - 8, background: col.bg, border: `2px solid ${activo ? '#6A2CF0' : col.border}`, borderRadius: m.forma === 'redonda' ? '50%' : 8, color: col.text, cursor: puedeEditar && modo === 'mesas' ? (arrastrandoEsta ? 'grabbing' : 'grab') : 'pointer', boxShadow: activo ? '0 0 0 3px rgba(106,44,240,.18)' : 'none', opacity: arrastrandoEsta ? 0.4 : 1 }}>
                       <span className="font-display font-bold leading-none" style={{ fontSize: Math.max(12, cel * 0.24) }}>{m.nombre}</span>
                       <span className="inline-flex items-center gap-0.5 opacity-80" style={{ fontSize: Math.max(9, cel * 0.16) }}><Icon.Users size={Math.max(9, cel * 0.16)} /> {m.capacidad || 0}</span>
+
+                      {/* TIRADORES DE TAMAÑO, solo en la mesa seleccionada: uno
+                          por lado y uno en la esquina. Aparecen al seleccionar y
+                          no siempre porque doce mesas con seis tiradores cada
+                          una convierten el plano en un alfiletero. */}
+                      {puedeEditar && modo === 'mesas' && activo ? TIRADORES.map((t) => (
+                        <span key={t.tipo} title={t.titulo}
+                          onPointerDown={(e) => onMesaDown(e, m, t.tipo)} onPointerMove={onMesaMove}
+                          onPointerUp={onMesaUp} onPointerCancel={onMesaUp}
+                          className="absolute bg-white dark:bg-slate-900 border-2 border-elerp-500 rounded-full touch-none"
+                          style={{ width: 12, height: 12, cursor: t.cursor, ...t.pos }} />
+                      )) : null}
                     </div>
                   ) : blk && puedeEditar ? (
                     <Icon.CircleX size={Math.max(12, cel * 0.28)} className="text-slate-400" />
@@ -350,6 +435,25 @@ function MapaMesas() {
                 </div>
               )
             }))}
+
+            {/* VISTA PREVIA del gesto: dónde va a quedar la mesa y si cabe. Es
+                lo que vuelve el arrastre legible — antes no se veía nada hasta
+                soltar, y un destino inválido no decía por qué no pasaba nada. */}
+            {vista ? (
+              <div className="pointer-events-none rounded-lg relative"
+                style={{
+                  gridColumn: `${clamp(vista.c, 0, plano.columnas - 1) + 1} / span ${Math.min(vista.dc, plano.columnas)}`,
+                  gridRow: `${clamp(vista.r, 0, plano.filas - 1) + 1} / span ${Math.min(vista.df, plano.filas)}`,
+                  border: `2px dashed ${vista.valido ? '#6A2CF0' : '#B3362C'}`,
+                  background: vista.valido ? 'rgba(106,44,240,.10)' : 'rgba(179,54,44,.10)',
+                  margin: 3,
+                }}>
+                <span className="absolute -mt-0.5 ml-1 num font-semibold"
+                  style={{ fontSize: 11, color: vista.valido ? '#6A2CF0' : '#B3362C' }}>
+                  {vista.dc}×{vista.df} · {aforoMaximo(vista.dc, vista.df)}p
+                </span>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -372,38 +476,27 @@ function MapaMesas() {
   )
 }
 
-// Panel de edición de una mesa (datos; la posición/tamaño se editan arrastrando).
-/* CADA CUADRO DEL PLANO ADMITE 4 PERSONAS. Una mesa de 2, 3 o 4 ocupa un
- * cuadro; para sentar a más hay que AMPLIARLA, y recién ahí se puede elegir un
- * aforo mayor. Manda el tamaño y el aforo se acomoda — el plano es la realidad
- * física del local, no al revés.
- *
- * Espejo de domain/mesa (PersonasPorCelda, Dimension, CapacidadMaxima): el
- * servidor vuelve a validar y rechaza el aforo que no entra, así que si las dos
- * reglas se separan, guardar falla en vez de dejar el plano incoherente. */
-const PERSONAS_POR_CUADRO = 4
+// Panel de edición de una mesa. La posición y el TAMAÑO se editan arrastrando
+// la mesa y sus bordes en el plano; acá van los datos.
+// La geometría (cuadros, aforo por cuadro, solapes) vive en lib/plano.js.
 
-// dimensionDeMesa: el tamaño guardado manda; sin él (mesas anteriores al
-// redimensionado) se deriva de la capacidad, así los planos ya dibujados no
-// necesitan migración.
-function dimensionDeMesa(m) {
-  if (m?.anchoCeldas > 0 && m?.altoCeldas > 0) return [m.anchoCeldas, m.altoCeldas]
-  const celdas = Math.max(1, Math.ceil((m?.capacidad || 0) / PERSONAS_POR_CUADRO))
-  if (celdas <= 3) return [celdas, 1]
-  let ancho = 1
-  while (ancho * ancho < celdas) ancho++
-  return [ancho, Math.ceil(celdas / ancho)]
-}
-
-const aforoMaximo = (ancho, alto) => ancho * alto * PERSONAS_POR_CUADRO
+/* TIRADORES de redimensionado. Se dibujan sobre la mesa seleccionada: derecha
+ * (ancho), abajo (alto) y esquina (los dos a la vez). Van con el cursor de
+ * redimensionar del sistema, que es la única pista universal de «esto se
+ * arrastra». */
+const TIRADORES = [
+  { tipo: 'ancho', titulo: 'Ensanchar', cursor: 'ew-resize', pos: { right: -7, top: '50%', marginTop: -6 } },
+  { tipo: 'alto', titulo: 'Alargar', cursor: 'ns-resize', pos: { bottom: -7, left: '50%', marginLeft: -6 } },
+  { tipo: 'ambos', titulo: 'Redimensionar', cursor: 'nwse-resize', pos: { right: -7, bottom: -7 } },
+]
 
 /* TamanoMesa son los controles de ampliación. Al agrandar sube el tope de aforo;
  * al achicar, el aforo se recorta solo al nuevo tope — así nunca queda un número
  * que el servidor va a rechazar al guardar. */
 function TamanoMesa({ ancho, alto, disabled, onCambio }) {
   const paso = (dc, df) => {
-    const a = Math.min(6, Math.max(1, ancho + dc))
-    const b = Math.min(6, Math.max(1, alto + df))
+    const a = clamp(ancho + dc, 1, MAX_CELDAS_MESA)
+    const b = clamp(alto + df, 1, MAX_CELDAS_MESA)
     onCambio(a, b)
   }
   const btn = (etiqueta, dc, df, titulo) => (
@@ -449,7 +542,7 @@ function PanelMesa({ mesa, puedeEditar, onGuardado, onEliminar, toast }) {
   // mostraba como válido.
   const cambiarTamano = (a, b) => setF((s) => ({
     ...s, anchoCeldas: a, altoCeldas: b,
-    capacidad: Math.min(Number(s.capacidad) || 0, aforoMaximo(a, b)),
+    capacidad: aforoAjustado(s.capacidad, a, b),
   }))
   const guardar = async () => {
     setBusy(true)
@@ -493,7 +586,7 @@ function NuevaMesaModal({ onClose, onCreada, toast, columna = 0, fila = 0 }) {
   const tope = aforoMaximo(f.anchoCeldas, f.altoCeldas)
   const cambiarTamano = (a, b) => setF((s) => ({
     ...s, anchoCeldas: a, altoCeldas: b,
-    capacidad: Math.min(Number(s.capacidad) || 0, aforoMaximo(a, b)),
+    capacidad: aforoAjustado(s.capacidad, a, b),
   }))
   const crear = async () => {
     if (!f.nombre.trim()) { toast({ title: 'Ponle un nombre o número a la mesa', kind: 'warn' }); return }
