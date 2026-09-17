@@ -41,6 +41,11 @@ services:
       COOKIE_SAMESITE: "${COOKIE_SAMESITE:-}"
       # Seguro por defecto: sin DEV_LOGIN explícito el modo demo queda apagado.
       DEV_LOGIN: "${DEV_LOGIN:-false}"
+      # A ElERP se entra con HUBMY. Esta puerta —email + contraseña— queda
+      # cerrada salvo que se abra a propósito (una instalación sin Hubmy, una
+      # contingencia). Con ella apagada el servidor responde 404 a
+      # /api/auth/native-login y /api/auth/accept-invite.
+      AUTH_NATIVA: "${AUTH_NATIVA:-false}"
       # Clave M2M de la superficie interna /internal (consola de plataforma).
       # Vacía por defecto ⇒ /internal cerrado (503). Se define solo donde corra
       # el servicio de plataforma.

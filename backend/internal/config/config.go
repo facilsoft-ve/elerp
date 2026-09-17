@@ -36,6 +36,19 @@ type Config struct {
 
 	// Modo demo sin Hubmy (debe ser false en producción)
 	DevLogin bool
+	// AuthNativa habilita el inicio de sesión con email + contraseña.
+	//
+	// APAGADA POR DEFECTO: a ElERP se entra con Hubmy. Hubmy es el proveedor de
+	// identidad del producto —ahí viven el 2FA, el SSO y la baja de un empleado—,
+	// y una segunda puerta con contraseñas propias significa otro juego de
+	// credenciales que nadie rota y que sobrevive al despido de quien la usaba.
+	//
+	// No se borró el camino: la aceptación de invitaciones crea una credencial
+	// local y hay pruebas que la cubren. Queda detrás de este interruptor para
+	// el día que haga falta (una instalación sin Hubmy, una contingencia), y
+	// mientras tanto el servidor responde 404 — la pantalla no es la que
+	// protege.
+	AuthNativa bool
 
 	// PlatformAPIKey autentica (M2M) la superficie interna /internal que consume
 	// la consola de plataforma (super-admin / Mornix). Vacío ⇒ /internal queda
@@ -81,7 +94,8 @@ func Load() Config {
 		// Seguro por defecto: un despliegue sin DEV_LOGIN explícito queda cerrado
 		// (sin modo demo sin credenciales). La demo pública lo habilita a
 		// propósito en su .env.
-		DevLogin: envBool("DEV_LOGIN", false),
+		DevLogin:   envBool("DEV_LOGIN", false),
+		AuthNativa: envBool("AUTH_NATIVA", false),
 
 		PlatformAPIKey: env("PLATFORM_API_KEY", ""),
 		BackupKey:      env("BACKUP_KEY", ""),

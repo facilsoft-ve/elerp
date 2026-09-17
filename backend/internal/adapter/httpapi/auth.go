@@ -14,7 +14,12 @@ import (
 )
 
 func (s *Server) handleHealth(c *fiber.Ctx) error {
-	return c.JSON(fiber.Map{"ok": true, "hubmy": s.cfg.HubmyConfigured(), "devLogin": s.cfg.DevLogin})
+	return c.JSON(fiber.Map{
+		"ok": true, "hubmy": s.cfg.HubmyConfigured(), "devLogin": s.cfg.DevLogin,
+		// authNativa le dice a la pantalla si ofrecer el formulario de email y
+		// contraseña. Apagado (el valor por defecto) a ElERP se entra con Hubmy.
+		"authNativa": s.cfg.AuthNativa,
+	})
 }
 
 func (s *Server) sameSite() string {
@@ -165,7 +170,15 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 }
 
 // handleNativeLogin autentica con email + contraseña locales.
+//
+// Cerrado salvo que AUTH_NATIVA lo abra: a ElERP se entra con Hubmy. Se
+// responde 404 y no 403 a propósito — un 403 confirma que la puerta existe y
+// que solo falta el permiso; para quien prueba credenciales, eso ya es
+// información.
 func (s *Server) handleNativeLogin(c *fiber.Ctx) error {
+	if !s.cfg.AuthNativa {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "no disponible"})
+	}
 	var in struct{ Email, Password string }
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
@@ -225,7 +238,16 @@ func (s *Server) handleInvitePreview(c *fiber.Ctx) error {
 }
 
 // handleAcceptInvite crea la credencial local y activa la membresía.
+//
+// Va con el mismo interruptor que el login nativo: emite sesión sin pasar por
+// Hubmy, así que dejarlo abierto mientras la puerta principal está cerrada
+// sería cerrar la puerta y dejar la ventana. Con Hubmy la invitación se reclama
+// sola: quien entra con el mismo correo invitado activa su membresía en el
+// callback (ver ClaimInvitations).
 func (s *Server) handleAcceptInvite(c *fiber.Ctx) error {
+	if !s.cfg.AuthNativa {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "no disponible"})
+	}
 	var in struct{ Token, Nombre, Password string }
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})

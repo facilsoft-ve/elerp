@@ -9,7 +9,17 @@ import { useAuth } from '../context/AuthContext.jsx'
 
 export function Login() {
   const { login, nativeLogin } = useAuth()
-  const [health, setHealth] = useState({ hubmy: false, devLogin: false })
+  /* A ElERP SE ENTRA CON HUBMY. Hubmy es el proveedor de identidad del producto
+   * —ahí viven el 2FA, el SSO y la baja de un empleado—, y una segunda puerta
+   * con contraseñas propias significa otro juego de credenciales que nadie rota
+   * y que sobrevive al despido de quien la usaba.
+   *
+   * El formulario de email y contraseña sigue en el código pero solo aparece si
+   * el SERVIDOR dice que esa puerta está abierta (AUTH_NATIVA, apagada por
+   * defecto). Quien protege es el servidor: con el interruptor apagado la ruta
+   * responde 404 aunque alguien arme la petición a mano. La pantalla solo
+   * refleja la política, nunca la impone. */
+  const [health, setHealth] = useState({ hubmy: false, devLogin: false, authNativa: false })
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
@@ -17,7 +27,9 @@ export function Login() {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    api.health().then((h) => setHealth({ hubmy: !!h.hubmy, devLogin: !!h.devLogin })).catch(() => {})
+    api.health()
+      .then((h) => setHealth({ hubmy: !!h.hubmy, devLogin: !!h.devLogin, authNativa: !!h.authNativa }))
+      .catch(() => {})
   }, [])
 
   // La demo entra DIRECTO al dev-login: la captación del prospecto se hace por el
@@ -138,14 +150,20 @@ export function Login() {
           <div className="font-display font-bold text-[26px] text-slate-900 dark:text-slate-100 leading-tight">Hola de nuevo</div>
           <div className="text-slate-500 mt-1.5 text-[14.5px]">Entra para seguir facturando.</div>
 
-          {/* SSO de Hubmy: es el camino principal para un usuario real, así que va
-              primero. Lleva la línea gráfica de Hubmy, no la de ElERP: un botón
-              de «entrar con X» pertenece a la marca X. */}
+          {/* Entrar con Hubmy: es LA puerta. Va solo, sin alternativas al lado,
+              porque ofrecer dos caminos donde hay uno es lo que hace que la
+              gente pruebe el equivocado primero. */}
           {health.hubmy ? <BotonHubmy onClick={login} className="mt-5" /> : null}
 
-          {health.hubmy ? (
-            <div className="my-4 flex items-center gap-3 text-[11px] uppercase tracking-wide text-slate-400">
-              <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" /> o con email <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
+          {/* Sin Hubmy configurado la pantalla tiene que DECIRLO. Antes caía en
+              el formulario de email y quien intentara entrar chocaría con
+              «credenciales inválidas», que manda a buscar el problema en el
+              lugar equivocado. */}
+          {!health.hubmy && !health.authNativa ? (
+            <div className="mt-5 rounded-lg px-3.5 py-3 flex gap-2.5 items-start text-[13px]"
+              style={{ background: '#FBEDEB', border: '1px solid #ECC8C4', color: '#B3362C' }}>
+              <Icon.CircleAlert size={16} className="shrink-0 mt-0.5" />
+              <span>El acceso con Hubmy no está configurado en este servidor. Avisa a soporte: sin él no hay forma de entrar.</span>
             </div>
           ) : null}
 
@@ -156,28 +174,39 @@ export function Login() {
             </div>
           ) : null}
 
-          <form onSubmit={submit} className="mt-5 space-y-3.5">
-            <div>
-              <label className="block text-[13px] font-semibold mb-1.5 text-slate-700 dark:text-slate-300">Correo electrónico</label>
-              <input className={field} type="email" autoComplete="username" placeholder="tu@email.com"
-                value={email} onChange={(e) => setEmail(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-[13px] font-semibold mb-1.5 text-slate-700 dark:text-slate-300">Contraseña</label>
-              <div className="relative">
-                <input className={field + ' pr-11'} type={showPass ? 'text' : 'password'} autoComplete="current-password" placeholder="Contraseña"
-                  value={password} onChange={(e) => setPassword(e.target.value)} />
-                <button type="button" onClick={() => setShowPass((s) => !s)} title="Mostrar u ocultar contraseña"
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
-                  {showPass ? <Icon.EyeOff size={17} /> : <Icon.Eye size={17} />}
+          {/* Email y contraseña: SOLO si el servidor declara esa puerta abierta
+              (AUTH_NATIVA). Apagada por defecto — ver el comentario de arriba. */}
+          {health.authNativa ? (
+            <>
+              {health.hubmy ? (
+                <div className="my-4 flex items-center gap-3 text-[11px] uppercase tracking-wide text-slate-400">
+                  <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" /> o con email <div className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
+                </div>
+              ) : null}
+              <form onSubmit={submit} className="mt-5 space-y-3.5">
+                <div>
+                  <label className="block text-[13px] font-semibold mb-1.5 text-slate-700 dark:text-slate-300">Correo electrónico</label>
+                  <input className={field} type="email" autoComplete="username" placeholder="tu@email.com"
+                    value={email} onChange={(e) => setEmail(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-[13px] font-semibold mb-1.5 text-slate-700 dark:text-slate-300">Contraseña</label>
+                  <div className="relative">
+                    <input className={field + ' pr-11'} type={showPass ? 'text' : 'password'} autoComplete="current-password" placeholder="Contraseña"
+                      value={password} onChange={(e) => setPassword(e.target.value)} />
+                    <button type="button" onClick={() => setShowPass((s) => !s)} title="Mostrar u ocultar contraseña"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+                      {showPass ? <Icon.EyeOff size={17} /> : <Icon.Eye size={17} />}
+                    </button>
+                  </div>
+                </div>
+                <button type="submit" disabled={busy || !email.trim() || !password}
+                  className="w-full rounded-lg bg-elerp-500 hover:bg-elerp-600 active:bg-elerp-700 text-white font-display font-medium py-3 text-[15px] inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed transition-colors ring-focus">
+                  {busy ? <><span className="spin"><Icon.Refresh size={17} /></span> Entrando…</> : 'Entrar'}
                 </button>
-              </div>
-            </div>
-            <button type="submit" disabled={busy || !email.trim() || !password}
-              className="w-full rounded-lg bg-elerp-500 hover:bg-elerp-600 active:bg-elerp-700 text-white font-display font-medium py-3 text-[15px] inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed transition-colors ring-focus">
-              {busy ? <><span className="spin"><Icon.Refresh size={17} /></span> Entrando…</> : 'Entrar'}
-            </button>
-          </form>
+              </form>
+            </>
+          ) : null}
 
           {health.devLogin ? (
             <button onClick={irAlDemo}
