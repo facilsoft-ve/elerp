@@ -46,12 +46,15 @@ export function Login() {
       {/* Panel de marca (izquierda) */}
       <div className="relative overflow-hidden hidden lg:flex w-[44%] max-w-[560px] shrink-0 flex-col justify-between p-14 text-white"
         style={{ background: 'var(--hb-azul-profundo)' }}>
-        {/* Racimos modulares — textura de marca, tal como en el prototipo: dos
-            composiciones en el tercio medio y una al pie. Nunca compiten en
-            contraste con el contenido (opacidades del 9% al 16%). */}
-        <RacimoModular variante="grande" style={{ left: 34, top: 168 }} />
-        <RacimoModular variante="chico" style={{ right: 74, top: 150 }} />
-        <RacimoModular variante="chico" escala={0.8} style={{ left: 286, bottom: 20 }} />
+        {/* Racimo modular — el manual lo pide «a tamaño grande y CORTADO POR EL
+            BORDE, no como confeti en las esquinas». Antes eran tres piezas
+            chicas sueltas que caían justo encima del rótulo, del titular y del
+            pie: se leían como manchas, no como textura de marca.
+            Ahora son dos composiciones grandes, mordidas por el borde derecho
+            —que es la franja vacía del panel— y lejos del texto, que va todo a
+            la izquierda. */}
+        <RacimoModular variante="grande" escala={2} style={{ right: -64, top: -28 }} />
+        <RacimoModular variante="chico" escala={1.3} style={{ right: -26, bottom: 64 }} />
 
         <div className="relative flex items-center">
           <Wordmark size={30} mono />
@@ -68,14 +71,13 @@ export function Login() {
             </span>
           </div>
 
-          {/* El acento va SUBRAYADO, no en otro color: sobre fondo de marca un
-              segundo color compite con el logo. Es el mismo recurso del sitio
-              (resaltador al 84% de la altura de la línea). */}
+          {/* El acento va en TINTE DE MARCA, no subrayado. El resaltador del sitio
+              funciona sobre claro; acá, un blanco translúcido detrás de texto
+              blanco se leía como un TACHADO sobre la frase. El tinte claro
+              (elerp-300) da 5,96:1 sobre este fondo — de sobra para un titular. */}
           <h1 className="font-display font-bold text-[34px] leading-[1.2] max-w-[420px] m-0">
             Vende, factura y lleva tu contabilidad{' '}
-            <span style={{ background: 'linear-gradient(180deg, transparent 84%, rgba(255,255,255,.28) 84%)' }}>
-              sin pelear con el sistema.
-            </span>
+            <span style={{ color: '#B295F4' }}>sin pelear con el sistema.</span>
           </h1>
 
           {/* En vez de tres promesas en viñetas, SE MUESTRA el producto: es la
@@ -103,12 +105,15 @@ export function Login() {
             </div>
           </div>
 
-          <div className="mt-5 text-[12.5px] max-w-[360px]" style={{ color: '#B295F4' }}>
+          {/* Contraste medido sobre #2A2440: #D0BEF9 da 8,71:1. */}
+          <div className="mt-5 text-[13px] max-w-[360px] leading-relaxed" style={{ color: '#D0BEF9' }}>
             Pensado para conectividad hostil: un corte de luz o de internet no detiene la caja.
           </div>
         </div>
 
-        <div className="relative text-[12.5px]" style={{ color: '#8D5FF0' }}>
+        {/* Estaba en #8D5FF0 → 3,53:1, por debajo del 4,5:1 que exige AA para texto
+            chico (regla del proyecto). #B295F4 da 5,96:1. */}
+        <div className="relative text-[12.5px]" style={{ color: '#B295F4' }}>
           ERP web multi-empresa para Venezuela · por Mornix
         </div>
       </div>

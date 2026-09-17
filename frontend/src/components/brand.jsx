@@ -132,7 +132,11 @@ export const RacimoModular = ({ variante = 'grande', tone = 'onDark', escala = 1
           left: p.x * escala, top: p.y * escala,
           width: p.s * escala, height: p.s * escala,
           borderRadius: p.r * escala,
-          background: tone === 'onDark' ? `rgba(255,255,255,${p.o})` : TINTE_CLARO[i % TINTE_CLARO.length],
+          // Blanco translúcido sobre la superficie de marca (violeta muy oscuro)
+          // da GRIS desaturado: los bloques se leían como manchas sucias en vez
+          // de textura de marca. Con el tinte claro de la marca conservan el
+          // matiz morado a la misma luminosidad.
+          background: tone === 'onDark' ? `rgba(208,190,249,${p.o})` : TINTE_CLARO[i % TINTE_CLARO.length],
         }} />
       ))}
       <span style={{
