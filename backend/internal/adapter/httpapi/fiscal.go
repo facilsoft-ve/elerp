@@ -28,6 +28,16 @@ func (s *Server) registerFiscal(r fiber.Router) {
 	g.Post("/documentos", pos, s.handleEmitir)
 	g.Post("/documentos/:id/anular", admin, s.handleAnular)
 	g.Post("/documentos/:id/nota-credito", admin, s.handleNotaCredito)
+	// Notas de crédito que NO devuelven mercancía (notas de la contadora, 15:18 y
+	// 15:19). Van en rutas propias y no como una variante del cuerpo de arriba
+	// porque llevan datos distintos —un monto, o el precio correcto por
+	// producto— y mezclarlas haría un cuerpo lleno de campos opcionales donde
+	// nadie sabría cuál manda.
+	g.Post("/documentos/:id/nota-credito/descuento", admin, s.handleNCDescuento)
+	g.Post("/documentos/:id/nota-credito/ajuste-precio", admin, s.handleNCAjustePrecio)
+	// Catálogo de motivos: la pantalla no puede llevar la lista escrita a mano o
+	// se desincroniza del servidor, que es quien valida.
+	g.Get("/motivos-nota", s.handleMotivosNota)
 	g.Post("/documentos/:id/nota-debito", admin, s.handleNotaDebito)
 
 	// Libros fiscales (Libro de Ventas / Libro de Compras): reportes DERIVADOS del
@@ -102,6 +112,14 @@ func (s *Server) registerFiscal(r fiber.Router) {
 	cfg.Get("/alicuotas", s.handleAlicuotas)
 	cfg.Post("/alicuotas", cfgAdmin, s.handleCrearAlicuota)
 	cfg.Patch("/alicuotas/:id", cfgAdmin, s.handleActualizarAlicuota)
+
+	// Maestro de CONCEPTOS ISLR. Solo lectura por ahora: lo consume el selector
+	// del modal de retención, que es donde la tarifa dejaba de tecetarse. La
+	// edición de la tabla es material de Configuración y va aparte.
+	// "/sugerencia" resuelve la tarifa y el monto EN EL SERVIDOR: la pantalla
+	// muestra, no calcula.
+	cfg.Get("/conceptos-islr", s.handleConceptosISLR)
+	cfg.Get("/conceptos-islr/sugerencia", s.handleSugerenciaRetencionISLR)
 
 	cfg.Get("/dispositivos/catalogo", s.handleCatalogoDispositivos)
 	cfg.Get("/dispositivos", s.handleDispositivos)
@@ -224,6 +242,13 @@ func (s *Server) handleRetencionRecibida(c *fiber.Ctx) error {
 		Base              float64 `json:"base"`       // solo ISLR
 		Concepto          string  `json:"concepto"`   // solo ISLR
 		Sustraendo        float64 `json:"sustraendo"` // solo ISLR
+		// ConceptoCodigo y Sujeto resuelven la tarifa contra el MAESTRO de
+		// conceptos. Cuando vienen, el servicio toma de ahí el porcentaje y el
+		// sustraendo y PISA lo que haya llegado en los campos de arriba: saberse
+		// la tabla del reglamento de memoria es justo lo que el maestro evita.
+		// Vacíos ⇒ comportamiento anterior (se teclea todo).
+		ConceptoCodigo string `json:"conceptoCodigo"` // solo ISLR
+		Sujeto         string `json:"sujeto"`         // solo ISLR
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
@@ -232,6 +257,7 @@ func (s *Server) handleRetencionRecibida(c *fiber.Ctx) error {
 		application.EntradaRetencion{
 			Impuesto: in.Impuesto, NumeroComprobante: in.NumeroComprobante, Fecha: in.Fecha,
 			Porcentaje: in.Porcentaje, Base: in.Base, Concepto: in.Concepto, Sustraendo: in.Sustraendo,
+			ConceptoCodigo: in.ConceptoCodigo, Sujeto: in.Sujeto,
 		})
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -662,6 +688,25 @@ func (s *Server) handleDesactivarDispositivo(c *fiber.Ctx) error {
 
 /* --- Maestro de impuestos -------------------------------------------------- */
 
+// handleConceptosISLR devuelve el maestro de conceptos retenibles de la empresa.
+// Se siembra solo la primera vez que se pide (ver application/concepto.go).
+func (s *Server) handleConceptosISLR(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"conceptos": s.svc.ConceptosISLR(empresaIDOf(c))})
+}
+
+// handleSugerenciaRetencionISLR resuelve «cuánto le retengo a ESTE sujeto por
+// ESTE concepto sobre ESTA base». El cálculo vive en el servidor a propósito: si
+// lo hiciera la pantalla habría dos implementaciones de la misma fórmula y una
+// de las dos se quedaría vieja.
+func (s *Server) handleSugerenciaRetencionISLR(c *fiber.Ctx) error {
+	out, err := s.svc.SugerirRetencionISLR(empresaIDOf(c),
+		c.Query("codigo"), c.Query("sujeto"), c.QueryFloat("base", 0))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
 func (s *Server) handleAlicuotas(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"alicuotas": s.svc.AlicuotasVista(empresaIDOf(c))})
 }
@@ -718,4 +763,67 @@ func (s *Server) handleActualizarAlicuota(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(out)
+}
+
+// handleMotivosNota expone los catálogos de motivos de nota de crédito y débito.
+func (s *Server) handleMotivosNota(c *fiber.Ctx) error {
+	nc, nd := s.svc.MotivosDeNota()
+	return c.JSON(fiber.Map{"credito": nc, "debito": nd})
+}
+
+// handleNCDescuento emite una nota de crédito por DESCUENTO: baja el monto sin
+// devolver mercancía.
+func (s *Server) handleNCDescuento(c *fiber.Ctx) error {
+	var in struct {
+		Monto  float64 `json:"monto"`
+		Exento bool    `json:"exento"`
+		Nota   string  `json:"nota"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.NotaCreditoDescuento(empresaIDOf(c), principalOf(c).UserID, origen(c),
+		c.Params("id"), in.Monto, in.Exento, in.Nota)
+	if err != nil {
+		return errorDeNota(c, err)
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+// handleNCAjustePrecio emite una nota de crédito por AJUSTE DE PRECIO: acredita
+// la diferencia por producto, sin devolver mercancía.
+func (s *Server) handleNCAjustePrecio(c *fiber.Ctx) error {
+	var in struct {
+		Nota    string `json:"nota"`
+		Ajustes []struct {
+			SKU            string  `json:"sku"`
+			PrecioCorrecto float64 `json:"precioCorrecto"`
+		} `json:"ajustes"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	ajustes := make([]application.AjustePrecioLinea, 0, len(in.Ajustes))
+	for _, a := range in.Ajustes {
+		ajustes = append(ajustes, application.AjustePrecioLinea{SKU: a.SKU, PrecioCorrecto: a.PrecioCorrecto})
+	}
+	out, err := s.svc.NotaCreditoAjustePrecio(empresaIDOf(c), principalOf(c).UserID, origen(c),
+		c.Params("id"), ajustes, in.Nota)
+	if err != nil {
+		return errorDeNota(c, err)
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+// errorDeNota traduce los fallos de las notas: 404 lo que no existe, 409 lo que
+// choca con el estado del documento (ya anulado, tope de crédito alcanzado) y
+// 400 lo demás. Distinguirlos permite a la pantalla reaccionar distinto.
+func errorDeNota(c *fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, application.ErrDocumentoNoExiste):
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+	case errors.Is(err, application.ErrYaAnulado), errors.Is(err, application.ErrNCDescuentoExcede):
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 }

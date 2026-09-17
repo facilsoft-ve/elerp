@@ -801,6 +801,42 @@ function Marketing() {
 
 /* --- Sedes --------------------------------------------------------------- */
 
+/* AvisoPresenciaSinUbicacion — el agujero de configuración de la presencia
+ * estricta.
+ *
+ * Si la empresa declaró roles que solo pueden empezar a trabajar DENTRO del
+ * local pero la sede no tiene coordenadas, `VerificarPresencia` devuelve «no
+ * aplica» y deja pasar a todo el mundo. Nadie se entera: la empresa se cree
+ * protegida sin estarlo, que es peor que no haber configurado nada.
+ *
+ * Es un AVISO y no un bloqueo a propósito. Trancar el local por una
+ * configuración a medias —gente parada en la puerta sin poder abrir turno— hace
+ * mucho más daño que la verificación que falta, y termina con alguien apagando
+ * la regla entera.
+ */
+function AvisoPresenciaSinUbicacion() {
+  const { db } = useData()
+  const roles = db.EMPRESA?.rolesPresenciaEstricta || []
+  // Solo las ACTIVAS: una sede dada de baja no tiene a nadie entrando a trabajar.
+  const sinUbicacion = (db.SEDES || []).filter((s) => s.activa && !(s.lat || s.lon))
+  if (!roles.length || !sinUbicacion.length) return null
+
+  return (
+    <div className="mb-3 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-900/20 px-3.5 py-3 flex gap-2.5 items-start">
+      <Icon.CircleAlert size={16} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+      <div className="text-[12.5px] text-amber-900 dark:text-amber-200">
+        <div className="font-semibold mb-0.5">La presencia estricta no se está verificando en todas las sedes</div>
+        Esta empresa exige estar en el local para empezar a trabajar
+        (<strong>{roles.map(rolLabel).join(', ')}</strong>), pero{' '}
+        {sinUbicacion.length === 1 ? 'la sede ' : 'las sedes '}
+        <strong>{sinUbicacion.map((s) => s.nombre).join(', ')}</strong>{' '}
+        no {sinUbicacion.length === 1 ? 'tiene' : 'tienen'} ubicación configurada.
+        Ahí <strong>se deja entrar desde cualquier lugar</strong> — la regla existe pero no se aplica.
+      </div>
+    </div>
+  )
+}
+
 function Sedes() {
   const { db, reload } = useData()
   const { ui } = useUI()
@@ -857,6 +893,8 @@ function Sedes() {
         ) : null}
       </div>
 
+      <AvisoPresenciaSinUbicacion />
+
       {sedes.length === 0 ? (
         <Empty icon={<Icon.Home size={22} />} title="Sin sedes todavía"
           body="Crea la primera sede para poder abrir cajas y cargar existencias."
@@ -876,6 +914,14 @@ function Sedes() {
                     {s.activa ? <Badge size="sm" color="emerald" dot>Activa</Badge> : <Badge size="sm" color="slate">Inactiva</Badge>}
                   </div>
                   <div className="text-[12px] text-slate-500 mt-0.5">{s.direccion || <span className="text-slate-400">Sin dirección</span>}</div>
+                  {/* Sin coordenadas la verificación de presencia NO corre en esta
+                      sede (devuelve «no aplica»). Se marca acá y no solo en el
+                      aviso de arriba para no obligar a cruzar dos listas. */}
+                  {s.activa && !(s.lat || s.lon) ? (
+                    <div className="text-[11.5px] text-amber-700 dark:text-amber-400 mt-1 inline-flex items-center gap-1">
+                      <Icon.CircleAlert size={13} /> Sin ubicación configurada
+                    </div>
+                  ) : null}
                 </div>
                 {puedeEditar ? (
                   <div className="flex items-center gap-1 shrink-0">

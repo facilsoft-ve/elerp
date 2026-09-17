@@ -7,6 +7,7 @@ import { metodoLabel, IVA_TASA } from '../lib/fiscal.js'
 import { useData } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
+import { SelectorConceptoISLR, esTextoLibre } from '../components/conceptoIslr.jsx'
 import { ComprobanteModal, comprobanteDeFactura } from '../components/ComprobantePDF.jsx'
 
 // Anular (reversa total), nota de crédito (reversa parcial, resta) y nota de
@@ -840,7 +841,11 @@ function RetencionDesdeFacturaModal({ doc, impuestosTomados = [], ccy, onClose, 
   const [fecha, setFecha] = useState(hoyISO())
   const [porcentaje, setPorcentaje] = useState('75')
   const [base, setBase] = useState('')
-  const [concepto, setConcepto] = useState('')
+  // El concepto ya no es texto: es una elección contra el MAESTRO ({codigo,
+  // sujeto}) con salida a texto libre. `sugerencia` es lo que devolvió el
+  // servidor —tarifa, sustraendo y monto— y manda sobre lo tecleado.
+  const [concepto, setConcepto] = useState({ codigo: '', sujeto: '', texto: '' })
+  const [sugerencia, setSugerencia] = useState(null)
   const [sustraendo, setSustraendo] = useState('')
   const [touched, setTouched] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -853,10 +858,14 @@ function RetencionDesdeFacturaModal({ doc, impuestosTomados = [], ccy, onClose, 
   // partida habitual; sigue siendo editable porque el concepto puede acotarla.
   useEffect(() => { if (esISLR && !base) setBase(String(netoDoc)) }, [esISLR, base, netoDoc])
 
-  const pct = Number(porcentaje)
+  // Con un concepto del maestro, la tarifa y el sustraendo SON los del maestro:
+  // el servidor los va a pisar igual al registrar, así que la pantalla tiene que
+  // mostrar lo mismo que se va a guardar y no lo que alguien tecleó.
+  const delMaestro = esISLR && !!sugerencia
+  const pct = delMaestro ? Number(sugerencia.porcentaje) : Number(porcentaje)
   const pctValido = Number.isFinite(pct) && pct > 0 && pct <= 100
   const baseCalc = esISLR ? (Number(base) || 0) : ivaDoc
-  const sust = esISLR ? (Number(sustraendo) || 0) : 0
+  const sust = esISLR ? (delMaestro ? Number(sugerencia.sustraendo) || 0 : Number(sustraendo) || 0) : 0
   const montoRetenido = pctValido ? Math.max(0, round2n(baseCalc * (pct / 100) - sust)) : 0
 
   const errComp = !numeroComprobante.trim() ? 'El número de comprobante es obligatorio (lo emitió el cliente).' : ''
@@ -864,7 +873,10 @@ function RetencionDesdeFacturaModal({ doc, impuestosTomados = [], ccy, onClose, 
   const errPct = !pctValido ? 'El porcentaje debe estar entre 0 y 100.' : ''
   const errBase = esISLR && !(baseCalc > 0) ? 'La base gravable debe ser mayor que cero.' : ''
   const errIVA = !esISLR && !(ivaDoc > 0) ? 'Esta factura no tiene IVA sobre el cual retener.' : ''
-  const errConcepto = esISLR && !concepto.trim() ? 'Indica el concepto de la retención de ISLR.' : ''
+  const errConcepto = !esISLR ? ''
+    : esTextoLibre(concepto)
+      ? (!concepto.texto?.trim() ? 'Indica el concepto de la retención de ISLR.' : '')
+      : (!concepto.sujeto ? 'Indica a quién se le retiene: la tarifa depende de eso.' : '')
   const errMonto = esISLR && pctValido && baseCalc > 0 && !(montoRetenido > 0)
     ? 'El monto a retener queda en cero (revisa el porcentaje y el sustraendo).' : ''
   const puede = !errComp && !errFecha && !errPct && !errBase && !errIVA && !errConcepto && !errMonto && !!libres.length
@@ -874,7 +886,20 @@ function RetencionDesdeFacturaModal({ doc, impuestosTomados = [], ccy, onClose, 
     if (!puede) return
     setBusy(true)
     const body = { impuesto, numeroComprobante: numeroComprobante.trim(), fecha, porcentaje: pct }
-    if (esISLR) { body.base = Number(base) || 0; body.concepto = concepto.trim(); body.sustraendo = Number(sustraendo) || 0 }
+    if (esISLR) {
+      body.base = Number(base) || 0
+      if (esTextoLibre(concepto)) {
+        // Fuera del maestro: sigue valiendo lo tecleado, como antes.
+        body.concepto = (concepto.texto || '').trim()
+        body.sustraendo = Number(sustraendo) || 0
+      } else {
+        // Del maestro: se manda el CÓDIGO y el sujeto, y el servidor resuelve la
+        // tarifa. Mandar además el porcentaje sería decirle dos veces lo mismo,
+        // con el riesgo de que discrepen.
+        body.conceptoCodigo = concepto.codigo
+        body.sujeto = concepto.sujeto
+      }
+    }
     try {
       const creada = await api.registrarRetencionRecibida(doc.id, body)
       toast({
@@ -932,30 +957,43 @@ function RetencionDesdeFacturaModal({ doc, impuestosTomados = [], ccy, onClose, 
 
             {esISLR ? (
               <>
-                <Field label="Concepto de la retención" required error={touched ? errConcepto : ''} hint="según la providencia">
-                  <Input value={concepto} onChange={(e) => setConcepto(e.target.value)}
-                    onBlur={() => setTouched(true)} invalid={touched && !!errConcepto}
-                    placeholder="Ej: Honorarios profesionales, servicios, alquiler…" />
-                </Field>
+                <SelectorConceptoISLR base={Number(base) || 0} valor={concepto}
+                  error={touched ? errConcepto : ''}
+                  onChange={(v, sug) => { setConcepto(v); setSugerencia(sug) }} />
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Base gravable" required error={touched ? errBase : ''} hint="sugerida: neto del documento">
                     <Input type="number" min={0} step="any" className="num" value={base}
                       onChange={(e) => setBase(e.target.value)} onBlur={() => setTouched(true)}
                       invalid={touched && !!errBase} placeholder="0,00" />
                   </Field>
-                  <Field label="Sustraendo" hint="opcional">
-                    <Input type="number" min={0} step="any" className="num" value={sustraendo}
-                      onChange={(e) => setSustraendo(e.target.value)} placeholder="0,00" />
-                  </Field>
+                  {/* El sustraendo solo se teclea FUERA del maestro: con un concepto
+                      elegido viene de la tabla, y un campo editable al lado
+                      invitaría a contradecirla (el servidor lo pisaría igual). */}
+                  {delMaestro ? (
+                    <Field label="Sustraendo" hint="del maestro">
+                      <Input className="num" value={fmtNum(sust, 2)} disabled readOnly />
+                    </Field>
+                  ) : (
+                    <Field label="Sustraendo" hint="opcional">
+                      <Input type="number" min={0} step="any" className="num" value={sustraendo}
+                        onChange={(e) => setSustraendo(e.target.value)} placeholder="0,00" />
+                    </Field>
+                  )}
                 </div>
               </>
             ) : null}
 
             <Field label="Porcentaje retenido" required error={touched ? (errPct || errIVA) : ''}>
               {esISLR ? (
-                <Input type="number" min={0} max={100} step="any" className="w-32 num" value={porcentaje}
-                  onChange={(e) => setPorcentaje(e.target.value)} onBlur={() => setTouched(true)}
-                  invalid={touched && !!errPct} placeholder="%" />
+                // Con concepto del maestro la tarifa se MUESTRA: es el punto de
+                // tener maestro. Tecleable solo en texto libre.
+                delMaestro ? (
+                  <Input className="w-32 num" value={`${fmtNum(pct, 2)}%`} disabled readOnly />
+                ) : (
+                  <Input type="number" min={0} max={100} step="any" className="w-32 num" value={porcentaje}
+                    onChange={(e) => setPorcentaje(e.target.value)} onBlur={() => setTouched(true)}
+                    invalid={touched && !!errPct} placeholder="%" />
+                )
               ) : (
                 <div className="flex items-center gap-2">
                   <Select value={PCT_RETENCION.includes(pct) ? String(pct) : 'otro'} className="w-40"

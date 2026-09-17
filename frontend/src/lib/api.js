@@ -424,6 +424,14 @@ export const api = {
   // igual que se guardan: convertir a porcentaje es cosa de la pantalla, no del
   // transporte — si no, el mismo número significa dos cosas según por dónde entre.
   alicuotas: () => request('/api/config/alicuotas'),
+
+  // ---- Maestro de conceptos ISLR ----
+  // La tabla de conceptos retenibles con su tarifa y su sustraendo. `sugerencia`
+  // resuelve cuánto retener EN EL SERVIDOR: la pantalla muestra, no calcula —
+  // dos implementaciones de la misma fórmula terminan discrepando.
+  conceptosISLR: () => request('/api/config/conceptos-islr'),
+  sugerenciaRetencionISLR: ({ codigo, sujeto, base }) =>
+    request(`/api/config/conceptos-islr/sugerencia?codigo=${encodeURIComponent(codigo)}&sujeto=${encodeURIComponent(sujeto)}&base=${encodeURIComponent(base)}`),
   crearAlicuota: (body) => request('/api/config/alicuotas', { method: 'POST', body: JSON.stringify(body) }),
   actualizarAlicuota: (id, body) => request(`/api/config/alicuotas/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   crearDispositivo: (body) => request('/api/config/dispositivos', { method: 'POST', body: JSON.stringify(body) }),
