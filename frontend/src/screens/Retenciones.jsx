@@ -6,6 +6,11 @@ import { useData } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
 import { ComprobanteRetencionModal } from '../components/ComprobanteRetencion.jsx'
+import {
+  filtrarRetenciones, txtRetencionesIVA, xmlRetencionesISLR,
+  descargarTexto, nombreArchivoRetenciones,
+  COLUMNAS_TXT_IVA, PENDIENTE_CONFIRMAR,
+} from '../lib/retencionesExport.js'
 
 // Retenciones de IVA (comprobantes). Dos direcciones:
 //   · Recibida — un cliente AGENTE DE RETENCIÓN te retiene un % (75/100) del IVA de
@@ -53,6 +58,13 @@ const puedeEmitida = (rol) => ['dueno', 'desarrollador'].includes(rol)
 
 const hoyISO = () => new Date().toISOString().slice(0, 10)
 
+// Mismos meses que el selector de los libros fiscales: el período se elige igual
+// en las dos pantallas.
+const MESES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+]
+
 export function Retenciones() {
   const { db } = useData()
   const { ui } = useUI()
@@ -64,6 +76,10 @@ export function Retenciones() {
   const [error, setError] = useState(null)
   const [alta, setAlta] = useState(null) // 'recibida' | 'emitida' | null
   const [imprimir, setImprimir] = useState(null) // retención emitida a imprimir
+  // Período de la exportación al SENIAT. Se declara por mes, igual que los libros.
+  const hoy = new Date()
+  const [anio, setAnio] = useState(hoy.getUTCFullYear())
+  const [mes, setMes] = useState(hoy.getUTCMonth() + 1)
 
   const cargar = useCallback(async () => {
     setError(null)
@@ -86,6 +102,29 @@ export function Retenciones() {
     for (const r of lista) c[r.tipo] = (c[r.tipo] || 0) + 1
     return c
   }, [lista])
+
+  // Comprobantes del período, por impuesto: es lo que se declara ante el SENIAT.
+  // Se calcula acá y no dentro del botón para poder DESHABILITARLO cuando no hay
+  // nada: un botón que descarga un archivo vacío hace perder el viaje al portal.
+  const delPeriodo = useMemo(() => ({
+    iva: filtrarRetenciones(lista, { anio, mes, impuesto: 'iva' }),
+    islr: filtrarRetenciones(lista, { anio, mes, impuesto: 'islr' }),
+  }), [lista, anio, mes])
+
+  const anios = useMemo(() => {
+    const y = new Date().getUTCFullYear()
+    return [y, y - 1, y - 2, y - 3, y - 4]
+  }, [])
+
+  const exportarIVA = () => descargarTexto(
+    nombreArchivoRetenciones('iva', db.EMPRESA, anio, mes, 'txt'),
+    txtRetencionesIVA(delPeriodo.iva, db.EMPRESA, anio, mes),
+  )
+  const exportarISLR = () => descargarTexto(
+    nombreArchivoRetenciones('islr', db.EMPRESA, anio, mes, 'xml'),
+    xmlRetencionesISLR(delPeriodo.islr, db.EMPRESA, anio, mes),
+    'application/xml;charset=utf-8',
+  )
 
   const segActivo = SEGMENTOS.find((s) => s.value === seg) || SEGMENTOS[0]
   const rows = segActivo.tipo ? lista.filter((r) => r.tipo === segActivo.tipo) : lista
@@ -129,6 +168,79 @@ export function Retenciones() {
             ) : null}
           </div>
         ) : null}
+      </div>
+
+      {/* ── Exportación al SENIAT ───────────────────────────────────────────
+          Los LIBROS van en XLSX porque se trabajan en hoja de cálculo; los
+          COMPROBANTES se PRESENTAN, así que van en el formato del organismo:
+          TXT para IVA, XML para ISLR. Son dos archivos distintos y por eso hay
+          dos botones y no un menú. */}
+      <div className="mb-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-3.5">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="text-[13px] font-semibold">Exportar al SENIAT</div>
+          <div className="flex items-center gap-2">
+            <Select value={mes} onChange={(e) => setMes(Number(e.target.value))} className="w-36">
+              {MESES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+            </Select>
+            <Select value={anio} onChange={(e) => setAnio(Number(e.target.value))} className="w-24">
+              {anios.map((y) => <option key={y} value={y}>{y}</option>)}
+            </Select>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            {/* Deshabilitado sin comprobantes: descargar un archivo vacío y
+                llevarlo al portal es perder el viaje. El contador va en el
+                botón para que se vea QUÉ se está por exportar. */}
+            <Button variant="secondary" icon={<Icon.Download size={15} />}
+              disabled={!delPeriodo.iva.length} onClick={exportarIVA}
+              title={delPeriodo.iva.length
+                ? `Exportar ${delPeriodo.iva.length} comprobante(s) de IVA a TXT`
+                : 'No hay retenciones de IVA en este período'}>
+              IVA · TXT{delPeriodo.iva.length ? ` (${fmtNum(delPeriodo.iva.length, 0)})` : ''}
+            </Button>
+            <Button variant="secondary" icon={<Icon.Download size={15} />}
+              disabled={!delPeriodo.islr.length} onClick={exportarISLR}
+              title={delPeriodo.islr.length
+                ? `Exportar ${delPeriodo.islr.length} comprobante(s) de ISLR a XML`
+                : 'No hay retenciones de ISLR en este período'}>
+              ISLR · XML{delPeriodo.islr.length ? ` (${fmtNum(delPeriodo.islr.length, 0)})` : ''}
+            </Button>
+          </div>
+        </div>
+
+        {/* El layout oficial NO está confirmado, y eso hay que decirlo ACÁ —no
+            solo en un comentario del código— para que nadie presente el archivo
+            creyendo que ya está validado contra la providencia. */}
+        <details className="mt-3 group">
+          <summary className="cursor-pointer list-none flex items-start gap-2 text-[12px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-2">
+            <Icon.CircleAlert size={14} className="mt-0.5 shrink-0" />
+            <span>
+              <strong>Formato pendiente de confirmar con la contadora.</strong> La estructura es
+              razonable y lleva todos los campos del comprobante, pero <strong>no está verificada
+              contra la providencia vigente</strong> ni contra un archivo aceptado por el portal.
+              <span className="underline ml-1 group-open:hidden">Ver qué falta y el orden de columnas</span>
+            </span>
+          </summary>
+          <div className="mt-2 px-3 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/60 text-[12px] text-slate-600 dark:text-slate-300 space-y-2">
+            <div>
+              <div className="font-semibold mb-1">Qué hay que confirmar</div>
+              <ul className="list-disc pl-4 space-y-0.5">
+                {PENDIENTE_CONFIRMAR.map((x) => <li key={x}>{x}</li>)}
+              </ul>
+            </div>
+            <div>
+              <div className="font-semibold mb-1">Orden de columnas del TXT de IVA</div>
+              {/* El TXT se entrega SIN encabezado (un archivo de presentación es
+                  solo datos), así que el orden se documenta acá: sin esto nadie
+                  puede verificar qué campo es cuál. */}
+              <ol className="list-decimal pl-4 space-y-0.5 num">
+                {COLUMNAS_TXT_IVA.map((c) => <li key={c}>{c}</li>)}
+              </ol>
+              <div className="mt-1.5 text-slate-400">
+                Separados por «|», una línea por comprobante y sin fila de encabezado.
+              </div>
+            </div>
+          </div>
+        </details>
       </div>
 
       {error ? (
