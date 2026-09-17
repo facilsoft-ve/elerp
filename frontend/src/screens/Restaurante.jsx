@@ -162,7 +162,9 @@ export function Restaurante({ route }) {
  *     ficha y terminaba con «Terraza», «terraza» y «Terrraza» conviviendo.
  */
 function MapaMesas() {
-  const { db, reload } = useData()
+  // Solo `reload`: el editor NO lee `db`. Su verdad es lo que tiene en pantalla
+  // hasta que se guarda el plano; leer del bootstrap lo pisaría con lo guardado.
+  const { reload } = useData()
   const { ui } = useUI()
   const toast = useToast()
   const confirm = useConfirm()
@@ -471,6 +473,21 @@ function MapaMesas() {
     setMesas((ms) => (ms || []).map((m) => (m.id === guardada.id ? { ...m, ...guardada } : m)))
   }
 
+  /* redimensionarMesa aplica el tamaño que piden los botones del panel. Pasa
+   * por el MISMO control de choques que el arrastre: los botones no pueden
+   * hacer lo que el mapa prohíbe, o el plano quedaría encimado y el servidor
+   * rechazaría el guardado al final, con veinte mesas ya movidas. */
+  const redimensionarMesa = (m, a, b) => {
+    if (!cabeEn(salon, m.id, m.columna || 0, m.fila || 0, a, b)) {
+      toast({ title: 'No se puede agrandar', body: 'Se saldría del plano o pisaría algo que ya está puesto.', kind: 'warn' })
+      return
+    }
+    setMesas((ms) => (ms || []).map((x) => (x.id !== m.id ? x : {
+      ...x, anchoCeldas: a, altoCeldas: b, capacidad: aforoAjustado(x.capacidad, a, b),
+    })))
+    setDirty(true)
+  }
+
   const eliminar = async (m) => {
     if (!(await confirm({ title: '¿Eliminar esta mesa?', body: `La mesa «${m.nombre}» se quitará del salón.`, confirmLabel: 'Eliminar', tone: 'danger' }))) return
     // Se quita en local por el mismo motivo: recargar borraría el avance del
@@ -689,7 +706,8 @@ function MapaMesas() {
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-3.5">
           {mesaSel ? (
             <PanelMesa key={mesaSel.id} mesa={mesaSel} puedeEditar={puedeEditar}
-              onGuardado={(guardada) => { integrarMesa(guardada); reload() }} onEliminar={() => eliminar(mesaSel)} toast={toast} />
+              onGuardado={(guardada) => { integrarMesa(guardada); reload() }} onEliminar={() => eliminar(mesaSel)}
+              onTamano={(a, b) => redimensionarMesa(mesaSel, a, b)} toast={toast} />
           ) : areaSel ? (
             <PanelArea key={areaSel.id} area={areaSel} puedeEditar={puedeEditar}
               onCambio={(p) => editarDelPlano('area', areaSel.id, p)} onQuitar={() => quitarDelPlano('area', areaSel.id)} />
@@ -853,31 +871,44 @@ function TamanoMesa({ ancho, alto, disabled, onCambio }) {
   )
 }
 
-function PanelMesa({ mesa, puedeEditar, onGuardado, onEliminar, toast }) {
+/* PanelMesa edita los DATOS de la mesa: nombre, zona, aforo y forma.
+ *
+ * LA GEOMETRÍA NO SE COPIA ACÁ. El panel leía el tamaño al abrirse y lo
+ * guardaba tal cual, así que arrastrar la mesa para agrandarla y después
+ * cambiarle la forma la devolvía al tamaño que tenía cuando se abrió el panel:
+ * el trabajo del mapa se perdía sin que nada lo avisara. Ahora la posición y el
+ * tamaño se leen SIEMPRE de la mesa del mapa, que es la única fuente de verdad,
+ * y los botones de tamaño de acá modifican esa mesa (con su control de choques),
+ * no una copia.
+ */
+function PanelMesa({ mesa, puedeEditar, onGuardado, onEliminar, onTamano, toast }) {
   const [dimA, dimB] = dimensionDeMesa(mesa)
   const [f, setF] = useState({
     nombre: mesa.nombre, zona: mesa.zona || '', capacidad: mesa.capacidad || 0,
-    forma: mesa.forma || 'cuadrada', anchoCeldas: dimA, altoCeldas: dimB,
+    forma: mesa.forma || 'cuadrada',
   })
   const [busy, setBusy] = useState(false)
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
-  const tope = aforoMaximo(f.anchoCeldas, f.altoCeldas)
-  // Al achicar la mesa el aforo se recorta solo: dejarlo por encima del tope
-  // haría que el servidor rechazara el guardado con un número que la pantalla
-  // mostraba como válido.
-  const cambiarTamano = (a, b) => setF((s) => ({
-    ...s, anchoCeldas: a, altoCeldas: b,
-    capacidad: aforoAjustado(s.capacidad, a, b),
-  }))
+  const tope = aforoMaximo(dimA, dimB)
+  // Si la mesa se achicó en el mapa mientras el panel estaba abierto, el aforo
+  // se recorta solo: dejarlo por encima del tope haría que el servidor
+  // rechazara el guardado con un número que la pantalla mostraba como válido.
+  useEffect(() => {
+    setF((s) => (s.capacidad > tope ? { ...s, capacidad: tope } : s))
+  }, [tope])
+
   const guardar = async () => {
     setBusy(true)
     try {
-      const guardada = await api.actualizarMesa(mesa.id, { nombre: f.nombre, zona: f.zona, capacidad: Number(f.capacidad) || 0, forma: f.forma, columna: mesa.columna, fila: mesa.fila, anchoCeldas: f.anchoCeldas, altoCeldas: f.altoCeldas })
-      // Se devuelve la mesa guardada para que el editor la INTEGRE. Antes esto
-      // disparaba una recarga completa del salón y se llevaba por delante todo
-      // lo que el plano tuviera sin guardar: mesas movidas, áreas dibujadas,
-      // paredes marcadas. Guardar un nombre no puede costar media hora de
-      // trabajo.
+      const guardada = await api.actualizarMesa(mesa.id, {
+        nombre: f.nombre, zona: f.zona, capacidad: Number(f.capacidad) || 0, forma: f.forma,
+        // De la mesa del mapa, no del formulario: es lo que está a la vista.
+        columna: mesa.columna, fila: mesa.fila, anchoCeldas: dimA, altoCeldas: dimB,
+      })
+      // El editor INTEGRA la mesa guardada. Antes esto disparaba una recarga
+      // completa del salón y se llevaba por delante todo lo que el plano tuviera
+      // sin guardar: mesas movidas, áreas dibujadas, paredes marcadas. Guardar
+      // un nombre no puede costar media hora de trabajo.
       await onGuardado(guardada); toast({ title: 'Mesa actualizada', body: f.nombre })
     } catch (e) { toast({ title: 'No se pudo guardar', body: e?.message || 'Error', kind: 'error' }) }
     finally { setBusy(false) }
@@ -887,7 +918,7 @@ function PanelMesa({ mesa, puedeEditar, onGuardado, onEliminar, toast }) {
       <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Mesa seleccionada</div>
       <Field label="Nombre / número"><Input value={f.nombre} disabled={!puedeEditar} onChange={(e) => set('nombre', e.target.value)} /></Field>
       <Field label="Zona / salón"><Input value={f.zona} disabled={!puedeEditar} onChange={(e) => set('zona', e.target.value)} placeholder="Salón principal, Terraza…" /></Field>
-      <TamanoMesa ancho={f.anchoCeldas} alto={f.altoCeldas} disabled={!puedeEditar} onCambio={cambiarTamano} />
+      <TamanoMesa ancho={dimA} alto={dimB} disabled={!puedeEditar} onCambio={onTamano} />
       <div className="grid grid-cols-2 gap-2">
         <Field label="Capacidad" hint={`máx. ${tope}`}>
           <Input type="number" min={0} max={tope} value={f.capacidad} disabled={!puedeEditar}
