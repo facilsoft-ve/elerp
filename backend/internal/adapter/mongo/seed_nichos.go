@@ -19,7 +19,7 @@ import (
 // regeneraría la bodega demo, algo que no corresponde hacer de rebote).
 //
 // Es idempotente: correrlo dos veces no duplica nada.
-func sembrarNichos(st *Store, semilla *inmem.Store) {
+func sembrarNichos(st *Store, semilla *inmem.Store, refrescar bool) {
 	// Credenciales de DEMOSTRACIÓN (contraseña única) de todos los tenants demo,
 	// incluida la bodega: el bloque de identidad del Seed principal solo corre en una
 	// base virgen, así que en el servidor no llegarían nunca. Aditivo por email.
@@ -264,7 +264,11 @@ func sembrarNichos(st *Store, semilla *inmem.Store) {
 
 		// Salón: grilla + mesas (solo el restaurante).
 		if snap.TienePlano {
-			if _, ya := st.Planos.Get(n.EmpresaID, n.SedeID); !ya {
+			// El plano es CONFIGURACIÓN, no ledger: cuando la demo se regenera se
+			// reemplaza, igual que el resto de los datos de demostración. Sin esto
+			// una base ya sembrada nunca vería las zonas ni los mostradores nuevos,
+			// que fue justo lo que pasó al agregarlos.
+			if _, ya := st.Planos.Get(n.EmpresaID, n.SedeID); !ya || refrescar {
 				st.Planos.Upsert(snap.Plano)
 			}
 		}

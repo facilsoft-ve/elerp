@@ -106,7 +106,10 @@ import (
 // v31: las sedes demo llevan UBICACIÓN (coordenadas + radio) y dirección
 // completa, para que el mapa de la sede y la presencia estricta se vean
 // funcionando y no vacíos.
-const versionSeedDemo = 32
+// v32: el salón del restaurante trae sus ÁREAS (Salón, Terraza) y sus
+// MOSTRADORES (caja, barra, postres), que antes eran celdas bloqueadas — el
+// plano decía «acá no va nada» donde hay una barra con su nombre.
+const versionSeedDemo = 33
 
 // Seed siembra la base con los datos demo (misma fuente que in-memory), de
 // forma idempotente: si ya hay empresas, no hace nada.
@@ -125,7 +128,8 @@ func Seed(db *gomongo.Database) {
 
 	// ¿Los datos de demostración quedaron viejos? Se limpian para que los vuelva
 	// a sembrar la lógica de abajo, que ya es idempotente por colección.
-	if demoID != "" && versionDelSeed(db) < versionSeedDemo {
+	refrescar := demoID != "" && versionDelSeed(db) < versionSeedDemo
+	if refrescar {
 		limpiarDemo(st, demoID)
 		guardarVersionDelSeed(db)
 	}
@@ -397,7 +401,7 @@ func Seed(db *gomongo.Database) {
 	// empresa: los guards de arriba miran solo el tenant demo (emp_demo), así que en una
 	// base ya sembrada nunca entrarían. No toca emp_demo ni exige subir versionSeedDemo
 	// (que regeneraría la bodega demo).
-	sembrarNichos(st, semilla)
+	sembrarNichos(st, semilla, refrescar)
 }
 
 // filtroContadoresDemo casa los contadores de numeración del tenant demo por el
