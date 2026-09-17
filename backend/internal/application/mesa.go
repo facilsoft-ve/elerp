@@ -24,10 +24,10 @@ var (
 	// ErrTamanoMesaInvalido acota el tamaño: una mesa más grande que esto no es
 	// una mesa, es un error de tecleo que desarma el plano.
 	ErrTamanoMesaInvalido = errors.New("el tamaño de la mesa es inválido")
-	ErrMesasNoDisponible = errors.New("el módulo de mesas no está disponible")
-	ErrMesaNoExiste      = errors.New("la mesa no existe")
-	ErrMesaSinNombre     = errors.New("la mesa necesita un nombre o número")
-	ErrFormaInvalida     = errors.New("forma de mesa inválida (redonda, cuadrada o rectangular)")
+	ErrMesasNoDisponible  = errors.New("el módulo de mesas no está disponible")
+	ErrMesaNoExiste       = errors.New("la mesa no existe")
+	ErrMesaSinNombre      = errors.New("la mesa necesita un nombre o número")
+	ErrFormaInvalida      = errors.New("forma de mesa inválida (redonda, cuadrada o rectangular)")
 )
 
 // ConMesas cablea el maestro de mesas y el repo del plano del salón. Se configura

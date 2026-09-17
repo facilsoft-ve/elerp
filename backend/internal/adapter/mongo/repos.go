@@ -101,7 +101,7 @@ func New(db *gomongo.Database) *Store {
 	st.attachReservas(db)     // definido en reserva.go
 	st.attachAlicuotas(db)
 	st.attachConceptosISLR(db) // definido en concepto.go (conceptos ISLR)    // definido en impuesto.go (maestro de impuestos)
-	st.attachMesoneros(db)    // definido en mesonero.go (credenciales + turnos)
+	st.attachMesoneros(db)     // definido en mesonero.go (credenciales + turnos)
 	return st
 }
 

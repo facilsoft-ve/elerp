@@ -138,7 +138,7 @@ type Turno struct {
 	// porque el tiempo extra se paga y tiene que poder responderse quién lo dio.
 	ExtensionPor     string `json:"extensionPor,omitempty" bson:"extensionpor,omitempty"`
 	ExtensionMinutos int    `json:"extensionMinutos,omitempty" bson:"extensionminutos,omitempty"`
-	Cierre        string `json:"cierre,omitempty" bson:"cierre,omitempty"`
+	Cierre           string `json:"cierre,omitempty" bson:"cierre,omitempty"`
 	// CerradoPor queda cuando lo cerró una persona (el supervisor que lo forzó).
 	// Vacío cuando el turno se cerró SOLO, al cerrarse su última cuenta: esa
 	// distinción es la que después explica un cierre a destiempo.

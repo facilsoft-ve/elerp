@@ -397,6 +397,6 @@ func (s *Store) SnapshotNicho(n NichoDemo) SnapshotEmpresa {
 		Mesoneros:    s.Mesoneros.List(n.EmpresaID),
 		Horarios:     s.Horarios.List(n.EmpresaID, n.SedeID),
 		ConfigSalon:  cfgSalon, TieneConfig: tieneCfg,
-		Contadores:   contadores,
+		Contadores: contadores,
 	}
 }

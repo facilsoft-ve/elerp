@@ -27,7 +27,7 @@ type ConfigSalon struct {
 	// local que no lo configuró no puede recibir advertencias todo el día.
 	HoraApertura string `json:"horaApertura" bson:"horaapertura"`
 	HoraCierre   string `json:"horaCierre" bson:"horacierre"`
-	Actualizada string `json:"actualizada" bson:"actualizada"` // RFC3339
+	Actualizada  string `json:"actualizada" bson:"actualizada"` // RFC3339
 }
 
 // ConfigSalonRepository persiste la configuración del módulo por sede. Una sola por

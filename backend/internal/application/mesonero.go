@@ -602,8 +602,8 @@ func (s *Service) cerrarTurnoSiSeVacio(empresaID, usuarioID, actor, origen strin
 /* --- Horarios y tiempo extra ----------------------------------------------- */
 
 var (
-	ErrHorarioInvalido   = errors.New("el horario tiene tramos inválidos: revisa los días y las horas (HH:MM)")
-	ErrExtensionInvalida = errors.New("el tiempo extra debe ir entre 1 y 480 minutos")
+	ErrHorarioInvalido       = errors.New("el horario tiene tramos inválidos: revisa los días y las horas (HH:MM)")
+	ErrExtensionInvalida     = errors.New("el tiempo extra debe ir entre 1 y 480 minutos")
 	ErrHorariosNoDisponibles = errors.New("los horarios del salón no están disponibles")
 )
 

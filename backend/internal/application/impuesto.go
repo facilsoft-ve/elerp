@@ -21,10 +21,10 @@ import (
 // que solo respeta la interfaz no es una regla, es una costumbre.
 
 var (
-	ErrAlicuotaNoExiste   = errors.New("la alícuota no existe")
-	ErrAlicuotaCodigo     = errors.New("el código de la alícuota es obligatorio")
-	ErrAlicuotaTipo       = errors.New("el tipo de alícuota no es válido")
-	ErrAlicuotaPorcentaje = errors.New("el porcentaje debe ir entre 0 % y 100 %")
+	ErrAlicuotaNoExiste    = errors.New("la alícuota no existe")
+	ErrAlicuotaCodigo      = errors.New("el código de la alícuota es obligatorio")
+	ErrAlicuotaTipo        = errors.New("el tipo de alícuota no es válido")
+	ErrAlicuotaPorcentaje  = errors.New("el porcentaje debe ir entre 0 % y 100 %")
 	ErrAlicuotaCodigoEnUso = errors.New("ya existe una alícuota vigente con ese código")
 	// ErrVigenciaAnterior protege el histórico: abrir una tasa ANTES de la que ya
 	// rige reescribiría el pasado — documentos ya emitidos quedarían explicados

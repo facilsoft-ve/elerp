@@ -432,7 +432,6 @@ type Repository interface {
 	Update(e Empresa) (Empresa, bool)
 }
 
-
 // NormalizarRolesPresencia limpia la lista de roles con presencia estricta:
 // recorta, pasa a minúsculas, descarta vacíos y deduplica. No valida contra el
 // catálogo de roles a propósito — este paquete no conoce `usuario`, y un rol que

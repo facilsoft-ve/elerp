@@ -39,16 +39,16 @@ type Impresora struct {
 	ID        string `json:"id" bson:"id"`
 	EmpresaID string `json:"empresaId" bson:"empresaid"`
 	SedeID    string `json:"sedeId" bson:"sedeid"`
-	Nombre    string `json:"nombre" bson:"nombre"`     // "Cocina", "Barra", "Postres"
+	Nombre    string `json:"nombre" bson:"nombre"` // "Cocina", "Barra", "Postres"
 	// Marca y Modelo identifican el EQUIPO (no el puesto): "Epson TM-T20III".
 	// Salen del catálogo precargado (domain/dispositivo) o se teclean libres.
 	// Sirven para que quien da soporte sepa qué hay instalado sin ir a verlo.
-	Marca  string `json:"marca" bson:"marca"`
-	Modelo string `json:"modelo" bson:"modelo"`
-	Conexion  string `json:"conexion" bson:"conexion"` // local | red
-	Host      string `json:"host" bson:"host"`         // IP/host (solo red)
-	Puerto    int    `json:"puerto" bson:"puerto"`     // 9100 típico (solo red)
-	AnchoMM   int    `json:"anchoMm" bson:"anchomm"`   // 58 | 80
+	Marca    string `json:"marca" bson:"marca"`
+	Modelo   string `json:"modelo" bson:"modelo"`
+	Conexion string `json:"conexion" bson:"conexion"` // local | red
+	Host     string `json:"host" bson:"host"`         // IP/host (solo red)
+	Puerto   int    `json:"puerto" bson:"puerto"`     // 9100 típico (solo red)
+	AnchoMM  int    `json:"anchoMm" bson:"anchomm"`   // 58 | 80
 	// Rubros son los rubros del catálogo cuyos productos salen por acá (p. ej.
 	// "Bebidas" por la barra). Vacío ⇒ no atrae nada por rubro; solo recibe si es la
 	// predeterminada.

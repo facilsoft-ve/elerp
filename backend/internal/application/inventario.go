@@ -336,11 +336,11 @@ type CambiosProducto struct {
 	// heredado (manda ExentoIVA).
 	AlicuotaCodigo *string
 	Activo         *bool
-	EsCombo      *bool
-	Componentes  []inventario.ComboComponente
-	EsPlato      *bool
-	Receta       []inventario.ComboComponente
-	EsInsumo     *bool
+	EsCombo        *bool
+	Componentes    []inventario.ComboComponente
+	EsPlato        *bool
+	Receta         []inventario.ComboComponente
+	EsInsumo       *bool
 	// ComanderaID es *string: nil = no enviado = no se toca; "" vacía la elección y
 	// devuelve el producto al ruteo por rubro.
 	ComanderaID *string

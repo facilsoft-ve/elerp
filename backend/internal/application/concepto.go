@@ -14,8 +14,8 @@ import (
 // tarifa venga con él, en vez de saberse de memoria la tabla del reglamento.
 
 var (
-	ErrConceptoNoExiste   = errors.New("el concepto de ISLR no existe")
-	ErrConceptoInvalido   = errors.New("el concepto de ISLR está incompleto o mal formado")
+	ErrConceptoNoExiste    = errors.New("el concepto de ISLR no existe")
+	ErrConceptoInvalido    = errors.New("el concepto de ISLR está incompleto o mal formado")
 	ErrConceptosNoCargados = errors.New("el maestro de conceptos de ISLR no está disponible")
 )
 

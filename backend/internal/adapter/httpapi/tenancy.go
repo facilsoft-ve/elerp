@@ -391,7 +391,6 @@ func rolesMatrix() map[string]map[string]string {
 	}
 }
 
-
 /* --- Presencia estricta (geolocalización) ----------------------------------
  *
  * Dos ajustes de PLATAFORMA que sostienen la verificación de presencia (ver

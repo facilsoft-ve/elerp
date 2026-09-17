@@ -8,10 +8,10 @@ import "testing"
 // de golpe y las mesas abiertas quedan sin quién las atienda.
 func TestTurno_CerrandoSigueVivoPeroNoTomaMesas(t *testing.T) {
 	casos := []struct {
-		estado     string
-		vivo       bool
-		tomaMesas  bool
-		porQue     string
+		estado    string
+		vivo      bool
+		tomaMesas bool
+		porQue    string
 	}{
 		{EstadoAbierto, true, true, "abierto trabaja con normalidad"},
 		{EstadoCerrando, true, false, "cerrando atiende lo suyo pero no toma más"},

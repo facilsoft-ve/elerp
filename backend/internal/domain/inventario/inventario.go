@@ -110,7 +110,7 @@ type Producto struct {
 	// que ser configurable Y quedar asociada a los productos tipo servicio, para
 	// que al facturarlos la retención salga sola en vez de teclearse.
 	ConceptoISLR string `json:"conceptoIslr,omitempty" bson:"conceptoislr,omitempty"`
-	Activo    bool `json:"activo" bson:"activo"`
+	Activo       bool   `json:"activo" bson:"activo"`
 	// ImagenURL apunta al archivo en el bucket de la empresa. Vacío significa
 	// «sin imagen asignada» y la interfaz muestra su marcador explícito, nunca
 	// una foto ajena ni un hueco silencioso.
