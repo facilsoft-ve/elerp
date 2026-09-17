@@ -26,6 +26,14 @@ import { useState } from 'react'
  *
  *     Aun así se conserva el respaldo: si la imagen no cargara, el botón se queda
  *     con su texto en vez de mostrar el icono roto.
+ *
+ *  3. **El botón es CLARO también en modo oscuro.** La versión oscura teñía el
+ *     logo entero de blanco (`brightness(0) invert(1)`), y con eso se perdía lo
+ *     único que hace reconocible la marca: el degradado magenta→cian de «MY».
+ *     Un botón de «entrar con X» existe para que se reconozca a X de un vistazo;
+ *     si hay que elegir entre combinar con el tema y conservar la marca, gana la
+ *     marca. Es lo mismo que hacen los botones de Google y Apple, que también se
+ *     quedan claros sobre fondo oscuro.
  */
 const LOGO_HUBMY = '/hubmy-logo.png'
 
@@ -37,14 +45,15 @@ export function BotonHubmy({ onClick, className = '', etiqueta = 'Iniciar sesió
 
   return (
     <button type="button" onClick={onClick} style={{ fontFamily: FUENTE_HUBMY }}
-      className={`w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
-        text-[14.5px] font-semibold transition-colors ring-focus
-        bg-white text-[#1c1c1c] border border-[#e2e2e2] hover:bg-[#f7f7f7] active:bg-[#f0f0f0]
-        dark:bg-[#1c1c1c] dark:text-white dark:border-[#2a2a2a] dark:hover:bg-[#242424]
+      className={`w-full inline-flex items-center justify-center gap-3 px-4 py-3 rounded-xl
+        text-[15px] font-semibold transition-colors ring-focus shadow-sm
+        bg-white text-[#141414] border border-[#e6e6e6] hover:bg-[#f7f7f7] active:bg-[#f0f0f0]
         ${className}`}>
       {!sinLogo ? (
-        <img src={LOGO_HUBMY} alt="Hubmy" height="20" onError={() => setSinLogo(true)}
-          className="h-5 w-auto block dark:[filter:brightness(0)_invert(1)]" />
+        // El logo va a 22 px: el mismo peso visual que el texto que lo acompaña,
+        // que es como lo muestra la referencia de marca.
+        <img src={LOGO_HUBMY} alt="Hubmy" height="22" onError={() => setSinLogo(true)}
+          className="h-[22px] w-auto block" />
       ) : null}
       {etiqueta}
     </button>
