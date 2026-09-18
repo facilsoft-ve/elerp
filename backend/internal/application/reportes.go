@@ -279,10 +279,12 @@ func (s *Service) ReporteInventario(empresaID string) ReporteInventarioResult {
 		})
 
 		// Rotación: unidades que salieron (MovSalida) en la ventana reciente. La
-		// salida guarda cantidad negativa; se acumula su valor absoluto.
+		// salida guarda cantidad negativa; se acumula su valor absoluto. Las
+		// devoluciones a proveedor también son salidas del ledger, pero no se
+		// vendieron: contarlas inflaría la rotación con mercancía que volvió atrás.
 		var salidas float64
 		for _, m := range movs {
-			if m.Tipo == inventario.MovSalida && m.Fecha >= corte {
+			if m.Tipo == inventario.MovSalida && m.Fecha >= corte && m.RefTipo != refNotaCompra {
 				salidas += -m.Cantidad
 			}
 		}

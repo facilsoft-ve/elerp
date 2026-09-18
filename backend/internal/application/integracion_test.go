@@ -507,12 +507,18 @@ func TestIntegracion_CicloDeCompraCompleto(t *testing.T) {
 /* --- 3b. Notas de crédito/débito de PROVEEDOR → CxP baja/sube --------------- */
 
 // TestIntegracion_NotasDeCompra_AjustanCxP prueba el cruce Compras⇄CxP⇄Contabilidad
-// de las notas de crédito y débito de PROVEEDOR sobre una factura de compra:
-//   - la NC (devolución/descuento) guarda montos NEGATIVOS, su asiento cuadra
-//     (Debe CxP / Haber IVA crédito + Inventario) y BAJA la deuda con el proveedor;
-//   - la ND (cargo adicional) guarda montos POSITIVOS, su asiento cuadra (Debe
-//     Inventario + IVA crédito / Haber CxP) y SUBE la deuda;
+// de las notas de crédito y débito de PROVEEDOR sobre una factura de compra, en su
+// forma de AJUSTE DE MONTO (sin líneas devueltas: descuento, rebaja, flete):
+//   - la NC guarda montos NEGATIVOS, su asiento cuadra (Debe CxP / Haber IVA crédito
+//   - Diferencia en compras) y BAJA la deuda con el proveedor;
+//   - la ND guarda montos POSITIVOS, su asiento cuadra (Debe Diferencia en compras +
+//     IVA crédito / Haber CxP) y SUBE la deuda;
 //   - la factura de compra original queda intacta (append-only) y el libro cuadra.
+//
+// La base va a 5202 Diferencia en compras y NO a 1201 Inventario porque ninguna de
+// las dos movió mercancía: tocar 1201 sin un movimiento detrás separaría el balance
+// de la valorización del inventario. La devolución CON líneas —que sí mueve stock y
+// sí toca 1201— se prueba en notas_compra_test.go.
 func TestIntegracion_NotasDeCompra_AjustanCxP(t *testing.T) {
 	svc, _ := nuevoServicio(t)
 	sku := primerSKU(t, svc)
@@ -547,10 +553,10 @@ func TestIntegracion_NotasDeCompra_AjustanCxP(t *testing.T) {
 	}
 	casiEq(t, saldoProveedor(t, svc, prov.ID), 232, "saldo inicial del proveedor (base+IVA)")
 
-	// (1) NOTA DE CRÉDITO de proveedor: devolución/descuento de base 50 (IVA 8, total
-	// 58) → montos NEGATIVOS, la deuda BAJA 58 (232→174).
+	// (1) NOTA DE CRÉDITO de proveedor: descuento de base 50 (IVA 8, total 58) →
+	// montos NEGATIVOS, la deuda BAJA 58 (232→174). Sin líneas: no devuelve mercancía.
 	nc, err := svc.EmitirNotaCreditoCompra(empDemo, actorA, origenTst, fc.ID, application.NotaCompraEntrada{
-		Concepto: "Devolución de mercancía dañada", Monto: 50,
+		Concepto: "Descuento por acuerdo comercial", Monto: 50,
 		NumeroDocumento: "NC-P-01", NumeroControl: "00-NCP-01", Fecha: time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	if err != nil {
@@ -572,14 +578,16 @@ func TestIntegracion_NotasDeCompra_AjustanCxP(t *testing.T) {
 	}
 	casiEq(t, saldoProveedor(t, svc, prov.ID), 174, "la NC baja la deuda con el proveedor (232-58)")
 
-	// El asiento de la NC cuadra: Debe CxP 58 / Haber IVA crédito 8 + Inventario 50.
+	// El asiento de la NC cuadra: Debe CxP 58 / Haber IVA crédito 8 + Diferencia 50.
+	// La NC no trae líneas, así que no movió stock y no toca 1201.
 	ncA := asientosPorRef(svc, empDemo, "nota_compra", nc.ID)
 	if len(ncA) != 1 {
 		t.Fatalf("la NC de compra debía derivar 1 asiento, hay %d", len(ncA))
 	}
 	casiEq(t, debeCta(ncA[0], contabilidad.CtaCuentasPorPagar), 58, "NC: total al debe de CxP 2101")
 	casiEq(t, haberCta(ncA[0], contabilidad.CtaIVACreditoFiscal), 8, "NC: IVA crédito al haber 1103")
-	casiEq(t, haberCta(ncA[0], contabilidad.CtaInventario), 50, "NC: base al haber de Inventario 1201")
+	casiEq(t, haberCta(ncA[0], contabilidad.CtaDiferenciaEnCompras), 50, "NC sin líneas: base al haber de Diferencia en compras 5202")
+	casiEq(t, haberCta(ncA[0], contabilidad.CtaInventario), 0, "NC sin líneas: no toca Inventario 1201 (no movió stock)")
 	if !ncA[0].Cuadra() {
 		t.Errorf("el asiento de la NC de compra no cuadra: %+v", ncA[0])
 	}
@@ -606,12 +614,14 @@ func TestIntegracion_NotasDeCompra_AjustanCxP(t *testing.T) {
 	}
 	casiEq(t, saldoProveedor(t, svc, prov.ID), 208.8, "la ND sube la deuda con el proveedor (174+34.8)")
 
-	// El asiento de la ND cuadra: Debe Inventario 30 + IVA crédito 4.8 / Haber CxP 34.8.
+	// El asiento de la ND cuadra: Debe Diferencia 30 + IVA crédito 4.8 / Haber CxP
+	// 34.8. Un flete no re-valúa el Kardex, así que tampoco toca 1201.
 	ndA := asientosPorRef(svc, empDemo, "nota_compra", nd.ID)
 	if len(ndA) != 1 {
 		t.Fatalf("la ND de compra debía derivar 1 asiento, hay %d", len(ndA))
 	}
-	casiEq(t, debeCta(ndA[0], contabilidad.CtaInventario), 30, "ND: base al debe de Inventario 1201")
+	casiEq(t, debeCta(ndA[0], contabilidad.CtaDiferenciaEnCompras), 30, "ND: base al debe de Diferencia en compras 5202")
+	casiEq(t, debeCta(ndA[0], contabilidad.CtaInventario), 0, "ND: no toca Inventario 1201 (no movió stock)")
 	casiEq(t, debeCta(ndA[0], contabilidad.CtaIVACreditoFiscal), 4.8, "ND: IVA crédito al debe 1103")
 	casiEq(t, haberCta(ndA[0], contabilidad.CtaCuentasPorPagar), 34.8, "ND: total al haber de CxP 2101")
 	if !ndA[0].Cuadra() {

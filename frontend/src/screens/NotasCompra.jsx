@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Icon } from '../components/Icon.jsx'
-import { Button, Badge, Input, Select, Modal, Empty, TableSkeleton, VistaDetalle, useToast, Field, Toggle } from '../components/primitives.jsx'
+import { Button, Badge, Input, Select, Modal, Empty, TableSkeleton, VistaDetalle, useToast, Field, Toggle, Segmented } from '../components/primitives.jsx'
 import { fmtCurrency, fmtNum, fmtDate } from '../lib/format.js'
 import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
@@ -170,6 +170,9 @@ export function NotasCompra({ tipo = 'nota_credito' }) {
 
 function DetalleNota({ nota: n, ccy, onVolver }) {
   const meta = META[n.tipo] || META.nota_credito
+  // Una nota con líneas devolvió mercancía de verdad: salió del ledger de inventario.
+  const lineas = n.lineas || []
+  const devolvio = lineas.length > 0
   return (
     <VistaDetalle onVolver={onVolver} icon={<meta.icon size={18} />}
       titulo={`${meta.corto} ${n.numeroCompleto}`}
@@ -207,7 +210,11 @@ function DetalleNota({ nota: n, ccy, onVolver }) {
           </div>
           <div className="flex items-start gap-2 text-[11.5px] text-slate-500 bg-slate-50 dark:bg-slate-800/60 rounded-lg px-3 py-2">
             <Icon.Lock size={13} className="mt-0.5 shrink-0" />
-            <span>Documento append-only: no se edita. {n.tipo === 'nota_credito' ? 'Revierte parte de la compra (Debe CxP / Haber IVA crédito + Inventario).' : 'Carga un concepto adicional (Debe Inventario + IVA crédito / Haber CxP).'} Ajusta la cuenta por pagar del proveedor.</span>
+            <span>Documento append-only: no se edita. {devolvio
+              ? 'Devolución: la mercancía salió del almacén. El inventario baja por el valor que salió del Kardex (costo promedio) y la diferencia contra lo que acredita el proveedor va a Diferencia en compras.'
+              : n.tipo === 'nota_credito'
+                ? 'Ajuste de monto, sin movimiento de inventario (Debe CxP / Haber IVA crédito + Diferencia en compras).'
+                : 'Cargo adicional, sin movimiento de inventario (Debe Diferencia en compras + IVA crédito / Haber CxP).'} Ajusta la cuenta por pagar del proveedor.</span>
           </div>
         </div>
 
@@ -216,6 +223,38 @@ function DetalleNota({ nota: n, ccy, onVolver }) {
             <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1.5">Concepto</div>
             <div className="text-[13.5px]">{n.concepto || '—'}</div>
           </div>
+
+          {devolvio ? (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
+              <div className="flex items-center gap-2 px-4 pt-4 pb-2">
+                <Icon.Package size={15} className="text-slate-400" />
+                <span className="text-[11px] uppercase tracking-wide text-slate-400">Mercancía devuelta · salió del almacén</span>
+              </div>
+              <table className="w-full text-[12.5px]">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 text-[11px] uppercase tracking-wide text-slate-400">
+                  <tr>
+                    <th className="text-left font-medium py-2 px-4">Producto</th>
+                    <th className="text-right font-medium py-2 px-3">Cantidad</th>
+                    <th className="text-right font-medium py-2 px-3">Costo de entrada</th>
+                    <th className="text-right font-medium py-2 px-4">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {lineas.map((l) => (
+                    <tr key={l.sku}>
+                      <td className="py-2 px-4">
+                        <div className="font-medium">{l.nombre || l.sku}</div>
+                        <div className="text-[11px] text-slate-400 num">{l.sku}{l.exento ? ' · exento' : ''}</div>
+                      </td>
+                      <td className="py-2 px-3 text-right num">{fmtNum(Number(l.cantidad) || 0, 2)}</td>
+                      <td className="py-2 px-3 text-right num text-slate-500 private-mask">{fmtCurrency(Number(l.costoUnitario) || 0, ccy)}</td>
+                      <td className="py-2 px-4 text-right num private-mask">{fmtCurrency(Number(l.total) || 0, ccy)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
           <div className="rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 p-4 space-y-1.5 text-[13px] max-w-sm ml-auto">
             <TotRow label="Base imponible" value={Math.abs(n.baseImponible)} ccy={ccy} />
             {n.baseExenta ? <TotRow label="Base exenta" value={Math.abs(n.baseExenta)} ccy={ccy} /> : null}
@@ -252,6 +291,12 @@ export function EmitirNotaCompraModal({ tipo = 'nota_credito', factura, onClose,
   const [concepto, setConcepto] = useState('')
   const [monto, setMonto] = useState('')
   const [exento, setExento] = useState(false)
+  // Naturaleza de la nota. `devolucion` mueve inventario (la mercancía vuelve al
+  // proveedor y sale del ledger); `ajuste` solo cambia el monto. La ND nunca
+  // devuelve: el stock entra por la recepción de la orden, no por un cargo.
+  const [modo, setModo] = useState('devolucion')
+  const [orden, setOrden] = useState(undefined) // undefined = cargando; null = error
+  const [devueltas, setDevueltas] = useState({}) // sku → cantidad tecleada
   const [numeroDocumento, setNumeroDocumento] = useState('')
   const [numeroControl, setNumeroControl] = useState('')
   const [fecha, setFecha] = useState(hoyISO())
@@ -271,27 +316,60 @@ export function EmitirNotaCompraModal({ tipo = 'nota_credito', factura, onClose,
   const lista = opciones || []
   const seleccionada = lista.find((f) => f.id === facturaId) || null
   const alic = seleccionada ? alicuotaDe(seleccionada) : 0.16
+  const esDevolucion = esCredito && modo === 'devolucion'
 
-  const base = Number(monto)
-  const baseValida = Number.isFinite(base) && base > 0
-  const iva = baseValida && !exento ? base * alic : 0
-  const total = baseValida ? base + iva : 0
+  // En modo devolución se trae la ORDEN de la factura: de ahí salen las líneas
+  // recibidas y su costo de entrada, que es lo que el servidor va a sacar del Kardex.
+  useEffect(() => {
+    if (!esDevolucion || !seleccionada?.ordenCompraId) { setOrden(undefined); return }
+    let vivo = true
+    setOrden(undefined)
+    api.ordenCompra(seleccionada.ordenCompraId)
+      .then((o) => { if (vivo) setOrden(o) })
+      .catch(() => { if (vivo) setOrden(null) })
+    return () => { vivo = false }
+  }, [esDevolucion, seleccionada?.ordenCompraId])
+
+  // Solo se devuelve lo que llegó: las líneas sin recepción no se pueden devolver.
+  // El tope real (descontando devoluciones previas y el stock que quede) lo aplica
+  // el backend; acá se evita el error obvio.
+  const lineasOC = (orden?.lineas || []).filter((l) => Number(l.cantidadRecibida) > 0)
+  const lineasDev = lineasOC
+    .map((l) => ({ ...l, cant: Number(devueltas[l.sku]) || 0 }))
+    .filter((l) => l.cant > 0)
+  const excedida = lineasOC.some((l) => (Number(devueltas[l.sku]) || 0) > Number(l.cantidadRecibida) + 1e-6)
+  const baseDev = lineasDev.reduce((s, l) => s + l.cant * (Number(l.costoUnitario) || 0), 0)
+  const baseDevGravada = lineasDev.filter((l) => !l.exento).reduce((s, l) => s + l.cant * (Number(l.costoUnitario) || 0), 0)
+
+  const montoTecleado = Number(monto)
+  const montoValido = Number.isFinite(montoTecleado) && montoTecleado > 0
+  const base = esDevolucion ? baseDev : (montoValido ? montoTecleado : 0)
+  const iva = esDevolucion ? baseDevGravada * alic : (montoValido && !exento ? montoTecleado * alic : 0)
+  const total = base + iva
 
   const errFac = !facturaId ? 'Elige una factura de compra.' : ''
   const errConcepto = !concepto.trim() ? 'El concepto es obligatorio.' : ''
-  const errMonto = !baseValida ? 'El monto base debe ser mayor que 0.' : ''
+  const errMonto = esDevolucion ? '' : (!montoValido ? 'El monto base debe ser mayor que 0.' : '')
+  const errLineas = !esDevolucion ? ''
+    : excedida ? 'No se puede devolver más de lo recibido en la orden.'
+      : !lineasDev.length ? 'Indica cuánto devuelves de al menos un producto.' : ''
   const errDoc = !numeroDocumento.trim() ? 'El número del documento del proveedor es obligatorio.' : ''
   const errCtrl = !numeroControl.trim() ? 'El número de control es obligatorio.' : ''
   const errFecha = !fecha ? 'La fecha es obligatoria.' : ''
-  const puedeConfirmar = !errFac && !errConcepto && !errMonto && !errDoc && !errCtrl && !errFecha
+  const puedeConfirmar = !errFac && !errConcepto && !errMonto && !errLineas && !errDoc && !errCtrl && !errFecha
 
   const confirmar = async () => {
     setTouched(true)
     if (!puedeConfirmar) return
     setBusy(true)
+    // Con líneas el servidor DERIVA el importe del costo con que entró la mercancía;
+    // mandar además un monto es un 400. Son excluyentes a propósito.
     const body = {
-      concepto: concepto.trim(), monto: base, exento,
+      concepto: concepto.trim(),
       numeroDocumento: numeroDocumento.trim(), numeroControl: numeroControl.trim(), fecha,
+      ...(esDevolucion
+        ? { lineas: lineasDev.map((l) => ({ sku: l.sku, cantidad: l.cant })) }
+        : { monto: montoTecleado, exento }),
     }
     try {
       if (esCredito) await api.emitirNotaCreditoCompra(facturaId, body)
@@ -347,19 +425,93 @@ export function EmitirNotaCompraModal({ tipo = 'nota_credito', factura, onClose,
               </Field>
             )}
 
+            {/* Naturaleza de la nota. Es la decisión que define si el inventario se
+                mueve: devolver saca la mercancía del almacén; un descuento no. */}
+            {esCredito ? (
+              <Field label="¿Qué acredita el proveedor?">
+                <Segmented value={modo} onChange={setModo} options={[
+                  { value: 'devolucion', label: 'Devolución de mercancía' },
+                  { value: 'ajuste', label: 'Descuento sin devolución' },
+                ]} />
+                <div className="mt-1.5 text-[11.5px] text-slate-500">
+                  {esDevolucion
+                    ? 'La mercancía vuelve al proveedor: sale del almacén y del Kardex, al costo con que entró.'
+                    : 'Solo baja lo que le debes. No mueve existencias ni re-valúa el inventario.'}
+                </div>
+              </Field>
+            ) : null}
+
             <Field label="Concepto" required error={touched ? errConcepto : ''}
-              hint={esCredito ? 'p. ej. devolución de mercancía dañada' : 'p. ej. flete no incluido'}>
+              hint={esDevolucion ? 'p. ej. mercancía dañada en el traslado' : esCredito ? 'p. ej. descuento por acuerdo comercial' : 'p. ej. flete no incluido'}>
               <Input value={concepto} onChange={(e) => setConcepto(e.target.value)}
                 onBlur={() => setTouched(true)} invalid={touched && !!errConcepto}
-                placeholder={esCredito ? 'Motivo de la devolución o descuento' : 'Motivo del cargo adicional'} />
+                placeholder={esDevolucion ? 'Motivo de la devolución' : esCredito ? 'Motivo del descuento' : 'Motivo del cargo adicional'} />
             </Field>
 
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Monto base (Bs)" required error={touched ? errMonto : ''}>
-                <Input type="number" min={0} step="any" className="num" value={monto}
-                  onChange={(e) => setMonto(e.target.value)} onBlur={() => setTouched(true)}
-                  invalid={touched && !!errMonto} placeholder="0,00" />
+            {esDevolucion ? (
+              <Field label="¿Qué devuelves?" required error={touched ? errLineas : ''}>
+                {orden === undefined ? (
+                  <div className="py-1"><TableSkeleton rows={2} cols={3} /></div>
+                ) : orden === null ? (
+                  <div className="text-[12.5px] text-rose-600 dark:text-rose-400">No se pudo cargar la orden de compra de esta factura.</div>
+                ) : !lineasOC.length ? (
+                  <div className="text-[12.5px] text-slate-500">Esta orden no tiene mercancía recibida, así que no hay nada que devolver.</div>
+                ) : (
+                  <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                    <table className="w-full text-[12.5px]">
+                      <thead className="bg-slate-50 dark:bg-slate-800/60 text-[11px] uppercase tracking-wide text-slate-400">
+                        <tr>
+                          <th className="text-left font-medium py-2 px-3">Producto</th>
+                          <th className="text-right font-medium py-2 px-2">Recibido</th>
+                          <th className="text-right font-medium py-2 px-2">Costo</th>
+                          <th className="text-right font-medium py-2 px-3 w-28">A devolver</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {lineasOC.map((l) => {
+                          const val = devueltas[l.sku] ?? ''
+                          const sobra = (Number(val) || 0) > Number(l.cantidadRecibida) + 1e-6
+                          return (
+                            <tr key={l.sku}>
+                              <td className="py-2 px-3">
+                                <div className="font-medium">{l.nombre || l.sku}</div>
+                                <div className="text-[11px] text-slate-400 num">{l.sku}</div>
+                              </td>
+                              <td className="py-2 px-2 text-right num text-slate-500">{fmtNum(Number(l.cantidadRecibida) || 0, 2)}</td>
+                              <td className="py-2 px-2 text-right num text-slate-500 private-mask">{fmtCurrency(Number(l.costoUnitario) || 0, ccy)}</td>
+                              <td className="py-2 px-3">
+                                <Input type="number" min={0} max={Number(l.cantidadRecibida) || 0} step="any" className="num text-right"
+                                  value={val} invalid={sobra} placeholder="0"
+                                  onChange={(e) => setDevueltas((d) => ({ ...d, [l.sku]: e.target.value }))}
+                                  onBlur={() => setTouched(true)} />
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <div className="mt-1.5 text-[11.5px] text-slate-500">
+                  El tope real lo aplica el servidor: descuenta lo ya devuelto en notas previas y no deja sacar lo que ya no está en el almacén.
+                </div>
               </Field>
+            ) : null}
+
+            <div className="grid grid-cols-2 gap-3">
+              {esDevolucion ? (
+                <Field label="Monto base (Bs)" hint="lo calcula el servidor con el costo de entrada">
+                  <div className="text-[13px] num rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 bg-slate-50 dark:bg-slate-800/60 private-mask">
+                    {fmtCurrency(baseDev, ccy)}
+                  </div>
+                </Field>
+              ) : (
+                <Field label="Monto base (Bs)" required error={touched ? errMonto : ''}>
+                  <Input type="number" min={0} step="any" className="num" value={monto}
+                    onChange={(e) => setMonto(e.target.value)} onBlur={() => setTouched(true)}
+                    invalid={touched && !!errMonto} placeholder="0,00" />
+                </Field>
+              )}
               <Field label="Fecha del documento" required error={touched ? errFecha : ''}>
                 <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)}
                   onBlur={() => setTouched(true)} invalid={touched && !!errFecha} />
@@ -377,15 +529,19 @@ export function EmitirNotaCompraModal({ tipo = 'nota_credito', factura, onClose,
               </Field>
             </div>
 
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
-              <Toggle checked={exento} onChange={setExento} label="Ajuste exento de IVA"
-                sub="Marca si el concepto no causa IVA (p. ej. intereses de mora)." />
-            </div>
+            {/* La exención de un ajuste la declara quien lo registra; en una devolución
+                se hereda de cada línea de la orden, así que el interruptor no aplica. */}
+            {esDevolucion ? null : (
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
+                <Toggle checked={exento} onChange={setExento} label="Ajuste exento de IVA"
+                  sub="Marca si el concepto no causa IVA (p. ej. intereses de mora)." />
+              </div>
+            )}
 
             {/* Total EN VIVO con la alícuota histórica de la factura. */}
             <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3 space-y-1.5 text-[13px]">
-              <div className="flex items-center justify-between"><span className="text-slate-500">Base</span><span className="num private-mask">{fmtCurrency(baseValida ? base : 0, ccy)}</span></div>
-              <div className="flex items-center justify-between"><span className="text-slate-500">IVA {exento ? '(exento)' : `(${fmtNum(alic * 100, 2)}%)`}</span><span className="num private-mask">{fmtCurrency(iva, ccy)}</span></div>
+              <div className="flex items-center justify-between"><span className="text-slate-500">Base</span><span className="num private-mask">{fmtCurrency(base, ccy)}</span></div>
+              <div className="flex items-center justify-between"><span className="text-slate-500">IVA {!esDevolucion && exento ? '(exento)' : `(${fmtNum(alic * 100, 2)}%)`}</span><span className="num private-mask">{fmtCurrency(iva, ccy)}</span></div>
               <div className="border-t border-slate-200 dark:border-slate-700 pt-1.5 flex items-center justify-between">
                 <span className="font-semibold">Total · {meta.signo}</span>
                 <span className={`num font-semibold private-mask ${esCredito ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>{fmtCurrency(total, ccy)}</span>

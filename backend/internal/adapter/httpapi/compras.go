@@ -60,20 +60,36 @@ func (s *Server) registerCompras(r fiber.Router) {
 }
 
 // notaCompraEntrada es el cuerpo compartido de emitir NC/ND de proveedor.
+//
+// `lineas` y `monto` son EXCLUYENTES: con líneas la nota devuelve mercancía y el
+// servidor deriva el importe del costo con que entró; con monto es un ajuste que no
+// mueve stock. Mandar los dos es un 400.
 type notaCompraEntrada struct {
-	Concepto        string  `json:"concepto"`
-	Monto           float64 `json:"monto"`
-	Exento          bool    `json:"exento"`
-	NumeroDocumento string  `json:"numeroDocumento"`
-	NumeroControl   string  `json:"numeroControl"`
-	Fecha           string  `json:"fecha"`
+	Concepto        string                   `json:"concepto"`
+	Monto           float64                  `json:"monto"`
+	Exento          bool                     `json:"exento"`
+	Lineas          []lineaNotaCompraEntrada `json:"lineas"`
+	NumeroDocumento string                   `json:"numeroDocumento"`
+	NumeroControl   string                   `json:"numeroControl"`
+	Fecha           string                   `json:"fecha"`
+}
+
+// lineaNotaCompraEntrada es un renglón devuelto: qué y cuánto. El costo no viaja
+// desde el cliente — lo pone el servidor desde la línea de la orden de compra.
+type lineaNotaCompraEntrada struct {
+	SKU      string  `json:"sku"`
+	Cantidad float64 `json:"cantidad"`
 }
 
 func (in notaCompraEntrada) toApp() application.NotaCompraEntrada {
-	return application.NotaCompraEntrada{
+	out := application.NotaCompraEntrada{
 		Concepto: in.Concepto, Monto: in.Monto, Exento: in.Exento,
 		NumeroDocumento: in.NumeroDocumento, NumeroControl: in.NumeroControl, Fecha: in.Fecha,
 	}
+	for _, l := range in.Lineas {
+		out.Lineas = append(out.Lineas, application.LineaNotaCompraEntrada{SKU: l.SKU, Cantidad: l.Cantidad})
+	}
+	return out
 }
 
 func (s *Server) handleNotasCompra(c *fiber.Ctx) error {
