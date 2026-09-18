@@ -4,11 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/mornix/elerp/internal/domain/compra"
 	"github.com/mornix/elerp/internal/domain/contabilidad"
 	"github.com/mornix/elerp/internal/domain/empresa"
+	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/inventario"
+	"github.com/mornix/elerp/internal/domain/proveedor"
 )
 
 // Errores de negocio del módulo de Compras.
@@ -42,6 +45,22 @@ type LineaOCEntrada struct {
 	Exento        bool
 }
 
+// RetencionesOCEntrada permite AJUSTAR, para esta orden concreta, el perfil de
+// retenciones que trae el proveedor. Nil ⇒ se usa el perfil del proveedor tal cual.
+// Existe porque el concepto o el porcentaje de una compra puntual pueden no ser los
+// habituales del proveedor (un mismo proveedor factura honorarios un mes y un flete
+// al siguiente), y quien arma la orden es quien lo sabe.
+type RetencionesOCEntrada struct {
+	RetieneIVA    bool
+	IVAPorcentaje float64
+	RetieneISLR   bool
+	// ISLRConceptoCodigo y ISLRSujeto resuelven la tarifa contra el MAESTRO de
+	// conceptos. No se teclea porcentaje: el maestro es la única fuente de tarifas,
+	// y el comprobante las copia al emitirse.
+	ISLRConceptoCodigo string
+	ISLRSujeto         string
+}
+
 // EntradaOC son los datos para crear una orden de compra.
 type EntradaOC struct {
 	ProveedorID     string
@@ -49,6 +68,68 @@ type EntradaOC struct {
 	CondicionesPago string
 	Notas           string
 	Lineas          []LineaOCEntrada
+	// Retenciones ajusta el perfil del proveedor solo para esta orden. Nil ⇒ perfil
+	// del proveedor.
+	Retenciones *RetencionesOCEntrada
+}
+
+// porcentajeRetencionIVA resuelve el % a retener de IVA: el del proveedor, si no el
+// por defecto de la empresa, si no el 75 % de la providencia. Misma escalera que
+// alicuotaIVA (config del caso > config de la empresa > default del sistema).
+const porcentajeRetencionIVADefault = 75.0
+
+func (s *Service) porcentajeRetencionIVA(empresaID string, delProveedor float64) float64 {
+	if delProveedor > 0 {
+		return delProveedor
+	}
+	if e, ok := s.empresas.ByID(empresaID); ok && e.RetencionIVAPorcentaje > 0 {
+		return e.RetencionIVAPorcentaje
+	}
+	return porcentajeRetencionIVADefault
+}
+
+// proyectarRetencionesOC calcula lo que se le retendrá al proveedor cuando llegue su
+// factura, y por tanto el NETO que se le va a pagar. Es una proyección que se graba
+// en la orden; el comprobante que vale ante el SENIAT se emite después, sobre la
+// factura de compra.
+//
+// Dos condiciones tienen que darse para que se retenga: la EMPRESA debe ser agente
+// de retención de ese impuesto (Configuración › Impuestos) y el PROVEEDOR tenerlo
+// activado. Si falta cualquiera, el monto es 0 — no se inventa una retención que
+// después nadie podría emitir.
+//
+// Bases: el IVA se retiene sobre el IVA de la orden; el ISLR, sobre el neto (el
+// subtotal sin impuesto), que es el ingreso del proveedor, y se le resta el
+// sustraendo de la tabla del reglamento sin bajar de cero.
+func (s *Service) proyectarRetencionesOC(empresaID string, prov proveedor.Proveedor, in *RetencionesOCEntrada,
+	subtotal, iva float64) (o compra.OrdenCompra) {
+	perfil := RetencionesOCEntrada{
+		RetieneIVA: prov.RetieneIVA, IVAPorcentaje: prov.RetencionIVAPorcentaje,
+		RetieneISLR:        prov.RetieneISLR,
+		ISLRConceptoCodigo: prov.ConceptoISLRCodigo, ISLRSujeto: prov.SujetoISLR,
+	}
+	if in != nil {
+		perfil = *in
+	}
+	emp, _ := s.empresas.ByID(empresaID)
+
+	if emp.AgenteRetencionIVA && perfil.RetieneIVA && iva > 0.004 {
+		o.RetencionIVAPorcentaje = s.porcentajeRetencionIVA(empresaID, perfil.IVAPorcentaje)
+		o.RetencionIVAMonto = round2(iva * o.RetencionIVAPorcentaje / 100)
+	}
+	// ISLR: la tarifa sale del MAESTRO, y el cálculo lo hace el propio concepto
+	// (fiscal.ConceptoISLR.Retener), que ya sabe de base mínima y sustraendo. Si la
+	// proyección lo recalculara por su cuenta, tarde o temprano diría un número
+	// distinto al del comprobante que se emite después.
+	if emp.AgenteRetencionISLR && perfil.RetieneISLR && subtotal > 0.004 {
+		if c, ok := fiscal.ConceptoPara(s.ConceptosISLR(empresaID), strings.TrimSpace(perfil.ISLRConceptoCodigo), perfil.ISLRSujeto); ok {
+			o.RetencionISLRConcepto = c.Nombre
+			o.RetencionISLRPorcentaje = c.Porcentaje
+			o.RetencionISLRSustraendo = round2(c.Sustraendo)
+			o.RetencionISLRMonto = round2(c.Retener(subtotal))
+		}
+	}
+	return o
 }
 
 // LineaRecepcion indica cuánto se recibe de un SKU en una recepción concreta.
@@ -151,6 +232,14 @@ func (s *Service) CrearOrdenCompra(empresaID, sedeID, actor, origen string, in E
 	if sede == "" {
 		sede = sedeID
 	}
+	// Condiciones de pago: las de la orden, y si no vienen, las pactadas con el
+	// proveedor. Se COPIAN a la orden: cambiar el maestro mañana no reescribe lo
+	// que ya se pactó en una orden vieja.
+	condiciones := strings.TrimSpace(in.CondicionesPago)
+	if condiciones == "" {
+		condiciones = strings.TrimSpace(prov.CondicionPago)
+	}
+
 	tasaActual, _ := s.TasaVigente(empresaID)
 	o := compra.OrdenCompra{
 		EmpresaID: empresaID, SedeID: sede,
@@ -158,9 +247,17 @@ func (s *Service) CrearOrdenCompra(empresaID, sedeID, actor, origen string, in E
 		Serie: serieOrdenCompra, Estado: compra.OCBorrador,
 		Lineas: lineas, Subtotal: subtotal, IVA: iva, Total: total,
 		Moneda: empresa.MonedaVES, TasaCambio: tasaActual.Valor, TasaFuente: tasaActual.Fuente,
-		CondicionesPago: in.CondicionesPago, Notas: in.Notas,
+		CondicionesPago: condiciones, Notas: in.Notas,
 		Actor: actor, Creada: ahora(), Actualizada: ahora(),
 	}
+	// Retenciones proyectadas: cuánto se le va a pagar de verdad al proveedor.
+	ret := s.proyectarRetencionesOC(empresaID, prov, in.Retenciones, subtotal, iva)
+	o.RetencionIVAPorcentaje, o.RetencionIVAMonto = ret.RetencionIVAPorcentaje, ret.RetencionIVAMonto
+	o.RetencionISLRConcepto, o.RetencionISLRPorcentaje = ret.RetencionISLRConcepto, ret.RetencionISLRPorcentaje
+	o.RetencionISLRSustraendo, o.RetencionISLRMonto = ret.RetencionISLRSustraendo, ret.RetencionISLRMonto
+	// Los tres importes ya vienen redondeados a dos decimales: restarlos no necesita
+	// otro round2, que además truncaría hacia cero si el neto diera negativo.
+	o.NetoAPagar = total - o.RetencionIVAMonto - o.RetencionISLRMonto
 	o.Numero = s.numerador.Siguiente(empresaID, sede, serieOrdenCompra)
 	o.NumeroCompleto = fmt.Sprintf("%s-%06d", serieOrdenCompra, o.Numero)
 

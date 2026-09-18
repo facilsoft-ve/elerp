@@ -1,8 +1,10 @@
 import { useState, useMemo } from 'react'
 import { Icon } from '../components/Icon.jsx'
-import { Button, Badge, Input, Modal, Empty, TableSkeleton, useToast, Field, useConfirm } from '../components/primitives.jsx'
+import { Button, Badge, Input, Select, Modal, Empty, TableSkeleton, useToast, Field, Toggle, useConfirm } from '../components/primitives.jsx'
 import { fmtNum } from '../lib/format.js'
 import { validarRIF } from '../lib/format.js'
+import { COND_PAGO } from '../lib/compras.js'
+import { useConceptosISLR, SUJETOS } from '../components/conceptoIslr.jsx'
 import { useData } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
@@ -147,28 +149,57 @@ function ProveedorModal({ proveedor, onClose, onSaved, toast }) {
     email: proveedor?.email || '',
     telefono: proveedor?.telefono || '',
     direccion: proveedor?.direccion || '',
+    // Perfil comercial y fiscal: lo que la orden de compra necesita para saber qué
+    // condiciones se pactaron y cuánto se le va a pagar de verdad a este proveedor.
+    condicionPago: proveedor?.condicionPago || '',
+    contribuyenteEspecial: !!proveedor?.contribuyenteEspecial,
+    retieneIva: !!proveedor?.retieneIva,
+    retencionIvaPorcentaje: proveedor?.retencionIvaPorcentaje ? String(proveedor.retencionIvaPorcentaje) : '',
+    retieneIslr: !!proveedor?.retieneIslr,
+    // El concepto de ISLR REFERENCIA el maestro: código + tipo de sujeto. La
+    // tarifa y el sustraendo salen de ahí, no se teclean acá.
+    conceptoIslrCodigo: proveedor?.conceptoIslrCodigo || '',
+    sujetoIslr: proveedor?.sujetoIslr || '',
   })
   const [touched, setTouched] = useState({})
   const [busy, setBusy] = useState(false)
+  // Maestro de conceptos de ISLR (mismo hook que usa el comprobante de retención).
+  const { porCodigo, sujetosDe, hayMaestro } = useConceptosISLR()
 
   const rif = validarRIF(f.documento)
   const emailOk = !f.email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())
+  // El backend es la autoridad sobre el perfil fiscal; acá solo se evita el error
+  // obvio, con las mismas reglas: si el impuesto se retiene, sus datos son exigibles.
+  const pctIva = Number(f.retencionIvaPorcentaje)
+
   const errs = {
     nombre: !f.nombre.trim() ? 'Ingresa el nombre o razón social.' : '',
     documento: !f.documento.trim() ? 'Ingresa el RIF o documento.' : !rif.valid ? rif.msg : '',
     email: emailOk ? '' : 'Correo con formato inválido.',
+    retencionIvaPorcentaje: f.retieneIva && f.retencionIvaPorcentaje && (!(pctIva > 0) || pctIva > 100)
+      ? 'El porcentaje debe estar entre 0 y 100.' : '',
+    conceptoIslrCodigo: f.retieneIslr && !f.conceptoIslrCodigo ? 'Elige el concepto del maestro.' : '',
+    sujetoIslr: f.retieneIslr && !f.sujetoIslr ? 'Indica qué es el proveedor ante el reglamento.' : '',
   }
-  const valid = !errs.nombre && !errs.documento && !errs.email
+  const valid = !Object.values(errs).some(Boolean)
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }))
+  const setBool = (k) => (v) => setF((s) => ({ ...s, [k]: v }))
   const blur = (k) => () => setTouched((t) => ({ ...t, [k]: true }))
 
   const save = async () => {
-    setTouched({ nombre: true, documento: true, email: true })
+    setTouched({ nombre: true, documento: true, email: true, conceptoIslrCodigo: true, sujetoIslr: true })
     if (!valid) return
     setBusy(true)
     const body = {
       nombre: f.nombre.trim(), documento: f.documento.trim(),
       email: f.email.trim(), telefono: f.telefono.trim(), direccion: f.direccion.trim(),
+      condicionPago: f.condicionPago,
+      contribuyenteEspecial: f.contribuyenteEspecial,
+      retieneIva: f.retieneIva,
+      retencionIvaPorcentaje: f.retieneIva ? (Number(f.retencionIvaPorcentaje) || 0) : 0,
+      retieneIslr: f.retieneIslr,
+      conceptoIslrCodigo: f.retieneIslr ? f.conceptoIslrCodigo : '',
+      sujetoIslr: f.retieneIslr ? f.sujetoIslr : '',
     }
     try {
       if (editando) {
@@ -206,6 +237,86 @@ function ProveedorModal({ proveedor, onClose, onSaved, toast }) {
         <div className="grid grid-cols-2 gap-3">
           <Field label="Teléfono" hint="opcional"><Input value={f.telefono} onChange={set('telefono')} placeholder="0212-…" /></Field>
           <Field label="Dirección" hint="opcional"><Input value={f.direccion} onChange={set('direccion')} /></Field>
+        </div>
+
+        {/* Perfil comercial: lo pactado una vez, que la orden de compra propone. */}
+        <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
+          <div className="text-[11px] uppercase tracking-wide text-slate-400 mt-3 mb-2">Condiciones comerciales</div>
+          <Field label="Condición de pago" hint="la propone cada orden de compra">
+            <Select value={f.condicionPago} onChange={set('condicionPago')}>
+              <option value="">Sin definir (la orden arranca en Contado)</option>
+              {COND_PAGO.map((c) => <option key={c} value={c}>{c}</option>)}
+            </Select>
+          </Field>
+        </div>
+
+        {/* Perfil fiscal: de acá sale cuánto se le paga de verdad al proveedor. */}
+        <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
+          <div className="text-[11px] uppercase tracking-wide text-slate-400 mt-3 mb-2">Retenciones</div>
+          <div className="flex items-start gap-2 text-[11.5px] text-slate-500 bg-slate-50 dark:bg-slate-800/60 rounded-lg px-3 py-2 mb-3">
+            <Icon.Info size={13} className="mt-0.5 shrink-0" />
+            <span>Solo se retiene si tu empresa es agente de retención de ese impuesto (Configuración → Impuestos). La orden de compra proyecta el neto a pagar; el comprobante se emite después, sobre la factura.</span>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 mb-3">
+            <Toggle checked={f.contribuyenteEspecial} onChange={setBool('contribuyenteEspecial')}
+              label="Contribuyente especial" sub="Informativo: no cambia ningún cálculo." />
+          </div>
+
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 mb-3">
+            <Toggle checked={f.retieneIva} onChange={setBool('retieneIva')}
+              label="Se le retiene IVA" sub="Sobre el IVA de la factura." />
+            {f.retieneIva ? (
+              <div className="mt-2.5">
+                <Field label="Porcentaje de retención de IVA" hint="vacío ⇒ el de tu empresa"
+                  error={errs.retencionIvaPorcentaje}>
+                  <Input type="number" min={0} max={100} step="any" className="num" value={f.retencionIvaPorcentaje}
+                    onChange={set('retencionIvaPorcentaje')} invalid={!!errs.retencionIvaPorcentaje} placeholder="75" />
+                </Field>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
+            <Toggle checked={f.retieneIslr} onChange={setBool('retieneIslr')}
+              label="Se le retiene ISLR" sub="Sobre el neto, según el concepto." />
+            {f.retieneIslr ? (
+              <div className="mt-2.5 space-y-3">
+                {!hayMaestro ? (
+                  <div className="text-[12px] text-amber-700 dark:text-amber-400">
+                    El maestro de conceptos de ISLR está vacío. Cárgalo en Facturación → Retenciones antes de
+                    configurar esto: la tarifa sale de ahí.
+                  </div>
+                ) : null}
+                <Field label="Concepto" required error={touched.conceptoIslrCodigo ? errs.conceptoIslrCodigo : ''}>
+                  <Select value={f.conceptoIslrCodigo} onChange={(e) => {
+                    const codigo = e.target.value
+                    // Si el sujeto elegido no tiene tarifa para el concepto nuevo, se
+                    // limpia: ofrecerlo llevaría a un «ese concepto no existe» al guardar.
+                    setF((s) => ({
+                      ...s, conceptoIslrCodigo: codigo,
+                      sujetoIslr: sujetosDe(codigo).includes(s.sujetoIslr) ? s.sujetoIslr : '',
+                    }))
+                  }}>
+                    <option value="">Elige el concepto…</option>
+                    {porCodigo.map((c) => <option key={c.codigo} value={c.codigo}>{c.nombre}</option>)}
+                  </Select>
+                </Field>
+                <Field label="¿Qué es este proveedor?" required
+                  hint="de esto depende la tarifa" error={touched.sujetoIslr ? errs.sujetoIslr : ''}>
+                  <Select value={f.sujetoIslr} onChange={set('sujetoIslr')} disabled={!f.conceptoIslrCodigo}>
+                    <option value="">{f.conceptoIslrCodigo ? 'Elige…' : 'Primero el concepto'}</option>
+                    {SUJETOS.filter((s) => sujetosDe(f.conceptoIslrCodigo).includes(s.id))
+                      .map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                  </Select>
+                </Field>
+                <div className="text-[11.5px] text-slate-500">
+                  La tarifa y el sustraendo los pone el maestro: el mismo concepto cobra distinto a una persona
+                  natural que a una jurídica.
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
     </Modal>

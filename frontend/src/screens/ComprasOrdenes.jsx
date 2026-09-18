@@ -5,6 +5,8 @@ import { TablaDatos } from '../components/TablaDatos.jsx'
 import { fmtCurrency, fmtNum, fmtDate } from '../lib/format.js'
 import { calcularTotales, IVA_TASA } from '../lib/fiscal.js'
 import { porCodigo } from '../lib/precio.js'
+import { COND_PAGO, RET_IVA_DEFAULT, perfilRetencionDe, proyectarRetenciones } from '../lib/compras.js'
+import { useConceptosISLR, SUJETOS } from '../components/conceptoIslr.jsx'
 import { useData } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
@@ -258,7 +260,6 @@ function Acciones({ oc, gestiona, busy, factura, onConfirmar, onRecibir, onCance
   )
 }
 
-const COND_PAGO = ['Contado', '15 días', '30 días', '60 días']
 
 /* Nueva orden de compra — formulario a PANTALLA COMPLETA (estilo Odoo). Es una
  * COMPRA: se captura el COSTO unitario, no el precio de venta. Los montos
@@ -276,6 +277,14 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
   const [sedeId, setSedeId] = useState(db.SEDE_ACTIVA?.id || sedes[0]?.id || '')
   const [condicionesPago, setCondicionesPago] = useState('Contado')
   const [notas, setNotas] = useState('')
+  // Perfil de retenciones de ESTA orden: se propone el del proveedor al elegirlo y
+  // se puede ajustar acá (un mismo proveedor factura honorarios un mes y un flete
+  // al siguiente). Ajustarlo no toca el maestro.
+  const [ret, setRet] = useState(perfilRetencionDe(null))
+  const proveedorSel = proveedores.find((p) => p.id === proveedorId) || null
+  // Maestro de conceptos de ISLR: de ahí sale la tarifa, igual que en el servidor.
+  const { conceptos, porCodigo, sujetosDe } = useConceptosISLR()
+
   /* Líneas: { sku, nombre, cantidad, costoUnitario, exento }
    *
    * `exento` NO se edita acá: sale de la ficha del producto, que es donde se
@@ -338,6 +347,22 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
     [], 0,
   ), [lineas])
 
+  // Al elegir proveedor se adoptan sus condiciones y su perfil de retenciones.
+  const elegirProveedor = (id) => {
+    setProveedorId(id)
+    const p = proveedores.find((x) => x.id === id) || null
+    setRet(perfilRetencionDe(p))
+    if (p?.condicionPago) setCondicionesPago(p.condicionPago)
+  }
+
+  // Proyección EN VIVO de lo que se le va a pagar al proveedor. El servidor
+  // recalcula con las mismas reglas al guardar y es la autoridad.
+  const proyeccion = useMemo(() => proyectarRetenciones({
+    empresa: db.EMPRESA, perfil: ret, conceptos,
+    subtotal: totales.subtotal, iva: totales.iva, total: totales.total,
+  }), [db.EMPRESA, ret, conceptos, totales])
+  const hayRetenciones = proyeccion.ivaMonto > 0 || proyeccion.islrMonto > 0
+
   const errProveedor = !proveedorId ? 'Elige un proveedor.' : ''
   const errSede = !sedeId ? 'Elige la sede que recibe la mercancía.' : ''
   const errLineas = lineas.length === 0 ? 'Agrega al menos un producto.'
@@ -354,6 +379,12 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
       const oc = await api.crearOrdenCompra({
         proveedorId, sedeId, condicionesPago, notas: notas.trim() || undefined,
         lineas: lineas.map((l) => ({ sku: l.sku, cantidad: Number(l.cantidad), costoUnitario: Number(l.costoUnitario), exento: !!l.exento })),
+        // El perfil de retenciones de ESTA orden (puede diferir del maestro).
+        retenciones: {
+          retieneIva: ret.retieneIva, ivaPorcentaje: Number(ret.ivaPorcentaje) || 0,
+          retieneIslr: ret.retieneIslr,
+          islrConceptoCodigo: ret.islrConceptoCodigo, islrSujeto: ret.islrSujeto,
+        },
       })
       toast({ title: 'Orden de compra creada', body: oc?.numeroCompleto ? `${oc.numeroCompleto} en borrador.` : 'Guardada en borrador.' })
       await onSaved()
@@ -387,7 +418,7 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="lg:col-span-2">
             <Field label="Proveedor" required error={touched ? errProveedor : ''}>
-              <Select value={proveedorId} onChange={(e) => setProveedorId(e.target.value)}>
+              <Select value={proveedorId} onChange={(e) => elegirProveedor(e.target.value)}>
                 <option value="">Elige proveedor…</option>
                 {proveedores.map((p) => <option key={p.id} value={p.id}>{p.nombre}{p.documento ? ` · ${p.documento}` : ''}</option>)}
               </Select>
@@ -481,6 +512,71 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
         </div>
       </div>
 
+      {/* Retenciones de ESTA orden. Se proponen desde el proveedor y se pueden
+          ajustar sin tocar el maestro: el concepto de ISLR cambia según lo que se
+          compre. Solo aparece si la empresa es agente de retención de algo. */}
+      {(db.EMPRESA?.agenteRetencionIVA || db.EMPRESA?.agenteRetencionISLR) ? (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4 mb-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Icon.Receipt size={15} className="text-slate-400" />
+            <h3 className="text-[13.5px] font-semibold">Retenciones al proveedor</h3>
+          </div>
+          <div className="text-[11.5px] text-slate-500 mb-3">
+            {proveedorSel
+              ? <>Propuestas desde el perfil de <span className="font-medium">{proveedorSel.nombre}</span>. Ajustarlas acá no cambia su ficha.</>
+              : 'Elige un proveedor para proponer su perfil.'}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {db.EMPRESA?.agenteRetencionIVA ? (
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
+                <Toggle checked={ret.retieneIva} onChange={(v) => setRet((r) => ({ ...r, retieneIva: v }))}
+                  label="Retener IVA" sub="Sobre el IVA de la factura." />
+                {ret.retieneIva ? (
+                  <div className="mt-2.5">
+                    <Field label="Porcentaje" hint="vacío ⇒ el de la empresa">
+                      <Input type="number" min={0} max={100} step="any" className="num w-32"
+                        value={ret.ivaPorcentaje || ''} placeholder={String(RET_IVA_DEFAULT)}
+                        onChange={(e) => setRet((r) => ({ ...r, ivaPorcentaje: e.target.value }))} />
+                    </Field>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {db.EMPRESA?.agenteRetencionISLR ? (
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
+                <Toggle checked={ret.retieneIslr} onChange={(v) => setRet((r) => ({ ...r, retieneIslr: v }))}
+                  label="Retener ISLR" sub="Sobre el neto, según el concepto." />
+                {ret.retieneIslr ? (
+                  <div className="mt-2.5 space-y-3">
+                    <Field label="Concepto">
+                      <Select value={ret.islrConceptoCodigo} onChange={(e) => {
+                        const codigo = e.target.value
+                        setRet((r) => ({
+                          ...r, islrConceptoCodigo: codigo,
+                          islrSujeto: sujetosDe(codigo).includes(r.islrSujeto) ? r.islrSujeto : '',
+                        }))
+                      }}>
+                        <option value="">Elige el concepto…</option>
+                        {porCodigo.map((c) => <option key={c.codigo} value={c.codigo}>{c.nombre}</option>)}
+                      </Select>
+                    </Field>
+                    <Field label="Tipo de sujeto" hint="de esto depende la tarifa">
+                      <Select value={ret.islrSujeto} disabled={!ret.islrConceptoCodigo}
+                        onChange={(e) => setRet((r) => ({ ...r, islrSujeto: e.target.value }))}>
+                        <option value="">{ret.islrConceptoCodigo ? 'Elige…' : 'Primero el concepto'}</option>
+                        {SUJETOS.filter((s) => sujetosDe(ret.islrConceptoCodigo).includes(s.id))
+                          .map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                      </Select>
+                    </Field>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {/* Notas · Totales */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
         <Field label="Notas" hint="opcional · referencia interna, condiciones acordadas…">
@@ -495,7 +591,30 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
             <div className="border-t border-slate-200 dark:border-slate-700 pt-1.5 flex items-center justify-between font-semibold">
               <span>Total <span className="text-[11px] font-normal text-slate-400">con IVA</span></span><span className="num private-mask text-[16px]">{fmtCurrency(totales.total, 'VES')}</span>
             </div>
-            <div className="pt-1 text-[11px] text-slate-400 leading-snug">IVA estimado de la compra. La factura fiscal del proveedor se registra aparte.</div>
+            {hayRetenciones ? (
+              <>
+                {proyeccion.ivaMonto > 0 ? (
+                  <div className="flex justify-between text-slate-500 pt-1">
+                    <span>Retención IVA <span className="text-slate-400">{fmtNum(proyeccion.ivaPorcentaje, 0)}%</span></span>
+                    <span className="num private-mask">− {fmtCurrency(proyeccion.ivaMonto, 'VES')}</span>
+                  </div>
+                ) : null}
+                {proyeccion.islrMonto > 0 ? (
+                  <div className="flex justify-between text-slate-500">
+                    <span>Retención ISLR <span className="text-slate-400">{fmtNum(proyeccion.islrPorcentaje, 0)}%</span></span>
+                    <span className="num private-mask">− {fmtCurrency(proyeccion.islrMonto, 'VES')}</span>
+                  </div>
+                ) : null}
+                <div className="border-t border-slate-200 dark:border-slate-700 pt-1.5 flex items-center justify-between font-semibold">
+                  <span>Neto a pagar <span className="text-[11px] font-normal text-slate-400">al proveedor</span></span>
+                  <span className="num private-mask text-[16px] text-emerald-700 dark:text-emerald-300">{fmtCurrency(proyeccion.neto, 'VES')}</span>
+                </div>
+              </>
+            ) : null}
+            <div className="pt-1 text-[11px] text-slate-400 leading-snug">
+              IVA estimado de la compra. La factura fiscal del proveedor se registra aparte.
+              {hayRetenciones ? ' Las retenciones son una proyección: el comprobante se emite sobre la factura.' : ''}
+            </div>
           </div>
           {touched && err ? (
             <div className="mt-3 flex items-start gap-1.5 text-[12px] text-amber-700 dark:text-amber-400">
@@ -641,6 +760,34 @@ function DetalleOrden({ oc, gestiona, sedes, factura, onVolver, onConfirmar, onR
             <div className="border-t border-slate-200 dark:border-slate-700 pt-1.5 flex items-center justify-between">
               <span className="font-semibold">Total <span className="text-[11px] font-normal text-slate-400">con IVA</span></span><span className="num font-semibold private-mask text-[16px]">{fmtCurrency(oc.total, ccy)}</span>
             </div>
+            {/* Retenciones proyectadas al crear la orden: el neto es lo que
+                efectivamente recibe el proveedor. Lo retenido se entera al SENIAT. */}
+            {(oc.retencionIvaMonto > 0 || oc.retencionIslrMonto > 0) ? (
+              <>
+                {oc.retencionIvaMonto > 0 ? (
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-slate-500">Retención IVA <span className="text-slate-400">{fmtNum(oc.retencionIvaPorcentaje, 0)}%</span></span>
+                    <span className="num private-mask">− {fmtCurrency(oc.retencionIvaMonto, ccy)}</span>
+                  </div>
+                ) : null}
+                {oc.retencionIslrMonto > 0 ? (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">
+                      Retención ISLR <span className="text-slate-400">{fmtNum(oc.retencionIslrPorcentaje, 0)}%</span>
+                      {oc.retencionIslrConcepto ? <span className="block text-[11px] text-slate-400">{oc.retencionIslrConcepto}</span> : null}
+                    </span>
+                    <span className="num private-mask">− {fmtCurrency(oc.retencionIslrMonto, ccy)}</span>
+                  </div>
+                ) : null}
+                <div className="border-t border-slate-200 dark:border-slate-700 pt-1.5 flex items-center justify-between">
+                  <span className="font-semibold">Neto a pagar <span className="text-[11px] font-normal text-slate-400">al proveedor</span></span>
+                  <span className="num font-semibold private-mask text-[16px] text-emerald-700 dark:text-emerald-300">{fmtCurrency(oc.netoAPagar, ccy)}</span>
+                </div>
+                <div className="text-[11px] text-slate-400 leading-snug pt-0.5">
+                  Proyección tomada del perfil del proveedor al crear la orden. El comprobante de retención se emite sobre la factura.
+                </div>
+              </>
+            ) : null}
             {oc.estado !== 'cancelada' && !factura ? <div className="text-[11px] text-slate-400 leading-snug pt-0.5">IVA estimado de la compra. La factura fiscal del proveedor se registra aparte.</div> : null}
           </div>
         </div>

@@ -57,6 +57,30 @@ type OrdenCompra struct {
 	CondicionesPago string `json:"condicionesPago" bson:"condicionespago"`
 	Notas           string `json:"notas" bson:"notas"`
 
+	// --- Retenciones PROYECTADAS ---------------------------------------------
+	//
+	// Instantánea del perfil fiscal del proveedor al crear la orden, para responder
+	// desde el pedido «¿cuánto le vamos a pagar de verdad?». Es una PROYECCIÓN, no
+	// un comprobante: el comprobante de retención se emite sobre la FACTURA de
+	// compra —nunca sobre la orden— porque es el documento que lo sustenta ante el
+	// SENIAT. Se guarda en la orden (y no se recalcula al vuelo) por la misma razón
+	// que la tasa de cambio: el perfil del proveedor puede cambiar mañana y la orden
+	// tiene que seguir explicando el número con el que se pactó.
+	//
+	// Los montos valen 0 cuando la empresa no es agente de retención de ese
+	// impuesto o el proveedor no lo tiene activado.
+	RetencionIVAPorcentaje float64 `json:"retencionIvaPorcentaje" bson:"retencionivaporcentaje"`
+	RetencionIVAMonto      float64 `json:"retencionIvaMonto" bson:"retencionivamonto"`
+
+	RetencionISLRConcepto   string  `json:"retencionIslrConcepto" bson:"retencionislrconcepto"`
+	RetencionISLRPorcentaje float64 `json:"retencionIslrPorcentaje" bson:"retencionislrporcentaje"`
+	RetencionISLRSustraendo float64 `json:"retencionIslrSustraendo" bson:"retencionislrsustraendo"`
+	RetencionISLRMonto      float64 `json:"retencionIslrMonto" bson:"retencionislrmonto"`
+
+	// NetoAPagar es Total − retenciones: lo que efectivamente recibe el proveedor.
+	// Lo retenido no se le paga a él, se entera al SENIAT.
+	NetoAPagar float64 `json:"netoAPagar" bson:"netoapagar"`
+
 	Actor       string `json:"actor" bson:"actor"`
 	Creada      string `json:"creada" bson:"creada"`           // UTC RFC3339
 	Actualizada string `json:"actualizada" bson:"actualizada"` // UTC RFC3339

@@ -213,6 +213,17 @@ func (s *Server) handleCrearOrdenCompra(c *fiber.Ctx) error {
 			CostoUnitario float64 `json:"costoUnitario"`
 			Exento        bool    `json:"exento"`
 		} `json:"lineas"`
+		// Retenciones ajusta, solo para esta orden, el perfil que trae el proveedor.
+		// Ausente ⇒ se aplica el perfil del proveedor tal cual.
+		Retenciones *struct {
+			RetieneIVA    bool    `json:"retieneIva"`
+			IVAPorcentaje float64 `json:"ivaPorcentaje"`
+			RetieneISLR   bool    `json:"retieneIslr"`
+			// La tarifa NO viaja desde el cliente: se resuelve contra el maestro
+			// de conceptos con el código y el tipo de sujeto.
+			ISLRConceptoCodigo string `json:"islrConceptoCodigo"`
+			ISLRSujeto         string `json:"islrSujeto"`
+		} `json:"retenciones"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
@@ -220,6 +231,13 @@ func (s *Server) handleCrearOrdenCompra(c *fiber.Ctx) error {
 	ent := application.EntradaOC{
 		ProveedorID: in.ProveedorID, SedeID: in.SedeID,
 		CondicionesPago: in.CondicionesPago, Notas: in.Notas,
+	}
+	if r := in.Retenciones; r != nil {
+		ent.Retenciones = &application.RetencionesOCEntrada{
+			RetieneIVA: r.RetieneIVA, IVAPorcentaje: r.IVAPorcentaje,
+			RetieneISLR:        r.RetieneISLR,
+			ISLRConceptoCodigo: r.ISLRConceptoCodigo, ISLRSujeto: r.ISLRSujeto,
+		}
 	}
 	for _, l := range in.Lineas {
 		ent.Lineas = append(ent.Lineas, application.LineaOCEntrada{
