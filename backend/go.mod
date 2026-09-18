@@ -6,6 +6,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.5
 	go.mongodb.org/mongo-driver v1.17.1
 	golang.org/x/crypto v0.26.0
+	rsc.io/qr v0.2.0
 )
 
 require (

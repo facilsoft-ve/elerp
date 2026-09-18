@@ -52,6 +52,7 @@ func main() {
 		svc.ConHorarios(st.Horarios)
 		svc.ConSedes(st.Sedes)
 		svc.ConSeries(st.Series)
+		svc.ConFacturacionDigital(st.ConfigDigital, st.EmisionesDigitales)
 		svc.ConAlmacenes(st.Almacenes)
 		svc.ConModulos(st.Modulos)
 		svc.ConLegal(st.Legal)
@@ -79,6 +80,7 @@ func main() {
 		svc.ConHorarios(st.Horarios)
 		svc.ConSedes(st.Sedes)
 		svc.ConSeries(st.Series)
+		svc.ConFacturacionDigital(st.ConfigDigital, st.EmisionesDigitales)
 		svc.ConAlmacenes(st.Almacenes)
 		svc.ConModulos(st.Modulos)
 		svc.ConLegal(st.Legal)
@@ -129,6 +131,11 @@ func main() {
 		log.Println("Tasa de cambio: obtención automática APAGADA (TASA_AUTO=false); solo carga manual.")
 	}
 
+	// Lazo de la IMPRENTA DIGITAL: envía lo encolado y busca los números de
+	// control. Corre siempre que el módulo esté cableado; si ninguna empresa lo
+	// tiene activo, cada vuelta no hace nada y no cuesta nada.
+	go lazoFacturacionDigital(svc)
+
 	hb := hubmy.New(cfg.HubmyAPIBase, cfg.HubmyAPIKey)
 	// Capa IA del asistente (opt-in por empresa): solo se cablea si Hubmy está
 	// configurado. Sin proxy, el asistente responde solo con la capa mecánica (local).
@@ -143,6 +150,37 @@ func main() {
 	log.Printf("ElERP API escuchando en :%s (callback: %s)", cfg.Port, cfg.CallbackURL())
 	if err := app.Listen(":" + cfg.Port); err != nil {
 		log.Fatal(err)
+	}
+}
+
+/* lazoFacturacionDigital atiende el outbox de la imprenta digital.
+ *
+ * Despierta cada 20 segundos porque el número de control tarda entre uno y cinco
+ * minutos y el cliente está mirando la página pública: revisar cada varios
+ * minutos haría que la factura «tarde» mucho más de lo que realmente tarda.
+ *
+ * Procesa de a POCAS y de a UNA: la imprenta responde 429 cuando la petición
+ * anterior de la misma cuenta sigue en curso, así que el paralelismo no acelera
+ * — hace fallar envíos. Cada emisión lleva su propia espera creciente, de modo
+ * que una que falla no bloquea a las demás.
+ */
+func lazoFacturacionDigital(svc *application.Service) {
+	for {
+		func() {
+			// Contexto acotado por vuelta: una llamada colgada no puede dejar el
+			// lazo detenido para siempre.
+			ctx, cancelar := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancelar()
+			defer func() {
+				// Un pánico en la integración no puede tumbar el proceso que está
+				// cobrando en las cajas.
+				if r := recover(); r != nil {
+					log.Printf("facturación digital: pánico en el lazo: %v", r)
+				}
+			}()
+			svc.ProcesarEmisiones(ctx, 20)
+		}()
+		time.Sleep(20 * time.Second)
 	}
 }
 

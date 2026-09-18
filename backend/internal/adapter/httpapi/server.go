@@ -77,6 +77,11 @@ func NewServer(cfg config.Config, svc *application.Service, tenancy *application
 
 	// Públicas
 	app.Get("/health", s.handleHealth)
+	// PÁGINA PÚBLICA de la factura digital: la abre quien escanea el QR del
+	// ticket. Va FUERA de /api y sin autenticación a propósito — el cliente no
+	// tiene cuenta en ElERP. La protege el token, que es aleatorio.
+	app.Get("/f/:token", s.handleFacturaPublica)
+	app.Get("/f/:token/qr.png", s.handleQRFactura)
 	app.Get("/api/health", s.handleHealth)
 	app.Get("/api/auth/login", authLimiter, s.handleLogin)
 	app.Get("/api/auth/dev-login", authLimiter, s.handleDevLogin)
@@ -149,6 +154,7 @@ func NewServer(cfg config.Config, svc *application.Service, tenancy *application
 	s.registerArchivos(data)
 	s.registerCajas(data)
 	s.registerPresenciaConfig(data)
+	s.rutasFacturacionDigital(data)
 	s.registerTasa(data)
 	s.registerTesoreria(data)
 	s.registerContabilidad(data)

@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"strings"
+
 	"errors"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/mornix/elerp/internal/application"
 	"github.com/mornix/elerp/internal/domain/cliente"
 	"github.com/mornix/elerp/internal/domain/empresa"
+	"github.com/mornix/elerp/internal/domain/facturaciondigital"
 	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/usuario"
 	"github.com/mornix/elerp/internal/domain/venta"
@@ -435,7 +438,48 @@ func (s *Server) handleEmitir(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
+	/* FACTURACIÓN DIGITAL: se encola DESPUÉS de emitir y nunca antes.
+	 *
+	 * El cobro no puede depender de que la imprenta conteste. Si está caída, la
+	 * venta igual se cobró y la factura sale cuando vuelva — eso es lo que compra
+	 * el outbox. Encolar es una escritura local: no hace red, así que no demora
+	 * la respuesta al cajero.
+	 *
+	 * El canal sale de dónde vino la venta: el mostrador y el módulo de ventas se
+	 * activan por separado. */
+	if emi, encolada := s.svc.EncolarEmision(empresaIDOf(c), canalDeVenta(c), out); encolada {
+		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+			"documento": out,
+			// La emisión viaja con el documento para que el POS pueda imprimir el
+			// ticket con su QR sin una segunda vuelta al servidor.
+			"facturaDigital": fiber.Map{
+				"token":  emi.Token,
+				"estado": emi.Estado,
+				"url":    s.urlPublicaFactura(emi.Token),
+			},
+		})
+	}
 	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+// canalDeVenta distingue el mostrador del módulo de ventas. El POS lo declara
+// con una cabecera; sin ella, la emisión vino del módulo de ventas.
+func canalDeVenta(c *fiber.Ctx) string {
+	if strings.EqualFold(string(c.Request().Header.Peek("X-Canal")), "pos") {
+		return facturaciondigital.CanalPOS
+	}
+	return facturaciondigital.CanalVentas
+}
+
+// urlPublicaFactura arma el enlace que va en el QR del ticket.
+func (s *Server) urlPublicaFactura(token string) string {
+	base := strings.TrimRight(s.cfg.FrontendURL, "/")
+	if base == "" || strings.Contains(base, "*") {
+		// Sin URL pública declarada se devuelve la ruta relativa: es mejor que un
+		// enlace con el origen equivocado, que llevaría al cliente a ningún lado.
+		return "/f/" + token
+	}
+	return base + "/f/" + token
 }
 
 func (s *Server) handleAnular(c *fiber.Ctx) error {

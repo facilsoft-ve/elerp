@@ -15,6 +15,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/cuenta"
 	"github.com/mornix/elerp/internal/domain/cupon"
 	"github.com/mornix/elerp/internal/domain/empresa"
+	"github.com/mornix/elerp/internal/domain/facturaciondigital"
 	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/inventario"
 	"github.com/mornix/elerp/internal/domain/legal"
@@ -172,6 +173,12 @@ type Service struct {
 	// rango autorizado). Se cablea con ConSeries; sin él, cada tipo numera con el
 	// prefijo derivado de la modalidad, que es como funcionaba antes.
 	series fiscal.SerieRepository
+	// configDigital y emisionesDigitales son el módulo de FACTURACIÓN DIGITAL
+	// (imprenta digital autorizada). Se cablean con ConFacturacionDigital; sin
+	// ellos, ElERP factura exactamente como antes y el módulo no existe — que es
+	// justo lo que lo hace un módulo y no una bifurcación del motor fiscal.
+	configDigital      facturaciondigital.ConfigRepository
+	emisionesDigitales facturaciondigital.EmisionRepository
 	// conceptosISLR es el maestro de conceptos retenibles de ISLR con su tarifa y
 	// su sustraendo. Se cablea con ConConceptosISLR; sin él, el concepto y el
 	// porcentaje se siguen tecleando en cada comprobante (como antes).
