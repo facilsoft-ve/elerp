@@ -569,9 +569,9 @@ func aplicarConteoEfectivo(arqueo *caja.Arqueo, in CierreArqueo) {
 		}
 		f.Declarado = true
 		f.Contado = monto
-		// round2 trunca en negativo: la diferencia se redondea en valor absoluto
-		// y se le devuelve el signo, para que un faltante no se vuelva sobrante.
-		f.Diferencia = round2signed(monto - f.Esperado)
+		// La diferencia puede ser negativa (faltante): round2 la redondea conservando
+		// su magnitud, así que un faltante nunca se vuelve sobrante.
+		f.Diferencia = round2(monto - f.Esperado)
 	}
 }
 
@@ -586,9 +586,9 @@ func (s *Service) CerrarCajaConArqueo(empresaID, actor, origen, cajaID string, f
 	if in.EfectivoContadoBs != nil {
 		arqueo.Declarado = true
 		arqueo.EfectivoContadoBs = round2(*in.EfectivoContadoBs)
-		// La diferencia puede ser negativa (faltante); round2 trunca en negativo,
-		// así que se redondea el valor absoluto y se le devuelve el signo.
-		arqueo.DiferenciaBs = round2signed(arqueo.EfectivoContadoBs - arqueo.EfectivoEsperadoBs)
+		// La diferencia puede ser negativa (faltante): round2 la redondea conservando
+		// su magnitud, así que un faltante de −6,00 sigue siendo −6,00.
+		arqueo.DiferenciaBs = round2(arqueo.EfectivoContadoBs - arqueo.EfectivoEsperadoBs)
 	}
 	if len(in.ContadoPorMetodo) > 0 {
 		conteo := make([]caja.ArqueoConteo, 0, len(in.ContadoPorMetodo))
@@ -617,16 +617,6 @@ func (s *Service) CerrarCajaConArqueo(empresaID, actor, origen, cajaID string, f
 	}
 	s.audit.Append(evento(empresaID, actor, origen, accion, ses.CajaCodigo, detalle))
 	return out, nil
-}
-
-// round2signed redondea a dos decimales conservando el signo. round2 trunca los
-// negativos hacia cero (quirk documentado), lo que en una diferencia de arqueo
-// convertiría un faltante de −6,00 en −5,99. Se redondea el valor absoluto.
-func round2signed(v float64) float64 {
-	if v < 0 {
-		return -round2(-v)
-	}
-	return round2(v)
 }
 
 // SesionPorID resuelve un turno del tenant por su ID. El puerto expone List (ya
