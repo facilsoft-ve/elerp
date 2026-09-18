@@ -712,10 +712,11 @@ func (s *Service) EmitirNotaCredito(empresaID, sedeID, actor, origen, refID, mot
 	// Montos NEGATIVOS (misma convención que AnularDocumento): la nota resta.
 	// El IGTF no se acredita: es un impuesto sobre el medio de pago, no sobre la
 	// mercancía devuelta; una devolución de bienes rebaja base + IVA.
-	// round2 solo redondea bien en positivo (trunca hacia cero en negativo, igual
-	// que en el resto del código): se redondea en positivo y se niega al final, la
-	// misma convención de AnularDocumento. Aplicarlo sobre nc.Subtotal+nc.IVA
-	// (ya negativos) daría un descuadre de 1 céntimo entre total y subtotal.
+	// Se redondea en positivo y se niega al final, la misma convención de
+	// AnularDocumento: así el total y sus partes se redondean sobre las mismas
+	// magnitudes y no puede aparecer un céntimo de diferencia entre ellos. (round2
+	// ya redondea bien en ambos signos; esto es por coherencia del cálculo, no por
+	// una limitación del redondeo.)
 	// Tasa histórica: la del documento original, no la config de hoy. Es una
 	// devolución que debe cuadrar con la factura que acredita. Fallback al default
 	// del sistema para documentos previos a esta configuración (tasa 0).
@@ -999,7 +1000,21 @@ func (s *Service) numeroControl(empresaID, modalidad string) string {
 	return fmt.Sprintf("%s-%08d", prefijo, seq)
 }
 
-func round2(v float64) float64 { return float64(int64(v*100+0.5)) / 100 }
+// round2 redondea a dos decimales con la regla «medio hacia arriba en magnitud»
+// (0,005 → 0,01 y −0,005 → −0,01), que es la de la contabilidad.
+//
+// El signo se trata aparte A PROPÓSITO. La conversión a int64 TRUNCA hacia cero,
+// así que `int64(v*100+0.5)` solo redondea bien en positivo: aplicada a un
+// negativo le come un céntimo de magnitud —round2(−5,00) devolvía −4,99—, y un
+// céntimo perdido en una resta descuadra el asiento que la usa. Un asiento
+// descuadrado NO SE GUARDA (ver asentarContrarioDe), así que el error no se veía
+// como un importe raro sino como una operación entera sin contabilizar.
+func round2(v float64) float64 {
+	if v < 0 {
+		return -float64(int64(-v*100+0.5)) / 100
+	}
+	return float64(int64(v*100+0.5)) / 100
+}
 
 // resolverVueltoPartes construye la lista de partes del vuelto y valida que su
 // suma en bolívares cuadre con el excedente que el servidor calculó.

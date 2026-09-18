@@ -248,7 +248,14 @@ func deudaDeProveedor(t *testing.T, svc *application.Service, provID string) flo
 }
 
 // round2Test redondea a 2 decimales igual que el dominio (para calcular esperados).
-func round2Test(v float64) float64 { return float64(int64(v*100+0.5)) / 100 }
+// round2Test replica round2 del paquete (incluido su trato del signo): si los dos
+// se separan, las pruebas dejan de medir lo que el código hace.
+func round2Test(v float64) float64 {
+	if v < 0 {
+		return -float64(int64(-v*100+0.5)) / 100
+	}
+	return float64(int64(v*100+0.5)) / 100
+}
 
 // TestRetencionRecibidaISLR_AsientaYBajaCxC: una retención de ISLR recibida al 3%
 // sobre una base de 1000 (monto 30) baja el saldo por cobrar 30, con asiento Debe
