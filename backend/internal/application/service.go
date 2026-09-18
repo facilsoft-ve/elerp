@@ -168,6 +168,10 @@ type Service struct {
 	// vigencia por fecha. Se cablea con ConAlicuotas; sin él, el motor cae a la
 	// tasa configurada de la empresa y se comporta como antes del maestro.
 	alicuotas fiscal.AlicuotaRepo
+	// series es la configuración de correlativos por tipo de documento (prefijo y
+	// rango autorizado). Se cablea con ConSeries; sin él, cada tipo numera con el
+	// prefijo derivado de la modalidad, que es como funcionaba antes.
+	series fiscal.SerieRepository
 	// conceptosISLR es el maestro de conceptos retenibles de ISLR con su tarifa y
 	// su sustraendo. Se cablea con ConConceptosISLR; sin él, el concepto y el
 	// porcentaje se siguen tecleando en cada comprobante (como antes).

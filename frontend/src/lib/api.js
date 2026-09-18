@@ -573,8 +573,12 @@ export const api = {
   // El próximo folio SOLO se puede fijar hacia adelante (para continuar la
   // numeración de un sistema previo): jamás retrocede ni reusa folios. El backend
   // rechaza cualquier retroceso con un 400.
+  // Correlativos: { tipos: [...], otras: [...] }. Cada tipo trae su prefijo, su
+  // rango autorizado y el contador de cada sede.
   numeracion: () => request('/api/config/numeracion'),
   fijarNumeracion: (body) => request('/api/config/numeracion/fijar', { method: 'POST', body: JSON.stringify(body) }),
+  // Configura prefijo y rango de un tipo. body = { tipo, prefijo, desde, hasta }.
+  configurarSerie: (body) => request('/api/config/numeracion/serie', { method: 'POST', body: JSON.stringify(body) }),
   // Número de Control (rango autorizado por el SENIAT): prefijo + desde/hasta.
   numeroControl: () => request('/api/config/numero-control'),
   configurarNumeroControl: (body) => request('/api/config/numero-control', { method: 'POST', body: JSON.stringify(body) }),

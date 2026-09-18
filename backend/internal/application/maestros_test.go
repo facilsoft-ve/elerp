@@ -194,12 +194,14 @@ func TestEstadoNumeracion_ReflejaLoEmitido(t *testing.T) {
 		t.Fatalf("emitir para tener una serie con folios: %v", err)
 	}
 	estado := svc.EstadoNumeracion(empDemo)
-	if len(estado) == 0 {
-		t.Fatal("tras emitir debe haber al menos una serie con estado")
+	if len(estado.Tipos) == 0 {
+		t.Fatal("el estado debe traer un bloque por cada tipo de documento")
 	}
-	for _, s := range estado {
-		if s.Proximo != s.Actual+1 {
-			t.Errorf("el próximo folio debe ser actual+1: serie %q actual=%d proximo=%d", s.Serie, s.Actual, s.Proximo)
+	for _, t0 := range estado.Tipos {
+		for _, c := range t0.Contadores {
+			if c.Proximo != c.Actual+1 {
+				t.Errorf("el próximo folio debe ser actual+1: serie %q actual=%d proximo=%d", c.Serie, c.Actual, c.Proximo)
+			}
 		}
 	}
 }
@@ -213,7 +215,8 @@ func TestFijarNumeracion_ForwardOnly(t *testing.T) {
 	}
 	// El estado refleja el salto: próximo = 500, actual = 499.
 	visto := false
-	for _, s := range svc.EstadoNumeracion(empDemo) {
+	// «PRUEBA» no es un tipo fiscal: sale en la lista de series internas.
+	for _, s := range svc.EstadoNumeracion(empDemo).Otras {
 		if s.Serie == "PRUEBA" && s.SedeID == sede1 {
 			visto = true
 			if s.Proximo != 500 || s.Actual != 499 {

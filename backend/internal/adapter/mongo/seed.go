@@ -114,6 +114,11 @@ const versionSeedDemo = 33
 // Seed siembra la base con los datos demo (misma fuente que in-memory), de
 // forma idempotente: si ya hay empresas, no hace nada.
 func Seed(db *gomongo.Database) {
+	// ANTES QUE NADA: el contador de folios. Si quedaron copias divergentes de una
+	// clave, cualquier cosa que emita a continuación puede entregar un folio ya
+	// usado — y los documentos son append-only.
+	repararContadores(db)
+
 	st := New(db)
 	semilla := inmem.New()
 	snap := semilla.Snapshot()
@@ -364,12 +369,10 @@ func Seed(db *gomongo.Database) {
 	// que ya numeró el snapshot: así la primera emisión viva sigue la correlativa en
 	// vez de reiniciar en 1 y colisionar con los folios sembrados (FL/C y COT).
 	if demoID != "" && len(snap.Contadores) > 0 && contadoresDemoVacio(st, demoID) {
-		ctx, cancel := opctx()
-		for key, seq := range snap.Contadores {
-			_, _ = st.Numerador.c.InsertOne(ctx, map[string]any{"id": key, "seq": seq})
-		}
-		cancel()
-		log.Printf("Mongo: inicializados %d contador(es) de numeración adelantados", len(snap.Contadores))
+		// Con $max y upsert (ver sembrarContadores): la clave se crea si falta y su
+		// secuencia solo avanza, así repetir la siembra no puede duplicar el
+		// contador ni devolverlo atrás.
+		sembrarContadores(st, demoID, snap.Contadores)
 	}
 	// Configuración de moneda (R10) de una empresa sembrada antes de que existiera.
 	// Se rellena SOLO si está vacía: si alguien ya eligió su moneda principal, no

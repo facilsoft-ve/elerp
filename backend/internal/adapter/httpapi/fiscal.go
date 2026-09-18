@@ -132,6 +132,7 @@ func (s *Server) registerFiscal(r fiber.Router) {
 	// pasa el gate del grupo pero la queda fuera cfgAdmin, igual que en métodos).
 	cfg.Get("/numeracion", cfgAdmin, s.handleNumeracion)
 	cfg.Post("/numeracion/fijar", cfgAdmin, s.handleFijarNumeracion)
+	cfg.Post("/numeracion/serie", cfgAdmin, s.handleConfigurarSerie)
 
 	// Configuración › Número de Control (rango autorizado por el SENIAT).
 	cfg.Get("/numero-control", cfgAdmin, s.handleNumeroControl)
@@ -159,9 +160,13 @@ func (s *Server) handleConfigurarNumeroControl(c *fiber.Ctx) error {
 	return c.JSON(s.svc.EstadoNumeroControl(empresaIDOf(c)))
 }
 
-// handleNumeracion devuelve el estado de las series fiscales de la empresa: por
-// cada serie de cada sede, su último folio y el próximo. Enriquece el nombre de
-// la sede con el maestro de sedes del tenant (el Service solo conoce el id).
+// handleNumeracion devuelve el estado de los correlativos: un bloque por tipo de
+// documento —con su prefijo, su rango y el contador de cada sede— más las series
+// internas (cotizaciones, órdenes de compra, transferencias, cierres Z).
+//
+// Los nombres de sede se enriquecen con el maestro del tenant: el Service conoce
+// las sedes para la presencia estricta, pero el nombre visible es del tenant y
+// una sede borrada tiene que decirlo en vez de mostrar un id suelto.
 func (s *Server) handleNumeracion(c *fiber.Ctx) error {
 	empID := empresaIDOf(c)
 	estado := s.svc.EstadoNumeracion(empID)
@@ -169,14 +174,45 @@ func (s *Server) handleNumeracion(c *fiber.Ctx) error {
 	for _, sd := range s.tenancy.Sedes(empID) {
 		nombres[sd.ID] = sd.Nombre
 	}
-	for i := range estado {
-		if n := nombres[estado[i].SedeID]; n != "" {
-			estado[i].SedeNombre = n
-		} else if estado[i].SedeID != "" {
-			estado[i].SedeNombre = "Sede eliminada"
+	nombrar := func(id, actual string) string {
+		if n := nombres[id]; n != "" {
+			return n
+		}
+		if id != "" {
+			return "Sede eliminada"
+		}
+		return actual
+	}
+	for i := range estado.Tipos {
+		for j := range estado.Tipos[i].Contadores {
+			cont := &estado.Tipos[i].Contadores[j]
+			cont.SedeNombre = nombrar(cont.SedeID, cont.SedeNombre)
 		}
 	}
+	for i := range estado.Otras {
+		estado.Otras[i].SedeNombre = nombrar(estado.Otras[i].SedeID, estado.Otras[i].SedeNombre)
+	}
 	return c.JSON(estado)
+}
+
+// handleConfigurarSerie fija el prefijo y el rango autorizado de un tipo de
+// documento. Cambiar el prefijo ABRE UNA SERIE NUEVA: los documentos ya emitidos
+// conservan el suyo y el contador del prefijo nuevo arranca donde diga el rango.
+func (s *Server) handleConfigurarSerie(c *fiber.Ctx) error {
+	var in struct {
+		Tipo    string `json:"tipo"`
+		Prefijo string `json:"prefijo"`
+		Desde   int    `json:"desde"`
+		Hasta   int    `json:"hasta"`
+	}
+	if err := c.BodyParser(&in); err != nil || in.Tipo == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "tipo de documento requerido"})
+	}
+	if err := s.svc.ConfigurarSerie(empresaIDOf(c), principalOf(c).UserID, origen(c),
+		in.Tipo, in.Prefijo, in.Desde, in.Hasta); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(s.svc.EstadoNumeracion(empresaIDOf(c)))
 }
 
 // handleFijarNumeracion fija el próximo folio de una serie, solo hacia adelante.

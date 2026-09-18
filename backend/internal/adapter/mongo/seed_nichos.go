@@ -2,11 +2,12 @@ package mongo
 
 import (
 	"log"
-
-	mesadom "github.com/mornix/elerp/internal/domain/mesa"
 	"strings"
 
+	"go.mongodb.org/mongo-driver/mongo/options"
+
 	"github.com/mornix/elerp/internal/adapter/inmem"
+	mesadom "github.com/mornix/elerp/internal/domain/mesa"
 )
 
 // sembrarNichos planta las empresas demo por RUBRO (restaurante, ferretería, farmacia).
@@ -149,11 +150,12 @@ func sembrarNichos(st *Store, semilla *inmem.Store, refrescar bool) {
 			// folios sin adelantar el contador, la primera factura real del prospecto
 			// reiniciaría en 1 y colisionaría con un folio ya emitido (y los
 			// documentos son append-only: no hay forma de arreglarlo después).
-			ctx, cancel := opctx()
-			for clave, seq := range snap.Contadores {
-				_, _ = st.Numerador.c.InsertOne(ctx, map[string]any{"id": clave, "seq": seq})
-			}
-			cancel()
+			// SOLO los contadores de ESTA empresa. El snapshot trae los de todas las
+			// demo (comparten el Numerador in-memory), y sembrarlos completos en
+			// cada nicho insertaba una copia del contador ajeno por arranque:
+			// llegaron a convivir cinco copias de la misma clave con folios
+			// distintos, que es la forma exacta de entregar un folio repetido.
+			sembrarContadores(st, n.EmpresaID, snap.Contadores)
 			log.Printf("Mongo: %s → %d documentos fiscales y %d contador(es) de numeración",
 				n.Giro, len(snap.Documentos), len(snap.Contadores))
 		}
@@ -373,4 +375,37 @@ func codigoDeHorario(snap inmem.SnapshotEmpresa, mesoneroIDSemilla string) strin
 		}
 	}
 	return ""
+}
+
+/* CONTADORES DE NUMERACIÓN: sembrar sin duplicar.
+ *
+ * La colección `contadores` es la que decide qué folio recibe el próximo
+ * documento. Dos copias de la misma clave con valores distintos significan que
+ * una lectura puede ver 13 mientras la otra va en 18 — y ahí se entrega un folio
+ * ya usado, sobre documentos que son append-only y no se pueden corregir
+ * después.
+ *
+ * Por eso se siembra con `$max` y upsert: la clave se crea si falta y su
+ * secuencia SOLO AVANZA. Repetir la siembra deja de tener consecuencias.
+ */
+func sembrarContadores(st *Store, empresaID string, contadores map[string]int) {
+	ctx, cancel := opctx()
+	defer cancel()
+	prefijo := empresaID + "|"
+	n := 0
+	for clave, seq := range contadores {
+		if !strings.HasPrefix(clave, prefijo) {
+			continue // contador de otra empresa demo: no es asunto de este nicho
+		}
+		_, err := st.Numerador.c.UpdateOne(ctx,
+			map[string]any{"id": clave},
+			map[string]any{"$max": map[string]any{"seq": seq}, "$setOnInsert": map[string]any{"id": clave}},
+			options.Update().SetUpsert(true))
+		if err == nil {
+			n++
+		}
+	}
+	if n > 0 {
+		log.Printf("Mongo: %s → %d contador(es) de numeración", empresaID, n)
+	}
 }

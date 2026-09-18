@@ -42,6 +42,10 @@ func nuevoServicio(t *testing.T) (*application.Service, *inmem.Store) {
 	// (vive en seed.go), así que se cablea con uno propio para los tests.
 	svc.ConNotasCompra(inmem.NewNotaCompraRepo())
 	svc.ConSolicitudesCompra(st.Solicitudes)
+	// Correlativos configurables y sedes: sin cablearlos, el servicio numera con
+	// el prefijo derivado (como antes) y no resuelve nombres de sede.
+	svc.ConSeries(st.Series)
+	svc.ConSedes(st.Sedes)
 	return svc, st
 }
 

@@ -1643,192 +1643,330 @@ function AsistenteIAConfig() {
   )
 }
 
-/* --- Series y numeración fiscal (forward-only) --------------------------- */
+/* --- CORRELATIVOS FISCALES (Configuración › Series y numeración) ----------
+ *
+ * Un bloque por tipo de documento, con su prefijo, su rango autorizado y el
+ * contador de cada sede. Antes esta pantalla LISTABA lo que ya se había
+ * emitido: la fila de «Factura» aparecía recién después de la primera venta,
+ * que es justo cuando ya no sirve. Una empresa que migra necesita declarar «mi
+ * factura arranca en 1500» ANTES de vender.
+ *
+ * Lo que la ley fija no se ofrece como campo. Las retenciones llevan formato
+ * AAAAMM + 8 dígitos y reinician cada mes por providencia: ahí no hay prefijo
+ * que elegir ni rango que declarar, solo el secuencial del mes en curso.
+ * Mostrar un campo que no se puede mover haría que alguien lo llene creyendo
+ * que sirve.
+ */
 
-// Nombre legible de cada serie. Los códigos los emite el backend (serieDe +
-// sufijos): FL/MF/ID según modalidad, sus notas -NC/-NA, y las series propias de
-// cotización (COT) y compra (OC). Uno desconocido se muestra tal cual.
+/* Nombre legible de las series que no tienen bloque propio: las internas y las
+ * fiscales que no se configuran desde aquí.
+ *
+ * «C» es la serie de CONTINGENCIA: las facturas emitidas sin conexión con
+ * numeración preasignada (Providencia 000102). Es una serie fiscal de verdad, y
+ * mostrarla como una letra suelta en la pantalla de correlativos hacía que
+ * pareciera basura. */
 const SERIE_LABEL = {
-  FL: 'Factura (forma libre)',
-  MF: 'Factura (máquina fiscal)',
-  ID: 'Factura (imprenta digital)',
-  'FL-NC': 'Nota de crédito',
-  'FL-NA': 'Anulación',
-  'MF-NC': 'Nota de crédito',
-  'MF-NA': 'Anulación',
-  'ID-NC': 'Nota de crédito',
-  'ID-NA': 'Anulación',
+  C: 'Factura de contingencia (sin conexión)',
   COT: 'Cotización',
   OC: 'Orden de compra',
+  SOL: 'Solicitud de compra',
+  TRF: 'Transferencia entre sedes',
+  Z: 'Cierre Z',
+  CTRL: 'Número de control',
+  NCC: 'Nota de crédito de proveedor',
+  NDC: 'Nota de débito de proveedor',
 }
 const serieLabel = (s) => SERIE_LABEL[s] || s
-// Folio con el mismo formato que el documento (serie-00000042).
 const pad8 = (n) => String(n || 0).padStart(8, '0')
 const folioCompleto = (serie, n) => `${serie}-${pad8(n)}`
 
-/* --- Número de Control (rango autorizado por el SENIAT) ------------------ */
-function NumeroControlConfig({ puedeEditar, toast }) {
-  const [v, setV] = useState(null)
-  const [f, setF] = useState({ prefijo: '00', desde: '', hasta: '' })
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-
-  const cargar = useCallback(() => {
-    api.numeroControl().then((r) => {
-      setV(r)
-      setF({ prefijo: r.prefijo || '00', desde: r.desde ? String(r.desde) : '', hasta: r.hasta ? String(r.hasta) : '' })
-    }).catch(() => setV(null))
-  }, [])
-  useEffect(() => { cargar() }, [cargar])
-
-  const guardar = async () => {
-    setBusy(true); setError('')
-    try {
-      const r = await api.configurarNumeroControl({ prefijo: f.prefijo.trim() || '00', desde: Number(f.desde) || 0, hasta: Number(f.hasta) || 0 })
-      setV(r)
-      toast({ title: 'Número de Control actualizado', body: `Prefijo ${r.prefijo} · próximo ${r.ejemplo}` })
-    } catch (e) {
-      setError(e?.message || 'No se pudo guardar.')
-    } finally { setBusy(false) }
-  }
-
-  return (
-    <div className="mb-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4">
-      <div className="flex items-baseline justify-between gap-2 flex-wrap">
-        <div className="text-[13px] font-semibold">Número de Control (SENIAT)</div>
-        {v ? <div className="text-[12px] text-slate-500 num">Próximo: <b>{v.ejemplo}</b>{v.restantes >= 0 ? ` · ${fmtNum(v.restantes, 0)} restantes del rango` : ''}</div> : null}
-      </div>
-      <div className="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5 mb-2.5">
-        Correlativo <strong>propio</strong>, distinto del número de factura, que el SENIAT autoriza por <strong>rango</strong>
-        (prefijo + desde/hasta). Se imprime en cada comprobante de forma libre / imprenta digital. Solo avanza.
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 max-w-xl">
-        <Field label="Prefijo (2 dígitos)">
-          <Input value={f.prefijo} maxLength={2} disabled={!puedeEditar} className="num"
-            onChange={(e) => { setF((s) => ({ ...s, prefijo: e.target.value.replace(/\D/g, '') })); setError('') }} placeholder="00" />
-        </Field>
-        <Field label="Desde" hint="inicio autorizado">
-          <Input type="number" min="0" value={f.desde} disabled={!puedeEditar} className="num"
-            onChange={(e) => { setF((s) => ({ ...s, desde: e.target.value })); setError('') }} placeholder="1" />
-        </Field>
-        <Field label="Hasta" hint="0 = sin tope">
-          <Input type="number" min="0" value={f.hasta} disabled={!puedeEditar} className="num"
-            onChange={(e) => { setF((s) => ({ ...s, hasta: e.target.value })); setError('') }} placeholder="500000" />
-        </Field>
-      </div>
-      {error ? <div className="text-[12px] text-red-600 dark:text-red-400 mt-2">{error}</div> : null}
-      {puedeEditar ? (
-        <div className="flex justify-end mt-2.5">
-          <Button size="sm" onClick={guardar} loading={busy} icon={<Icon.Check size={15} />}>Guardar rango</Button>
-        </div>
-      ) : null}
-    </div>
-  )
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
+  'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+// periodoLegible: "2026-09" → "septiembre 2026". El código crudo no le dice nada
+// a quien tiene que reconocer el mes que está declarando.
+function periodoLegible(p) {
+  const [a, m] = String(p || '').split('-')
+  const i = Number(m) - 1
+  return MESES[i] ? `${MESES[i]} ${a}` : p
 }
-
-/* --- Series y numeración fiscal (forward-only) --------------------------- */
 
 function Numeracion() {
   const { ui } = useUI()
   const toast = useToast()
   const puedeEditar = PUEDE_ADMINISTRAR.includes(ui.rol)
-  const [rows, setRows] = useState(null) // null = cargando; [] = vacío
+  const [estado, setEstado] = useState(null) // null = cargando
   const [error, setError] = useState('')
-  const [fijando, setFijando] = useState(null) // fila a fijar (abre modal)
+  const [fijando, setFijando] = useState(null)   // {tipo, contador}
+  const [editando, setEditando] = useState(null) // tipo a configurar
 
   const cargar = useCallback(() => {
     setError('')
     api.numeracion()
-      .then((r) => setRows(r || []))
-      .catch((e) => { setError(e?.message || 'No se pudo cargar la numeración.'); setRows([]) })
+      .then((r) => setEstado(r || { tipos: [], otras: [] }))
+      .catch((e) => { setError(e?.message || 'No se pudo cargar la numeración.'); setEstado({ tipos: [], otras: [] }) })
   }, [])
   useEffect(() => { cargar() }, [cargar])
+
+  if (estado === null) {
+    return <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4"><TableSkeleton rows={5} cols={4} /></div>
+  }
+  if (error) {
+    return (
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card px-4 py-8 text-center">
+        <div className="text-[13px] text-red-600 dark:text-red-400 mb-2">{error}</div>
+        <Button size="sm" variant="ghost" icon={<Icon.Refresh size={14} />} onClick={cargar}>Reintentar</Button>
+      </div>
+    )
+  }
 
   return (
     <div>
       <div className="text-[12.5px] text-slate-500 dark:text-slate-400 max-w-2xl mb-3">
-        Cada <strong>serie</strong> lleva su propio contador de folios por sede. Aquí ves el último folio entregado y el
-        próximo que se asignará. El próximo folio solo se puede <strong>adelantar</strong>, para continuar la numeración
-        de un sistema anterior sin repetir un número.
+        Cada tipo de documento lleva su propio <strong>correlativo</strong>. Aquí declaras con qué serie se numera, entre
+        qué números autorizados, y ves el próximo folio de cada sede. El folio solo se puede <strong>adelantar</strong>:
+        un número ya emitido no se reutiliza, aunque el documento se anule.
       </div>
 
-      <NumeroControlConfig puedeEditar={puedeEditar} toast={toast} />
-
-      {/* Advertencia de cumplimiento, siempre visible */}
       <div className="mb-3 rounded-xl bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-700/60 px-3.5 py-3 text-[12.5px] text-amber-800 dark:text-amber-300 flex gap-2.5 items-start">
         <Icon.Shield size={15} className="mt-0.5 shrink-0" />
         <span>
-          Fijar la numeración es una acción de <strong>cumplimiento fiscal</strong>: solo avanza y es
-          <strong> irreversible</strong>. Un folio ya usado no se puede reutilizar ni volver atrás, así que el próximo
-          folio nunca puede ser menor que el actual. Úsalo solo para continuar desde un sistema previo.
+          Cambiar un correlativo es una acción de <strong>cumplimiento fiscal</strong> e <strong>irreversible</strong>.
+          Úsala para continuar la numeración de un sistema anterior o para registrar el rango que te autorizaron.
         </span>
       </div>
 
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
-        {rows === null ? (
-          <div className="p-4"><TableSkeleton rows={4} cols={4} /></div>
-        ) : error ? (
-          <div className="px-4 py-8 text-center">
-            <div className="text-[13px] text-red-600 dark:text-red-400 mb-2">{error}</div>
-            <Button size="sm" variant="ghost" icon={<Icon.Refresh size={14} />} onClick={cargar}>Reintentar</Button>
-          </div>
-        ) : rows.length === 0 ? (
-          <Empty icon={<Icon.ClipboardList size={22} />} title="Aún no se ha emitido ningún documento"
-            body="Las series aparecen aquí al emitir la primera factura, cotización u orden de compra. Desde ese momento podrás fijar su próximo folio para continuar una numeración anterior." />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60">
-                  <th className="py-2.5 px-3 font-medium">Sede</th>
-                  <th className="py-2.5 pr-3 font-medium">Serie</th>
-                  <th className="py-2.5 pr-3 font-medium">Último folio</th>
-                  <th className="py-2.5 pr-3 font-medium">Próximo folio</th>
-                  {puedeEditar ? <th className="py-2.5 pr-3 font-medium text-right">Acciones</th> : null}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={`${r.sedeId}|${r.serie}`} className="border-b border-slate-100 dark:border-slate-800/70">
-                    <td className="py-2.5 px-3 text-[13px]">{r.sedeNombre || r.sedeId}</td>
-                    <td className="py-2.5 pr-3">
-                      <div className="text-[13px] font-medium">{serieLabel(r.serie)}</div>
-                      <div className="text-[11.5px] text-slate-400 mono">{r.serie}</div>
-                    </td>
-                    <td className="py-2.5 pr-3 mono text-[12.5px] text-slate-500 num">
-                      {r.actual > 0 ? folioCompleto(r.serie, r.actual) : <span className="text-slate-400">Sin emitir</span>}
-                    </td>
-                    <td className="py-2.5 pr-3 mono text-[12.5px] font-semibold num">{folioCompleto(r.serie, r.proximo)}</td>
-                    {puedeEditar ? (
-                      <td className="py-2.5 pr-3 text-right whitespace-nowrap">
-                        <Button size="sm" variant="ghost" icon={<Icon.ArrowUp size={14} />} onClick={() => setFijando(r)}>Fijar próximo</Button>
-                      </td>
-                    ) : null}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      <div className="space-y-3">
+        {(estado.tipos || []).map((t) => (
+          <BloqueSerie key={t.tipo} tipo={t} puedeEditar={puedeEditar}
+            onConfigurar={() => setEditando(t)}
+            onFijar={(contador) => setFijando({ tipo: t, contador })} />
+        ))}
       </div>
+
+      {(estado.otras || []).length > 0 ? (
+        <div className="mt-5">
+          <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold mb-2">Otras series</div>
+          <div className="text-[12.5px] text-slate-500 dark:text-slate-400 mb-2 max-w-2xl">
+            Documentos internos que también llevan folio (cotizaciones, compras, transferencias, cierres Z) y series
+            fiscales anteriores a un cambio de prefijo. No los declara el SENIAT, pero su numeración tampoco retrocede.
+          </div>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60">
+                    <th className="py-2.5 px-3 font-medium">Sede</th>
+                    <th className="py-2.5 pr-3 font-medium">Serie</th>
+                    <th className="py-2.5 pr-3 font-medium">Último folio</th>
+                    <th className="py-2.5 pr-3 font-medium">Próximo folio</th>
+                    {puedeEditar ? <th className="py-2.5 pr-3 font-medium text-right">Acciones</th> : null}
+                  </tr>
+                </thead>
+                <tbody>
+                  {estado.otras.map((r) => (
+                    <tr key={`${r.sedeId}|${r.serie}`} className="border-b border-slate-100 dark:border-slate-800/70">
+                      <td className="py-2.5 px-3 text-[13px]">{r.sedeNombre || <span className="text-slate-400">Toda la empresa</span>}</td>
+                      <td className="py-2.5 pr-3">
+                        <div className="text-[13px] font-medium">{serieLabel(r.serie)}</div>
+                        <div className="text-[11.5px] text-slate-400 mono">{r.serie}</div>
+                      </td>
+                      <td className="py-2.5 pr-3 mono text-[12.5px] text-slate-500 num">
+                        {r.actual > 0 ? folioCompleto(r.serie, r.actual) : <span className="text-slate-400">Sin emitir</span>}
+                      </td>
+                      <td className="py-2.5 pr-3 mono text-[12.5px] font-semibold num">{folioCompleto(r.serie, r.proximo)}</td>
+                      {puedeEditar ? (
+                        <td className="py-2.5 pr-3 text-right whitespace-nowrap">
+                          <Button size="sm" variant="ghost" icon={<Icon.ArrowUp size={14} />}
+                            onClick={() => setFijando({ tipo: { nombre: serieLabel(r.serie) }, contador: { ...r, ejemplo: folioCompleto(r.serie, r.proximo) } })}>
+                            Fijar próximo
+                          </Button>
+                        </td>
+                      ) : null}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {!puedeEditar ? (
         <div className="mt-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 px-3.5 py-3 text-[12.5px] text-slate-600 dark:text-slate-300 flex gap-2.5 items-start">
           <Icon.Shield size={15} className="mt-0.5 shrink-0 text-slate-400" />
-          <span>Solo la Dueña/Admin (o el Desarrollador) fija la numeración. Aquí ves el estado, pero no puedes cambiarlo.</span>
+          <span>Solo la Dueña/Admin (o el Desarrollador) configura los correlativos. Aquí ves el estado, pero no puedes cambiarlo.</span>
         </div>
       ) : null}
 
       {fijando ? (
-        <FijarNumeracionModal fila={fijando} onClose={() => setFijando(null)}
-          onSaved={(nuevas) => { setRows(nuevas); toast({ title: 'Numeración actualizada', body: `${serieLabel(fijando.serie)} · próximo ${folioCompleto(fijando.serie, fijando.proximo)}` }) }} />
+        <FijarNumeracionModal tipo={fijando.tipo} contador={fijando.contador} onClose={() => setFijando(null)}
+          onSaved={(nuevo) => { setEstado(nuevo); toast({ title: 'Correlativo actualizado', body: `${fijando.tipo.nombre}` }) }} />
+      ) : null}
+      {editando ? (
+        <ConfigurarSerieModal tipo={editando} onClose={() => setEditando(null)}
+          onSaved={(nuevo) => { setEstado(nuevo); toast({ title: 'Serie configurada', body: editando.nombre }) }} />
       ) : null}
     </div>
   )
 }
 
-function FijarNumeracionModal({ fila, onClose, onSaved }) {
-  const minimo = fila.proximo // no puede ser menor que el próximo actual
+/* BloqueSerie: un tipo de documento con su serie, su rango y sus contadores. */
+function BloqueSerie({ tipo, puedeEditar, onConfigurar, onFijar }) {
+  const conRango = tipo.conRango && (tipo.desde > 0 || tipo.hasta > 0)
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[13.5px] font-semibold">{tipo.nombre}</span>
+            <span className="mono text-[11.5px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">{tipo.prefijo}</span>
+            {tipo.mensual ? <Badge size="sm" color="slate">Reinicia cada mes</Badge> : null}
+          </div>
+          <div className="text-[12px] text-slate-500 dark:text-slate-400 mt-1 max-w-xl">{tipo.ayuda}</div>
+          {conRango ? (
+            <div className="text-[12px] text-slate-500 mt-1 num">
+              Rango autorizado: <b>{tipo.desde || 1}</b> – <b>{tipo.hasta > 0 ? tipo.hasta : 'sin tope'}</b>
+            </div>
+          ) : null}
+          {tipo.periodo ? (
+            <div className="text-[12px] text-slate-500 mt-1">Período en curso: <b>{periodoLegible(tipo.periodo)}</b></div>
+          ) : null}
+        </div>
+        {puedeEditar && (tipo.prefijoEditable || tipo.conRango) ? (
+          <Button size="sm" variant="ghost" icon={<Icon.Pencil size={14} />} onClick={onConfigurar}>Configurar</Button>
+        ) : null}
+      </div>
+
+      <div className="mt-3 border-t border-slate-100 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800">
+        {(tipo.contadores || []).map((c) => (
+          <div key={`${c.sedeId}|${c.serie}`} className="flex items-center gap-3 py-2.5 flex-wrap">
+            <div className="flex-1 min-w-[140px]">
+              <div className="text-[12.5px]">
+                {tipo.porSede
+                  ? (c.sedeNombre || <span className="text-slate-400">Sin sede</span>)
+                  : <span className="text-slate-500">Toda la empresa</span>}
+              </div>
+              <div className="text-[11.5px] text-slate-400">
+                Último: <span className="mono num">{c.actual > 0 ? c.actual : '—'}</span>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[11px] uppercase tracking-wide text-slate-400">Próximo</div>
+              <div className="mono text-[13px] font-semibold num">{c.ejemplo}</div>
+            </div>
+            {c.restantes >= 0 ? (
+              <div className={`text-[11.5px] px-2 py-0.5 rounded-full num ${c.restantes === 0
+                ? 'bg-red-50 dark:bg-red-900/30 text-[#B3362C] dark:text-red-300'
+                : c.restantes <= 50
+                  ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500'}`}>
+                {c.restantes === 0 ? 'Rango agotado' : `${fmtNum(c.restantes, 0)} restantes`}
+              </div>
+            ) : null}
+            {puedeEditar ? (
+              <Button size="sm" variant="ghost" icon={<Icon.ArrowUp size={14} />} onClick={() => onFijar(c)}>Fijar próximo</Button>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* ConfigurarSerieModal: prefijo y rango autorizado de un tipo. */
+function ConfigurarSerieModal({ tipo, onClose, onSaved }) {
+  const [f, setF] = useState({
+    prefijo: tipo.prefijoEditable ? (tipo.prefijo || '') : '',
+    desde: tipo.desde ? String(tipo.desde) : '',
+    hasta: tipo.hasta ? String(tipo.hasta) : '',
+  })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const cambiaPrefijo = tipo.prefijoEditable && f.prefijo.trim() !== '' && f.prefijo.trim() !== tipo.prefijo
+  const desde = Number(f.desde) || 0
+  const hasta = Number(f.hasta) || 0
+  const rangoMal = hasta > 0 && desde > 0 && hasta < desde
+    ? "El «hasta» no puede ser menor que el «desde»." : ''
+
+  const guardar = async () => {
+    if (rangoMal) { setError(rangoMal); return }
+    setBusy(true); setError('')
+    try {
+      const nuevo = await api.configurarSerie({ tipo: tipo.tipo, prefijo: f.prefijo.trim(), desde, hasta })
+      onSaved(nuevo)
+      onClose()
+    } catch (e) {
+      setError(e?.message || 'No se pudo guardar.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} size="sm" icon={<Icon.ClipboardList size={18} />}
+      title={`Configurar ${tipo.nombre}`} sub={tipo.ayuda}
+      footer={<>
+        <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+        <Button onClick={guardar} loading={busy} disabled={!!rangoMal} icon={<Icon.Check size={16} />}>Guardar</Button>
+      </>}>
+      <div className="space-y-3.5">
+        {tipo.prefijoEditable ? (
+          <Field label="Serie" hint={tipo.tipo === 'numero_control' ? '2 dígitos' : 'letras, números y guion'}
+            error={error && !rangoMal ? error : ''}>
+            <Input value={f.prefijo} placeholder={tipo.prefijo} invalid={!!error && !rangoMal}
+              onChange={(e) => { setF((s) => ({ ...s, prefijo: e.target.value })); setError('') }} />
+          </Field>
+        ) : (
+          <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 text-[12.5px] text-slate-600 dark:text-slate-300">
+            El formato de este comprobante lo fija el SENIAT (<span className="mono">AAAAMM</span> + 8 dígitos) y reinicia
+            cada mes. No hay serie que elegir: lo único configurable es el próximo secuencial del mes en curso, desde
+            <strong> Fijar próximo</strong>.
+          </div>
+        )}
+
+        {/* AVISO DE SERIE NUEVA. Cambiar el prefijo no renombra lo emitido: abre
+            otra serie, y el contador vuelve a empezar. Decirlo antes de guardar
+            es la diferencia entre una decisión y una sorpresa. */}
+        {cambiaPrefijo ? (
+          <div className="rounded-lg bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-700/60 px-3 py-2.5 text-[12px] text-amber-800 dark:text-amber-300">
+            Cambiar la serie <strong>abre una serie nueva</strong>. Los documentos ya emitidos conservan
+            <span className="mono"> {tipo.prefijo}</span> y su numeración; la serie <span className="mono">{f.prefijo.trim()}</span> arranca
+            en {desde > 0 ? <b className="num">{desde}</b> : <b>1</b>}.
+          </div>
+        ) : null}
+
+        {tipo.conRango ? (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Desde" hint="inicio autorizado">
+                <Input type="number" min={0} step="1" className="num" value={f.desde} placeholder="1"
+                  onChange={(e) => { setF((s) => ({ ...s, desde: e.target.value })); setError('') }} />
+              </Field>
+              <Field label="Hasta" hint="0 = sin tope" error={rangoMal}>
+                <Input type="number" min={0} step="1" className="num" value={f.hasta} placeholder="sin tope"
+                  invalid={!!rangoMal}
+                  onChange={(e) => { setF((s) => ({ ...s, hasta: e.target.value })); setError('') }} />
+              </Field>
+            </div>
+            <div className="text-[12px] text-slate-500 dark:text-slate-400">
+              El <strong>desde</strong> adelanta el contador de cada sede que todavía no lo haya pasado; a la que ya
+              esté más adelante no la toca, porque un folio emitido no se reasigna. El <strong>hasta</strong> es el tope
+              autorizado: se avisa cuando quedan pocos.
+            </div>
+          </>
+        ) : null}
+
+        {error && rangoMal === '' && tipo.prefijoEditable === false ? (
+          <div className="text-[12px] text-[#B3362C] dark:text-red-400">{error}</div>
+        ) : null}
+      </div>
+    </Modal>
+  )
+}
+
+/* FijarNumeracionModal: adelanta el próximo folio de un contador concreto. */
+function FijarNumeracionModal({ tipo, contador, onClose, onSaved }) {
+  const minimo = contador.proximo
   const [valor, setValor] = useState(String(minimo))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -1836,16 +1974,15 @@ function FijarNumeracionModal({ fila, onClose, onSaved }) {
   const n = Number(valor)
   const entero = valor.trim() !== '' && Number.isInteger(n)
   const valido = entero && n >= minimo
-  // Validación inline: entero y no menor que el próximo actual.
   const hint = !entero ? 'Escribe un número entero.' : (n < minimo ? `No puede ser menor que ${minimo} (el próximo actual).` : '')
 
   const confirmar = async () => {
     if (!valido) { setError(hint || 'Valor inválido.'); return }
     setBusy(true); setError('')
     try {
-      // El backend confirma la regla forward-only y devuelve el estado actualizado.
-      const estado = await api.fijarNumeracion({ sedeId: fila.sedeId, serie: fila.serie, proximo: n })
-      onSaved(estado || [])
+      // El backend confirma la regla forward-only y devuelve el estado completo.
+      const nuevo = await api.fijarNumeracion({ sedeId: contador.sedeId, serie: contador.serie, proximo: n })
+      onSaved(nuevo)
       onClose()
     } catch (e) {
       setError(e?.message || 'No se pudo fijar la numeración.')
@@ -1855,37 +1992,31 @@ function FijarNumeracionModal({ fila, onClose, onSaved }) {
 
   return (
     <Modal open onClose={onClose} size="sm" icon={<Icon.ArrowUp size={18} />}
-      title="Fijar próximo folio" sub={`${serieLabel(fila.serie)} · ${fila.sedeNombre || fila.sedeId}`}
+      title="Fijar próximo folio" sub={`${tipo.nombre}${contador.sedeNombre ? ` · ${contador.sedeNombre}` : ''}`}
       footer={<>
         <Button variant="ghost" onClick={onClose}>Cancelar</Button>
         <Button onClick={confirmar} loading={busy} disabled={!valido} icon={<Icon.Check size={16} />}>Fijar folio</Button>
       </>}>
       <div className="space-y-3.5">
         <div className="rounded-lg bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-700/60 px-3 py-2.5 text-[12px] text-amber-800 dark:text-amber-300">
-          Esto <strong>solo avanza</strong> la numeración y es irreversible. El próximo documento de esta serie recibirá
-          el folio que fijes aquí. Los folios que queden por el camino no se podrán usar.
+          Esto <strong>solo avanza</strong> la numeración y es irreversible. El próximo documento recibirá el folio que
+          fijes aquí; los que queden por el camino no se podrán usar.
         </div>
         <div className="grid grid-cols-2 gap-3 text-[12.5px]">
           <div>
             <div className="text-slate-400">Último emitido</div>
-            <div className="mono num">{fila.actual > 0 ? folioCompleto(fila.serie, fila.actual) : 'Sin emitir'}</div>
+            <div className="mono num">{contador.actual > 0 ? contador.actual : 'Sin emitir'}</div>
           </div>
           <div>
             <div className="text-slate-400">Próximo actual</div>
-            <div className="mono num">{folioCompleto(fila.serie, fila.proximo)}</div>
+            <div className="mono num">{contador.ejemplo}</div>
           </div>
         </div>
-        <Field label="Próximo folio" required
-          hint={`mínimo ${minimo}`}
+        <Field label="Próximo folio" required hint={`mínimo ${minimo}`}
           error={error || (valor.trim() !== '' && !valido ? hint : '')}>
           <Input type="number" min={minimo} step="1" value={valor} invalid={(!!error || (valor.trim() !== '' && !valido))}
             onChange={(e) => { setValor(e.target.value); setError('') }} />
         </Field>
-        {valido && n > minimo ? (
-          <div className="text-[12px] text-slate-500">
-            El próximo documento se numerará <span className="mono font-semibold">{folioCompleto(fila.serie, n)}</span>.
-          </div>
-        ) : null}
       </div>
     </Modal>
   )

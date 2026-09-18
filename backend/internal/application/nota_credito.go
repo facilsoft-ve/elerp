@@ -322,7 +322,7 @@ func (s *Service) emitirNotaCreditoSinMercancia(empresaID, actor, origen string,
 	nc.IVA = -ivaPos
 	nc.Total = -round2(subtotal + ivaPos)
 
-	nc.Serie = serieDe(orig.Modalidad) + "-NC"
+	nc.Serie = s.serieDoc(empresaID, fiscal.SerieNotaCredito, orig.Modalidad)
 	nc.Numero = s.numerador.Siguiente(empresaID, sedeID, nc.Serie)
 	nc.NumeroCompleto = fmt.Sprintf("%s-%08d", nc.Serie, nc.Numero)
 	nc.NumeroControl = s.numeroControl(empresaID, orig.Modalidad)

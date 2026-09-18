@@ -88,6 +88,7 @@ type Store struct {
 	Mesoneros        *MesoneroRepo
 	Turnos           *TurnoRepo
 	Alicuotas        *AlicuotaRepo
+	Series           *SerieRepo
 	ConceptosISLR    *ConceptoISLRRepo
 	Horarios         *HorarioRepo
 }
@@ -137,6 +138,7 @@ func New() *Store {
 		Mesoneros:     NewMesoneroRepo(),
 		Turnos:        NewTurnoRepo(),
 		Alicuotas:     NewAlicuotaRepo(),
+		Series:        NewSerieRepo(),
 		ConceptosISLR: NewConceptoISLRRepo(),
 		Horarios:      NewHorarioRepo(),
 	}

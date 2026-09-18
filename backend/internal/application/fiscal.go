@@ -487,7 +487,7 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 	}
 
 	// Numeración fiscal serializada por empresa+sede+serie.
-	doc.Serie = serieDe(modalidad)
+	doc.Serie = s.serieDoc(empresaID, fiscal.SerieFactura, modalidad)
 	doc.Numero = s.numerador.Siguiente(empresaID, sedeID, doc.Serie)
 	doc.NumeroCompleto = fmt.Sprintf("%s-%08d", doc.Serie, doc.Numero)
 	doc.NumeroControl = s.numeroControl(empresaID, modalidad)
@@ -584,7 +584,7 @@ func (s *Service) AnularDocumento(empresaID, sedeID, actor, origen, refID, motiv
 		RefDocumentoID: refID, Motivo: motivo,
 		Actor: actor, Fecha: ahora(),
 	}
-	rev.Serie = serieDe(orig.Modalidad) + "-NA"
+	rev.Serie = s.serieDoc(empresaID, fiscal.SerieAnulacion, orig.Modalidad)
 	rev.Numero = s.numerador.Siguiente(empresaID, sedeID, rev.Serie)
 	rev.NumeroCompleto = fmt.Sprintf("%s-%08d", rev.Serie, rev.Numero)
 	rev.NumeroControl = s.numeroControl(empresaID, orig.Modalidad)
@@ -731,7 +731,7 @@ func (s *Service) EmitirNotaCredito(empresaID, sedeID, actor, origen, refID, mot
 	nc.Total = -round2(subtotal + ivaPos)
 
 	// Numeración de serie propia de notas de crédito.
-	nc.Serie = serieDe(orig.Modalidad) + "-NC"
+	nc.Serie = s.serieDoc(empresaID, fiscal.SerieNotaCredito, orig.Modalidad)
 	nc.Numero = s.numerador.Siguiente(empresaID, sedeID, nc.Serie)
 	nc.NumeroCompleto = fmt.Sprintf("%s-%08d", nc.Serie, nc.Numero)
 	nc.NumeroControl = s.numeroControl(empresaID, orig.Modalidad)
@@ -922,7 +922,7 @@ func (s *Service) EmitirNotaDebito(empresaID, sedeID, actor, origen, refID strin
 	nd.Total = round2(nd.Subtotal + nd.IVA)
 
 	// Numeración de serie propia de notas de débito (-ND), atómica por empresa+sede.
-	nd.Serie = serieDe(orig.Modalidad) + "-ND"
+	nd.Serie = s.serieDoc(empresaID, fiscal.SerieNotaDebito, orig.Modalidad)
 	nd.Numero = s.numerador.Siguiente(empresaID, sedeID, nd.Serie)
 	nd.NumeroCompleto = fmt.Sprintf("%s-%08d", nd.Serie, nd.Numero)
 	nd.NumeroControl = s.numeroControl(empresaID, orig.Modalidad)
@@ -956,19 +956,36 @@ func (s *Service) alicuotaIGTF(empresaID string) float64 {
 	return fiscal.AlicuotaIGTF
 }
 
-func serieDe(modalidad string) string {
-	switch modalidad {
-	case "maquina_fiscal":
-		return "MF"
-	case "imprenta_digital":
-		return "ID"
-	default:
-		return "FL"
+/* serieDoc resuelve el CÓDIGO DE SERIE con el que se numera un tipo de
+ * documento. El prefijo configurado manda; sin configuración se deriva de la
+ * modalidad, que es como numeraba antes de existir esta pantalla.
+ *
+ * La derivación como respaldo no es cortesía con el código viejo: es lo que hace
+ * que una empresa que nunca abrió Configuración siga numerando igual después de
+ * actualizar. Un correlativo que cambia solo es un problema fiscal, no un
+ * detalle.
+ */
+func (s *Service) serieDoc(empresaID, tipo, modalidad string) string {
+	if s.series != nil {
+		if cfg, ok := s.series.Get(empresaID, tipo); ok && strings.TrimSpace(cfg.Prefijo) != "" {
+			return strings.TrimSpace(cfg.Prefijo)
+		}
 	}
+	return fiscal.CodigoModalidad(modalidad) + fiscal.SufijoSerie(tipo)
 }
 
 // serieControl es la serie del correlativo del Número de Control (por empresa).
 const serieControl = "CTRL"
+
+// prefijoNumeroControl resuelve el prefijo de 2 dígitos que acompaña al número
+// de control. Vive en la empresa desde antes de la pantalla de correlativos; se
+// lee de ahí para no tener dos fuentes de verdad del mismo dato.
+func (s *Service) prefijoNumeroControl(empresaID string) string {
+	if emp, ok := s.empresas.ByID(empresaID); ok && emp.NumeroControlPrefijo != "" {
+		return emp.NumeroControlPrefijo
+	}
+	return "00"
+}
 
 // numeroControl asigna el "Número de Control" SENIAT: un correlativo PROPIO por
 // empresa (formato NN-NNNNNNNN), distinto del número de factura. En MÁQUINA FISCAL
@@ -977,10 +994,7 @@ func (s *Service) numeroControl(empresaID, modalidad string) string {
 	if modalidad == "maquina_fiscal" {
 		return ""
 	}
-	prefijo := "00"
-	if emp, ok := s.empresas.ByID(empresaID); ok && emp.NumeroControlPrefijo != "" {
-		prefijo = emp.NumeroControlPrefijo
-	}
+	prefijo := s.prefijoNumeroControl(empresaID)
 	seq := s.numerador.Siguiente(empresaID, "", serieControl)
 	return fmt.Sprintf("%s-%08d", prefijo, seq)
 }
@@ -1196,6 +1210,13 @@ func cerrarDesglose(desglose map[string]*fiscal.DocumentoImpuesto, orden []strin
 		out = append(out, *f)
 	}
 	return out, total
+}
+
+// ConSeries cablea la configuración de correlativos. Opcional: sin ella cada
+// tipo numera con el prefijo derivado de la modalidad, como antes.
+func (s *Service) ConSeries(r fiscal.SerieRepository) *Service {
+	s.series = r
+	return s
 }
 
 // ConAlicuotas cablea el maestro de impuestos. Opcional: sin él el motor usa la
