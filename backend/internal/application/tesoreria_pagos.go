@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mornix/elerp/internal/domain/compra"
 	"github.com/mornix/elerp/internal/domain/tesoreria"
 )
 
@@ -26,6 +27,58 @@ type EntradaPagoProveedor struct {
 	MontoBs       float64
 	Metodo        string
 	Referencia    string
+	// ExcepcionMotivo autoriza pagar una compra cuya factura no cuadra con lo
+	// recibido (control en tres vías). Se exige solo cuando hace falta, y lo que se
+	// pide es el MOTIVO: es lo que después se puede leer en la auditoría.
+	ExcepcionMotivo string
+}
+
+// ErrPagoBloqueadoPorControl: la factura de esa compra no cuadra con lo recibido y
+// la empresa exige declarar por qué se paga igual.
+var ErrPagoBloqueadoPorControl = errors.New("la factura de esa compra no cuadra con lo recibido: indica el motivo para pagarla igual")
+
+// facturasEnExcepcionDe devuelve las facturas del proveedor que el control en tres
+// vías marcó como NO conformes. Solo se miran las evaluadas: las registradas antes
+// de que el control existiera no son excepciones, son facturas sin veredicto.
+func (s *Service) facturasEnExcepcionDe(empresaID, proveedorID, ordenID string) []compra.FacturaCompra {
+	var out []compra.FacturaCompra
+	if s.facturasCompra == nil {
+		return out
+	}
+	for _, f := range s.facturasCompra.List(empresaID) {
+		if !f.ControlEvaluado || f.ControlConforme {
+			continue
+		}
+		if f.ProveedorID != proveedorID {
+			continue
+		}
+		// Imputado a una orden: solo importa ESA. A cuenta del proveedor: importa
+		// cualquiera suya, o el bloqueo se esquivaría pagando «a cuenta».
+		if ordenID != "" && f.OrdenCompraID != ordenID {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// verificarControlTresVias frena el pago de una compra cuya factura no cuadra con
+// lo recibido, salvo que quien paga DECLARE por qué. Con política "avisar" la
+// excepción queda marcada en la factura pero no frena nada.
+func (s *Service) verificarControlTresVias(empresaID string, in EntradaPagoProveedor) error {
+	if s.politicaControlCompras(empresaID) != ControlBloquear {
+		return nil
+	}
+	if strings.TrimSpace(in.ExcepcionMotivo) != "" {
+		return nil // alguien lo autoriza y dice por qué; queda en el pago y en la auditoría
+	}
+	enExcepcion := s.facturasEnExcepcionDe(empresaID, in.ProveedorID, strings.TrimSpace(in.OrdenCompraID))
+	if len(enExcepcion) == 0 {
+		return nil
+	}
+	f := enExcepcion[0]
+	return fmt.Errorf("%w (factura %s: facturado %.2f contra recibido %.2f, tolerancia %.2f)",
+		ErrPagoBloqueadoPorControl, f.NumeroFactura, f.BaseImponible+f.BaseExenta, f.BaseRecibida, f.ControlTolerancia)
 }
 
 // RegistrarPagoProveedor anexa un pago contra la deuda de un proveedor y deriva su
@@ -52,6 +105,10 @@ func (s *Service) RegistrarPagoProveedor(empresaID, actor, origen string, in Ent
 	if saldo <= 0.004 {
 		return tesoreria.PagoProveedor{}, fmt.Errorf("%w: no se le adeuda nada", ErrPagoExcede)
 	}
+	// Control en tres vías: no se paga lo que no llegó, salvo declaración expresa.
+	if err := s.verificarControlTresVias(empresaID, in); err != nil {
+		return tesoreria.PagoProveedor{}, err
+	}
 	montoBs := round2(in.MontoBs)
 	if montoBs > saldo+0.005 {
 		return tesoreria.PagoProveedor{}, fmt.Errorf("%w: el saldo es %.2f Bs", ErrPagoExcede, saldo)
@@ -62,7 +119,8 @@ func (s *Service) RegistrarPagoProveedor(empresaID, actor, origen string, in Ent
 		OrdenCompraID: strings.TrimSpace(in.OrdenCompraID),
 		Monto:         montoBs, MontoBs: montoBs, Moneda: "VES",
 		Metodo: in.Metodo, Referencia: strings.TrimSpace(in.Referencia),
-		Actor: actor, Fecha: ahora(),
+		ExcepcionMotivo: strings.TrimSpace(in.ExcepcionMotivo),
+		Actor:           actor, Fecha: ahora(),
 	})
 	// Asiento derivado: baja la cuenta por pagar y sale el dinero.
 	s.asentarPagoProveedor(empresaID, actor, p)

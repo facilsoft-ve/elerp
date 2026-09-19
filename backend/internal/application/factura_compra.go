@@ -79,6 +79,39 @@ func (s *Service) FacturaCompra(empresaID, id string) (compra.FacturaCompra, boo
 // Si in.Lineas viene vacío, las líneas se prefijan desde lo efectivamente recibido
 // (la factura coincide con la recepción): la diferencia es cero y solo se reconoce
 // el IVA, como antes.
+// Políticas del control en tres vías.
+const (
+	ControlAvisar   = "avisar"
+	ControlBloquear = "bloquear"
+)
+
+// politicaControlCompras resuelve la política vigente. Vacío ⇒ "avisar": las
+// empresas ya creadas no cambian de comportamiento por esto.
+func (s *Service) politicaControlCompras(empresaID string) string {
+	if e, ok := s.empresas.ByID(empresaID); ok && e.ControlComprasPolitica == ControlBloquear {
+		return ControlBloquear
+	}
+	return ControlAvisar
+}
+
+// toleranciaControlCompras es cuánto puede diferir lo facturado de lo recibido sin
+// que sea excepción. Manda el MAYOR de los dos topes declarados: un tope en monto
+// cubre el redondeo de facturas chicas, y uno en porcentaje escala con el importe.
+// Ambos en cero = tolerancia cero.
+func (s *Service) toleranciaControlCompras(empresaID, _ string, baseRecibida float64) float64 {
+	e, ok := s.empresas.ByID(empresaID)
+	if !ok {
+		return 0
+	}
+	tol := e.ControlComprasToleranciaMonto
+	if e.ControlComprasToleranciaPorcentaje > 0 {
+		if porPct := round2(baseRecibida * e.ControlComprasToleranciaPorcentaje / 100); porPct > tol {
+			tol = porPct
+		}
+	}
+	return round2(tol)
+}
+
 func (s *Service) RegistrarFacturaCompra(empresaID, actor, origen, ordenCompraID string, in EntradaFacturaCompra) (compra.FacturaCompra, error) {
 	if s.ordenesCompra == nil || s.facturasCompra == nil {
 		return compra.FacturaCompra{}, ErrOCNoExiste
@@ -144,8 +177,19 @@ func (s *Service) RegistrarFacturaCompra(empresaID, actor, origen, ordenCompraID
 		}
 	}
 
+	// CONTROL EN TRES VÍAS: se compara lo facturado contra lo recibido y se graba el
+	// veredicto. La factura se registra SIEMPRE —hay obligación de llevarla al Libro
+	// de Compras—; lo que el control frena es el PAGO (ver RegistrarPagoProveedor).
+	tolerancia := s.toleranciaControlCompras(empresaID, o.ID, baseRecibida)
+	desvio := diferencia
+	if desvio < 0 {
+		desvio = -desvio
+	}
+	conforme := desvio <= tolerancia+0.004
+
 	f := compra.FacturaCompra{
 		EmpresaID: empresaID, OrdenCompraID: o.ID,
+		ControlEvaluado: true, ControlConforme: conforme, ControlTolerancia: tolerancia,
 		ProveedorID: o.ProveedorID, ProveedorNombre: o.ProveedorNombre, ProveedorRIF: rif,
 		NumeroFactura: in.NumeroFactura, NumeroControl: in.NumeroControl, Fecha: in.Fecha,
 		Lineas:        lineas,

@@ -357,8 +357,16 @@ func (t *TenancyService) ActualizarEmpresa(empresaID, actor, origen string, in E
 	return out, nil
 }
 
-// ErrAlicuotaInvalida se devuelve cuando una tasa cae fuera del rango [0,1].
-var ErrAlicuotaInvalida = errors.New("las alícuotas se expresan como fracción entre 0 y 1 (p. ej. 0.16 = 16%); 0 usa el valor del sistema")
+// Errores de configuración de la empresa.
+var (
+	// ErrAlicuotaInvalida se devuelve cuando una tasa cae fuera del rango [0,1].
+	ErrAlicuotaInvalida = errors.New("las alícuotas se expresan como fracción entre 0 y 1 (p. ej. 0.16 = 16%); 0 usa el valor del sistema")
+	// ErrPoliticaControlInvalida: la política del control en tres vías no es una
+	// de las dos admitidas.
+	ErrPoliticaControlInvalida = errors.New("la política de control de compras debe ser avisar o bloquear")
+	// ErrToleranciaControlInvalida: tolerancia negativa o porcentaje fuera de rango.
+	ErrToleranciaControlInvalida = errors.New("la tolerancia del control de compras no puede ser negativa, y el porcentaje va de 0 a 100")
+)
 
 // ActualizarImpuestos configura las alícuotas de IVA e IGTF de la empresa
 // (fracciones: 0.16 = 16%). Materializa «compliance as configuration»: una nueva
@@ -388,6 +396,36 @@ func (t *TenancyService) ActualizarImpuestos(empresaID, actor, origen string, iv
 	}
 	t.audit.Append(evento(empresaID, actor, origen, "config.impuestos.actualizar", empresaID,
 		fmt.Sprintf("IVA %.4f / IGTF %.4f / agIVA %t / agISLR %t / retIVA%% %.0f", iva, igtf, agenteIVA, agenteISLR, retIVAPct)))
+	return out, nil
+}
+
+// ActualizarControlCompras fija la política del CONTROL EN TRES VÍAS (pedido ·
+// recepción · factura del proveedor) y su tolerancia.
+//
+// Es política de Compras, no fiscal, y por eso vive aparte de las alícuotas: lo
+// que decide es si se puede PAGAR una factura que no cuadra con lo recibido. La
+// factura siempre se registra —hay obligación de llevarla al Libro de Compras—;
+// lo que se frena es el desembolso.
+func (t *TenancyService) ActualizarControlCompras(empresaID, actor, origen, politica string, tolMonto, tolPct float64) (empresa.Empresa, error) {
+	emp, ok := t.emps.ByID(empresaID)
+	if !ok {
+		return empresa.Empresa{}, ErrEmpresaNoExiste
+	}
+	if politica != "" && politica != "avisar" && politica != "bloquear" {
+		return empresa.Empresa{}, ErrPoliticaControlInvalida
+	}
+	if tolMonto < 0 || tolPct < 0 || tolPct > 100 {
+		return empresa.Empresa{}, ErrToleranciaControlInvalida
+	}
+	emp.ControlComprasPolitica = politica
+	emp.ControlComprasToleranciaMonto = tolMonto
+	emp.ControlComprasToleranciaPorcentaje = tolPct
+	out, ok := t.emps.Update(emp)
+	if !ok {
+		return empresa.Empresa{}, ErrEmpresaNoExiste
+	}
+	t.audit.Append(evento(empresaID, actor, origen, "config.controlcompras.actualizar", empresaID,
+		fmt.Sprintf("%s / tolerancia Bs %.2f o %.2f%%", politica, tolMonto, tolPct)))
 	return out, nil
 }
 

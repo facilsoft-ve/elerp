@@ -676,11 +676,19 @@ function RegistrarPagoProveedorModal({ proveedor, db, ccy, onClose, onHecho }) {
   const [tocado, setTocado] = useState(false)
   const [apiError, setApiError] = useState('')
 
+  // Control en tres vías: si el servidor frena el pago porque la factura no cuadra
+  // con lo recibido, se pide el MOTIVO y se reintenta declarándolo. No se pregunta
+  // antes: la mayoría de los pagos son conformes y no tienen por qué dar explicaciones.
+  const [bloqueoControl, setBloqueoControl] = useState('')
+  const [excepcionMotivo, setExcepcionMotivo] = useState('')
+
   const excede = Number(monto) > proveedor.saldo + 0.001
   // Validación inline: monto obligatorio (>0) y sin exceder el saldo pendiente.
   const errMonto = !(Number(monto) > 0) ? 'Escribe el monto a pagar (mayor que cero).'
     : excede ? 'El pago no puede exceder el saldo pendiente.' : ''
-  const valid = !errMonto
+  const errMotivo = bloqueoControl && !excepcionMotivo.trim()
+    ? 'Indica por qué se paga igual: queda registrado en el pago.' : ''
+  const valid = !errMonto && !errMotivo
 
   const guardar = async () => {
     setTocado(true)
@@ -690,11 +698,20 @@ function RegistrarPagoProveedorModal({ proveedor, db, ccy, onClose, onHecho }) {
       await api.registrarPagoProveedor({
         proveedorId: proveedor.proveedorId, montoBs: Number(monto),
         metodo, referencia: referencia.trim(),
+        excepcionMotivo: excepcionMotivo.trim() || undefined,
       })
       onHecho()
       onClose()
     } catch (e) {
-      setApiError(e?.message || 'No se pudo registrar el pago.')
+      const msg = e?.message || 'No se pudo registrar el pago.'
+      // El backend distingue este caso: no es un error de datos, es un control que
+      // pide autorización. Se muestra el detalle y se abre el campo del motivo.
+      if (/no cuadra con lo recibido/i.test(msg)) {
+        setBloqueoControl(msg)
+        setApiError('')
+      } else {
+        setApiError(msg)
+      }
       setBusy(false)
     }
   }
@@ -727,6 +744,23 @@ function RegistrarPagoProveedorModal({ proveedor, db, ccy, onClose, onHecho }) {
             {metodos.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </Select>
         </Field>
+        {bloqueoControl ? (
+          <div className="rounded-lg border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-900/20 px-3 py-2.5">
+            <div className="flex items-start gap-2 mb-2">
+              <Icon.CircleAlert size={14} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="text-[12px] text-amber-800 dark:text-amber-200">{bloqueoControl}</div>
+            </div>
+            <Field label="Motivo para pagar igual" required error={tocado ? errMotivo : ''}>
+              <Input value={excepcionMotivo} autoFocus
+                placeholder="Ej: faltante acordado, el resto llega la próxima semana"
+                invalid={tocado && !!errMotivo} onBlur={() => setTocado(true)}
+                onChange={(e) => setExcepcionMotivo(e.target.value)} />
+            </Field>
+            <div className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+              Queda guardado en el pago y en la auditoría.
+            </div>
+          </div>
+        ) : null}
         <Field label="Referencia" hint="opcional">
           <Input value={referencia} onChange={(e) => setReferencia(e.target.value)} className="mono" placeholder="123456" />
         </Field>

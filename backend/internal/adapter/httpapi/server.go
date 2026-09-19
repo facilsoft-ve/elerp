@@ -106,6 +106,7 @@ func NewServer(cfg config.Config, svc *application.Service, tenancy *application
 	api.Post("/empresas/:id/onboarding", s.handleOnboarding)
 	api.Patch("/empresas/:id", s.handleActualizarEmpresa)
 	api.Patch("/empresas/:id/impuestos", s.handleActualizarImpuestos)
+	api.Patch("/empresas/:id/control-compras", s.handleActualizarControlCompras)
 	api.Post("/empresas/:id/sedes", s.handleCrearSede)
 	api.Patch("/empresas/:id/sedes/:sedeId", s.handleActualizarSede)
 	api.Post("/empresas/:id/sedes/:sedeId/desactivar", s.handleDesactivarSede)

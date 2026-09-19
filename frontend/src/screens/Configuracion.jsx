@@ -1177,7 +1177,12 @@ function Impuestos() {
     agIVA: !!emp.agenteRetencionIVA,
     agISLR: !!emp.agenteRetencionISLR,
     retIVA: String(emp.retencionIVAPorcentaje > 0 ? emp.retencionIVAPorcentaje : 75),
-  }), [ivaGuardado, igtfGuardado, emp.agenteRetencionIVA, emp.agenteRetencionISLR, emp.retencionIVAPorcentaje])
+    // Control en tres vías (pedido · recepción · factura del proveedor).
+    ctrlPolitica: emp.controlComprasPolitica === 'bloquear' ? 'bloquear' : 'avisar',
+    ctrlTolMonto: String(emp.controlComprasToleranciaMonto || 0),
+    ctrlTolPct: String(emp.controlComprasToleranciaPorcentaje || 0),
+  }), [ivaGuardado, igtfGuardado, emp.agenteRetencionIVA, emp.agenteRetencionISLR, emp.retencionIVAPorcentaje,
+    emp.controlComprasPolitica, emp.controlComprasToleranciaMonto, emp.controlComprasToleranciaPorcentaje])
 
   const [f, setF] = useState(inicial)
   const [busy, setBusy] = useState(false)
@@ -1201,6 +1206,13 @@ function Impuestos() {
         agenteRetencionIVA: f.agIVA,
         agenteRetencionISLR: f.agISLR,
         retencionIVAPorcentaje: f.agIVA ? (Number(f.retIVA) || 75) : 0,
+      })
+      // El control de compras es política aparte (decide si se puede PAGAR una
+      // factura que no cuadra con lo recibido), así que tiene su propio endpoint.
+      await api.actualizarControlCompras(activeEmpresaId, {
+        politica: f.ctrlPolitica,
+        toleranciaMonto: Number(f.ctrlTolMonto) || 0,
+        toleranciaPorcentaje: Number(f.ctrlTolPct) || 0,
       })
       // Recargar bootstrap (db.EMPRESA) para que la nueva tasa rija en documentos
       // nuevos; refrescar auth por consistencia con las demás pantallas de empresa.
@@ -1254,6 +1266,39 @@ function Impuestos() {
             ) : null}
             <Toggle checked={f.agISLR} onChange={(v) => puedeEditar && set('agISLR', v)}
               label="Agente de retención de ISLR" sub="Retienes ISLR (el % y el sustraendo dependen del concepto)" />
+          </div>
+        </div>
+
+        {/* CONTROL EN TRES VÍAS: pedido · recepción · factura del proveedor.
+            La factura siempre se registra —hay obligación de llevarla al Libro de
+            Compras—; lo que este control decide es si se puede PAGARLA. */}
+        <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+          <div className="text-[13px] font-semibold">Control de compras en tres vías</div>
+          <div className="text-[12px] text-slate-500 mb-3">
+            Compara lo facturado por el proveedor contra lo que realmente se recibió. La factura siempre se
+            registra; lo que se decide aquí es si su pago se frena.
+          </div>
+          <div className="max-w-[420px] space-y-3">
+            <Field label="Cuando la factura no cuadra con lo recibido">
+              <Select value={f.ctrlPolitica} disabled={!puedeEditar}
+                onChange={(e) => set('ctrlPolitica', e.target.value)}>
+                <option value="avisar">Avisar — se marca la diferencia y se puede pagar</option>
+                <option value="bloquear">Bloquear — pagar exige declarar el motivo</option>
+              </Select>
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Tolerancia (Bs)" hint="para el redondeo">
+                <Input type="number" min="0" step="0.01" value={f.ctrlTolMonto}
+                  disabled={!puedeEditar} onChange={(e) => set('ctrlTolMonto', e.target.value)} />
+              </Field>
+              <Field label="Tolerancia (%)" hint="sobre lo recibido">
+                <Input type="number" min="0" max="100" step="0.1" value={f.ctrlTolPct}
+                  disabled={!puedeEditar} onChange={(e) => set('ctrlTolPct', e.target.value)} />
+              </Field>
+            </div>
+            <div className="text-[11.5px] text-slate-500">
+              Manda el mayor de los dos topes. Ambos en cero: cualquier diferencia es una excepción.
+            </div>
           </div>
         </div>
         <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 px-3 py-2.5 text-[12px] text-slate-600 dark:text-slate-300 flex gap-2.5 items-start">

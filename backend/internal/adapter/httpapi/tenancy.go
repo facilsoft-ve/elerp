@@ -141,6 +141,30 @@ func (s *Server) handleActualizarImpuestos(c *fiber.Ctx) error {
 	return c.JSON(emp)
 }
 
+// handleActualizarControlCompras fija la política del control en tres vías y su
+// tolerancia. Es política de Compras: decide si se puede PAGAR una factura que no
+// cuadra con lo recibido (la factura siempre se registra).
+func (s *Server) handleActualizarControlCompras(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if !s.puedeAdministrar(c, id) {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "sin permiso"})
+	}
+	var in struct {
+		Politica             string  `json:"politica"`
+		ToleranciaMonto      float64 `json:"toleranciaMonto"`
+		ToleranciaPorcentaje float64 `json:"toleranciaPorcentaje"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	emp, err := s.tenancy.ActualizarControlCompras(id, principalOf(c).UserID, origen(c),
+		in.Politica, in.ToleranciaMonto, in.ToleranciaPorcentaje)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(emp)
+}
+
 // handleActualizarSede cambia nombre y dirección de una sede.
 func (s *Server) handleActualizarSede(c *fiber.Ctx) error {
 	id := c.Params("id")

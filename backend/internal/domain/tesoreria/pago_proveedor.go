@@ -27,7 +27,12 @@ type PagoProveedor struct {
 	// registrado no se borra: se reversa, igual que un cobro o un documento fiscal.
 	Reverso   bool   `json:"reverso" bson:"reverso"`
 	RefPagoID string `json:"refPagoId" bson:"refpagoid"`
-	Motivo    string `json:"motivo" bson:"motivo"`
+	// ExcepcionMotivo es por qué se pagó igual una compra cuya factura no cuadra
+	// con lo recibido (control en tres vías). Vacío en un pago normal. Se exige —y
+	// se guarda— para que la auditoría pueda leer quién autorizó qué: si alguien
+	// necesita la excepción todas las semanas, se ve.
+	ExcepcionMotivo string `json:"excepcionMotivo" bson:"excepcionmotivo"`
+	Motivo          string `json:"motivo" bson:"motivo"`
 }
 
 // PagoProveedorRepo es el puerto del ledger de pagos a proveedor. SOLO-ANEXADO a

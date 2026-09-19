@@ -117,13 +117,16 @@ func (s *Server) handleRegistrarPagoProveedor(c *fiber.Ctx) error {
 		MontoBs       float64 `json:"montoBs"`
 		Metodo        string  `json:"metodo"`
 		Referencia    string  `json:"referencia"`
+		// Autoriza pagar una compra cuya factura no cuadra con lo recibido
+		// (control en tres vías). Queda guardado en el pago.
+		ExcepcionMotivo string `json:"excepcionMotivo"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
 	out, err := s.svc.RegistrarPagoProveedor(empresaIDOf(c), principalOf(c).UserID, origen(c), application.EntradaPagoProveedor{
 		ProveedorID: in.ProveedorID, OrdenCompraID: in.OrdenCompraID, MontoBs: in.MontoBs,
-		Metodo: in.Metodo, Referencia: in.Referencia,
+		Metodo: in.Metodo, Referencia: in.Referencia, ExcepcionMotivo: in.ExcepcionMotivo,
 	})
 	if err != nil {
 		if errors.Is(err, application.ErrProveedorNoPago) {

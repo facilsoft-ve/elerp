@@ -56,6 +56,22 @@ type FacturaCompra struct {
 	BaseRecibida   float64 `json:"baseRecibida" bson:"baserecibida"`
 	DiferenciaBase float64 `json:"diferenciaBase" bson:"diferenciabase"`
 
+	// CONTROL EN TRES VÍAS: el veredicto de comparar pedido · recepción · factura.
+	//
+	//   - ControlConforme: la diferencia contra lo recibido cabe en la tolerancia.
+	//     Falso ⇒ la factura está en EXCEPCIÓN y su pago queda frenado según la
+	//     política de la empresa.
+	//   - ControlTolerancia: el tope que se aplicó, GRABADO en el documento. Igual
+	//     que la tasa de cambio o la alícuota: cambiar la política mañana no puede
+	//     reescribir el veredicto de una factura de ayer.
+	//
+	// Las facturas anteriores a esta funcionalidad tienen ControlConforme en falso
+	// y tolerancia 0; se reconocen porque ControlEvaluado también es falso, y no se
+	// tratan como excepción.
+	ControlEvaluado   bool    `json:"controlEvaluado" bson:"controlevaluado"`
+	ControlConforme   bool    `json:"controlConforme" bson:"controlconforme"`
+	ControlTolerancia float64 `json:"controlTolerancia" bson:"controltolerancia"`
+
 	Moneda     string `json:"moneda" bson:"moneda"`
 	Registrada string `json:"registrada" bson:"registrada"` // UTC RFC3339 (cuándo se registró)
 	Actor      string `json:"actor" bson:"actor"`

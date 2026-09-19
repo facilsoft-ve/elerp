@@ -222,7 +222,9 @@ function Acciones({ oc, gestiona, busy, factura, onConfirmar, onRecibir, onCance
   if (factura) {
     return (
       <div className="inline-flex items-center gap-1.5">
-        <Badge size="sm" color="emerald" dot>Facturada · {factura.numeroControl || factura.numeroFactura || ''}</Badge>
+        <Badge size="sm" color={factura.controlEvaluado && !factura.controlConforme ? 'amber' : 'emerald'} dot>
+          {factura.controlEvaluado && !factura.controlConforme ? 'Facturada · no cuadra' : `Facturada · ${factura.numeroControl || factura.numeroFactura || ''}`}
+        </Badge>
         {gestiona && oc.estado === 'recibida_parcial'
           ? <button onClick={onRecibir} title="Recibir mercancía" aria-label={`Recibir mercancía de ${oc.numeroCompleto || 'la orden'}`} className={`${btn} text-teal-700 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-900/20 ring-focus`}><Icon.Inbox size={14} /></button>
           : <button onClick={onVer} title="Ver" aria-label={`Ver la orden ${oc.numeroCompleto || ''}`} className={`${btn} text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 ring-focus`}><Icon.Eye size={14} /></button>}
@@ -552,7 +554,19 @@ function DetalleOrden({ oc, gestiona, sedes, factura, onVolver, onConfirmar, onR
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4 space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
               <Badge color={em.color} dot>{em.label}</Badge>
-              {factura ? <Badge color="emerald" dot>Facturada · {factura.numeroControl || factura.numeroFactura}</Badge> : null}
+              {factura ? (
+                <Badge color={factura.controlEvaluado && !factura.controlConforme ? 'amber' : 'emerald'} dot>
+                  Facturada · {factura.numeroControl || factura.numeroFactura}
+                </Badge>
+              ) : null}
+              {/* Control en tres vías: lo facturado no cuadra con lo recibido. El pago
+                  queda frenado si la empresa lo exige. */}
+              {factura?.controlEvaluado && !factura.controlConforme ? (
+                <span className="inline-flex items-center gap-1.5 text-[11.5px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2 py-1">
+                  <Icon.CircleAlert size={13} />
+                  Facturado {fmtCurrency(Math.abs(factura.baseImponible + factura.baseExenta), ccy)} contra {fmtCurrency(factura.baseRecibida, ccy)} recibidos
+                </span>
+              ) : null}
               {oc.condicionesPago ? <span className="text-[11.5px] text-slate-400">{oc.condicionesPago}</span> : null}
             </div>
             <div>

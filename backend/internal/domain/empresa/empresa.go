@@ -405,6 +405,23 @@ type Empresa struct {
 	AgenteRetencionIVA     bool    `json:"agenteRetencionIVA" bson:"agenteretencioniva"`
 	AgenteRetencionISLR    bool    `json:"agenteRetencionISLR" bson:"agenteretencionislr"`
 	RetencionIVAPorcentaje float64 `json:"retencionIVAPorcentaje" bson:"retencionivaporcentaje"`
+
+	// CONTROL EN TRES VÍAS (pedido · recepción · factura del proveedor).
+	//
+	// La factura de compra SIEMPRE se registra —es obligación llevarla al Libro de
+	// Compras—, así que el control no frena el registro: clasifica la factura y, si
+	// no cuadra con lo recibido, FRENA EL PAGO. Es lo que se busca: no pagar lo que
+	// no llegó.
+	//
+	// ControlComprasPolitica: "avisar" (marca la excepción y deja pagar) o
+	// "bloquear" (el pago exige que alguien declare por qué se paga igual).
+	// Vacío ⇒ "avisar": las empresas ya creadas no cambian de comportamiento.
+	ControlComprasPolitica string `json:"controlComprasPolitica" bson:"controlcompraspolitica"`
+	// Tolerancia admitida entre lo facturado y lo recibido. Se acepta la diferencia
+	// que no supere NINGUNO de los dos topes declarados (el mayor de ambos manda);
+	// 0 en los dos = tolerancia cero, cualquier diferencia es excepción.
+	ControlComprasToleranciaMonto      float64 `json:"controlComprasToleranciaMonto" bson:"controlcomprastoleranciamonto"`
+	ControlComprasToleranciaPorcentaje float64 `json:"controlComprasToleranciaPorcentaje" bson:"controlcomprastoleranciaporcentaje"`
 	// Rango AUTORIZADO del Número de Control (SENIAT). Prefijo de 2 dígitos ("00" por
 	// defecto) + rango [Desde, Hasta] autorizado por la providencia. El correlativo
 	// vivo lo lleva el Numerador (serie "CTRL"); estos campos definen el prefijo, el

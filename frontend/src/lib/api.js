@@ -83,6 +83,8 @@ export const api = {
   reactivarSede: (empId, sedeId) => request(`/api/empresas/${encodeURIComponent(empId)}/sedes/${encodeURIComponent(sedeId)}/reactivar`, { method: 'POST' }),
   // Configuración › Impuestos y alícuotas. body = { alicuotaIVA, alicuotaIGTF } en fracciones (0.16 = 16%).
   actualizarImpuestos: (id, body) => request(`/api/empresas/${encodeURIComponent(id)}/impuestos`, { method: 'PATCH', body: JSON.stringify(body) }),
+  // Control en tres vías (pedido · recepción · factura): política y tolerancia.
+  actualizarControlCompras: (id, body) => request(`/api/empresas/${encodeURIComponent(id)}/control-compras`, { method: 'PATCH', body: JSON.stringify(body) }),
 
   // Datos de arranque de la empresa/sede activa.
   bootstrap: () => request('/api/bootstrap'),
