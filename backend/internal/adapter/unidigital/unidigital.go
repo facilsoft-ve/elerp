@@ -277,6 +277,41 @@ func (c *Cliente) SeriesConfiguradas(ctx context.Context) ([]Serie, error) {
 	return out, err
 }
 
+// Contador es en qué número va la imprenta para una serie y un tipo de
+// documento. Es el punto de partida del correlativo: el avance lo lleva quien
+// emite, pero de DÓNDE arranca lo dice la imprenta, y arrancar en otro número
+// hace que rechace la primera factura por estar fuera de orden.
+type Contador struct {
+	StrongID     string `json:"strongId"`
+	Serie        string `json:"serie"`
+	DocumentType string `json:"documentType"`
+	Counter      int    `json:"counter"`
+}
+
+// Contadores trae el correlativo actual de cada serie y tipo.
+func (c *Cliente) Contadores(ctx context.Context) ([]Contador, error) {
+	var out []Contador
+	err := c.llamar(ctx, http.MethodGet, "/series/counters", nil, &out)
+	return out, err
+}
+
+// NombreTipo traduce el `codeName` que usamos al nombre con el que la imprenta
+// rotula sus contadores. Se hace acá y no en la aplicación porque es vocabulario
+// de ellos: si mañana lo cambian, se cambia en un solo sitio.
+func NombreTipo(codeName string) string {
+	switch codeName {
+	case "FA":
+		return "Factura"
+	case "NC":
+		return "Nota de Crédito"
+	case "ND":
+		return "Nota de Débito"
+	case "GD":
+		return "Guia de Despacho"
+	}
+	return ""
+}
+
 // Sucursal es una oficina comercial; su StrongID es obligatorio al emitir.
 type Sucursal struct {
 	StrongID string `json:"strongId"`

@@ -113,6 +113,15 @@ func (s *Service) GuardarConfigDigital(empresaID, actor, origen string, in Entra
 	out := s.configDigital.Upsert(c)
 	s.audit.Append(evento(empresaID, actor, origen, "config.facturaciondigital", empresaID,
 		fmt.Sprintf("activa=%v pos=%v ventas=%v ambiente=%s", c.Activa, c.PorPOS, c.PorVentas, c.Ambiente)))
+	// Al activar se toma el punto de partida de la IMPRENTA. Sin esto, una cuenta
+	// que ya emitió desde otro sistema nos vería arrancar en 1 y rechazaría la
+	// primera factura por número fuera de orden.
+	if out.Lista() {
+		if n, err := s.SincronizarCorrelativos(context.Background(), empresaID); err == nil && n > 0 {
+			s.audit.Append(evento(empresaID, actor, origen, "facturaciondigital.correlativos", empresaID,
+				fmt.Sprintf("%d contador(es) sincronizados con la imprenta", n)))
+		}
+	}
 	return out, nil
 }
 
@@ -138,6 +147,10 @@ type DiagnosticoDigital struct {
 	Series       []unidigital.Serie    `json:"series"`
 	Configuradas []unidigital.Serie    `json:"configuradas"`
 	Sucursales   []unidigital.Sucursal `json:"sucursales"`
+	// Contadores es en qué número va la imprenta por serie y tipo. Se muestra
+	// porque es de dónde sale el correlativo: verlo antes de activar evita la
+	// sorpresa de que la primera factura se rechace por número fuera de orden.
+	Contadores []unidigital.Contador `json:"contadores"`
 	// PuedeEmitir resume el diagnóstico: hay al menos una serie habilitada y una
 	// sucursal. Es lo que decide si tiene sentido activar el módulo.
 	PuedeEmitir bool   `json:"puedeEmitir"`
@@ -173,6 +186,7 @@ func (s *Service) ProbarDigital(ctx context.Context, empresaID, ambiente, usuari
 	d.Series, _ = cli.Series(ctx)
 	d.Configuradas, _ = cli.SeriesConfiguradas(ctx)
 	d.Sucursales, _ = cli.Sucursales(ctx)
+	d.Contadores, _ = cli.Contadores(ctx)
 	d.PuedeEmitir = len(d.Configuradas) > 0 && len(d.Sucursales) > 0
 	if !d.PuedeEmitir {
 		d.Problema = problemaDeProvision(d)
@@ -200,6 +214,49 @@ func problemaDeProvision(d DiagnosticoDigital) string {
 	}
 	return "La imprenta todavía no puede emitir con esta cuenta: " + strings.Join(falta, " y ") +
 		". Pídelo a soporte de la imprenta antes de activar el módulo."
+}
+
+// SincronizarCorrelativos pone nuestros contadores donde dice la imprenta.
+//
+// QUIÉN LLEVA EL CORRELATIVO: nosotros. `Number` es un campo de ENTRADA de
+// `createandapprove` —si la imprenta lo generara, no nos lo pediría— y ella lo
+// valida: ascendente estricto por serie y tipo, sin huecos.
+//
+// PERO EL PUNTO DE PARTIDA LO DA ELLA, en `GET /series/counters`. Son cosas
+// distintas y confundirlas cuesta la primera factura: una cuenta que ya emitió
+// desde otro sistema tiene su contador en 5, y si nosotros mandamos 1 la
+// rechaza.
+//
+// Solo adelanta, nunca retrocede: si nuestro contador ya está más arriba, se
+// deja donde está — un folio que creemos usado no se reasigna.
+func (s *Service) SincronizarCorrelativos(ctx context.Context, empresaID string) (int, error) {
+	cfg := s.ConfigDigital(empresaID)
+	cli, err := s.clienteDigital(cfg)
+	if err != nil {
+		return 0, err
+	}
+	contadores, err := cli.Contadores(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, c := range contadores {
+		if c.StrongID != cfg.SerieStrongID {
+			continue // contador de otra serie
+		}
+		for _, tipo := range []string{"FA", "NC", "ND"} {
+			if unidigital.NombreTipo(tipo) != c.DocumentType {
+				continue
+			}
+			clave := serieImprenta(cfg, tipo)
+			if s.numerador.Actual(empresaID, "", clave) < c.Counter {
+				if err := s.numerador.Fijar(empresaID, "", clave, c.Counter); err == nil {
+					n++
+				}
+			}
+		}
+	}
+	return n, nil
 }
 
 /* --- Emisión ------------------------------------------------------------- */
