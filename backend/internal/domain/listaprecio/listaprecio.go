@@ -30,13 +30,21 @@ type ItemLista struct {
 // ListaPrecio es una tarifa de la empresa: un conjunto de precios por SKU con un
 // nombre, un tipo (venta/compra), una moneda y un interruptor de actividad.
 type ListaPrecio struct {
-	ID        string      `json:"id" bson:"id"`
-	EmpresaID string      `json:"empresaId" bson:"empresaid"`
-	Nombre    string      `json:"nombre" bson:"nombre"`
-	Tipo      string      `json:"tipo" bson:"tipo"`     // TipoVenta | TipoCompra
-	Activa    bool        `json:"activa" bson:"activa"` // desactivar sin borrar
-	Moneda    string      `json:"moneda" bson:"moneda"` // moneda de los precios (VES, USD, …)
-	Items     []ItemLista `json:"items" bson:"items"`   // precio por SKU
+	ID        string `json:"id" bson:"id"`
+	EmpresaID string `json:"empresaId" bson:"empresaid"`
+	Nombre    string `json:"nombre" bson:"nombre"`
+	Tipo      string `json:"tipo" bson:"tipo"` // TipoVenta | TipoCompra
+	// ProveedorID ata una lista de COMPRA a su proveedor: es la tarifa negociada
+	// con él, y por eso la orden de compra puede proponer sus costos sola. Solo
+	// tiene sentido en TipoCompra; en una lista de venta se ignora.
+	//
+	// Es opcional a propósito: una lista de compra sin proveedor sigue siendo
+	// válida (una tarifa de referencia, o las que ya existían antes de esto), solo
+	// que nadie la propone automáticamente.
+	ProveedorID string      `json:"proveedorId" bson:"proveedorid"`
+	Activa      bool        `json:"activa" bson:"activa"` // desactivar sin borrar
+	Moneda      string      `json:"moneda" bson:"moneda"` // moneda de los precios (VES, USD, …)
+	Items       []ItemLista `json:"items" bson:"items"`   // precio por SKU
 }
 
 // Repository persiste listas de precio, aislado por empresaID.

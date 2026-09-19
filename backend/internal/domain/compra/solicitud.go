@@ -16,6 +16,37 @@ const (
 	SolCancelada  = "cancelada"  // descartada
 )
 
+// MODALIDADES DE COMPRA: cómo se elige al proveedor.
+//
+// No es una etiqueta decorativa — cada modalidad CAMBIA lo que la solicitud exige,
+// que es lo que la vuelve auditable. Quien revise una compra tiene que poder ver
+// si hubo concurso o no, y que el documento no pueda mentir al respecto.
+const (
+	// ModalidadDirecta: se le compra a un proveedor sin concurso (urgencia, único
+	// proveedor del rubro, monto menor). Exige EXACTAMENTE UNO: si hay varios
+	// invitados no fue directa, fue un concurso.
+	ModalidadDirecta = "adjudicacion_directa"
+	// ModalidadLicitacion: se pide presupuesto a VARIOS y se compara. Exige AL MENOS
+	// DOS proveedores: una licitación de uno solo no es una licitación.
+	ModalidadLicitacion = "licitacion"
+	// ModalidadListaPrecios: no se pide presupuesto — se compra a la tarifa ya
+	// negociada con el proveedor. Exige exactamente uno, y su lista de precios de
+	// compra es la que pone los costos.
+	ModalidadListaPrecios = "lista_precios"
+)
+
+// ModalidadValida acota la modalidad. El vacío se admite y significa «no
+// declarada»: quien crea la solicitud puede no decir nada, y entonces la deduce el
+// servicio de a cuántos proveedores se le pide (ver Service.modalidadResuelta).
+// Así ni el API ni las solicitudes que ya existían necesitan cambiar.
+func ModalidadValida(m string) bool {
+	switch m {
+	case "", ModalidadDirecta, ModalidadLicitacion, ModalidadListaPrecios:
+		return true
+	}
+	return false
+}
+
 // Estados de la cotización de un proveedor concreto dentro de la solicitud.
 const (
 	CotizaPendiente  = "pendiente"  // se le pidió, aún no responde
@@ -60,6 +91,12 @@ type SolicitudCompra struct {
 	NumeroCompleto string `json:"numeroCompleto" bson:"numerocompleto"` // serie "SOL" vía Numerador
 	Serie          string `json:"serie" bson:"serie"`
 	Estado         string `json:"estado" bson:"estado"`
+
+	// Modalidad es cómo se elige al proveedor: adjudicación directa, licitación o
+	// lista de precios. Siempre queda con un valor concreto —si no se declara, el
+	// servicio la deduce de a cuántos se les pidió—. Solo las solicitudes anteriores
+	// a esta funcionalidad la tienen vacía, y ahí significa «no consta».
+	Modalidad string `json:"modalidad" bson:"modalidad"`
 
 	Fecha string `json:"fecha" bson:"fecha"` // fecha del documento (UTC RFC3339)
 	Notas string `json:"notas" bson:"notas"`

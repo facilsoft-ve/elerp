@@ -317,7 +317,9 @@ func (s *Server) handleCancelarOrdenCompra(c *fiber.Ctx) error {
 type solicitudEntrada struct {
 	SedeID string `json:"sedeId"`
 	Notas  string `json:"notas"`
-	Lineas []struct {
+	// modalidad: adjudicacion_directa | licitacion | lista_precios. Vacío ⇒ directa.
+	Modalidad string `json:"modalidad"`
+	Lineas    []struct {
 		SKU      string  `json:"sku"`
 		Cantidad float64 `json:"cantidad"`
 	} `json:"lineas"`
@@ -325,7 +327,9 @@ type solicitudEntrada struct {
 }
 
 func (in solicitudEntrada) toApp() application.EntradaSolicitud {
-	ent := application.EntradaSolicitud{SedeID: in.SedeID, Notas: in.Notas, Proveedores: in.Proveedores}
+	ent := application.EntradaSolicitud{
+		SedeID: in.SedeID, Notas: in.Notas, Modalidad: in.Modalidad, Proveedores: in.Proveedores,
+	}
 	for _, l := range in.Lineas {
 		ent.Lineas = append(ent.Lineas, application.LineaSolicitudEntrada{SKU: l.SKU, Cantidad: l.Cantidad})
 	}

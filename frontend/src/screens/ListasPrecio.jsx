@@ -153,6 +153,9 @@ function FormLista({ lista, tipo, copy, onVolver, onSaved, toast }) {
   }, [db.PRODUCTOS, lista])
 
   const [nombre, setNombre] = useState(lista?.nombre || '')
+  // Proveedor dueño de la tarifa. Solo en listas de COMPRA: es lo que permite que
+  // una orden proponga sus costos sola. En una de venta el backend lo rechaza.
+  const [proveedorId, setProveedorId] = useState(lista?.proveedorId || '')
   const [activa, setActiva] = useState(lista ? lista.activa !== false : true)
   const [moneda, setMoneda] = useState((lista?.moneda || monedaEmpresa || 'VES').toUpperCase())
   // Precios por SKU como STRING: '' = no incluido (usa precio base); cualquier
@@ -190,6 +193,7 @@ function FormLista({ lista, tipo, copy, onVolver, onSaved, toast }) {
       .filter((p) => conPrecio(p.sku))
       .map((p) => ({ sku: p.sku, precio: Number(precios[p.sku]) || 0 }))
     const body = { nombre: nombre.trim(), tipo, activa, moneda, items }
+    if (tipo === 'compra') body.proveedorId = proveedorId
     try {
       if (editando) {
         await api.actualizarListaPrecio(lista.id, body)
@@ -234,6 +238,25 @@ function FormLista({ lista, tipo, copy, onVolver, onSaved, toast }) {
             </Select>
           </Field>
         </div>
+        {/* Una tarifa de COMPRA es lo pactado con un proveedor concreto. Atarla a él
+            es lo que deja que la orden proponga estos costos sola. */}
+        {tipo === 'compra' ? (
+          <div className="mt-4">
+            <Field label="Proveedor" hint="de quién es esta tarifa">
+              <Select value={proveedorId} onChange={(e) => setProveedorId(e.target.value)}>
+                <option value="">Sin proveedor — tarifa de referencia</option>
+                {(db.PROVEEDORES || []).filter((p) => p.activo).map((p) => (
+                  <option key={p.id} value={p.id}>{p.nombre}{p.documento ? ` · ${p.documento}` : ''}</option>
+                ))}
+              </Select>
+            </Field>
+            <div className="mt-1.5 text-[11.5px] text-slate-500">
+              {proveedorId
+                ? 'Una solicitud en modalidad «lista de precios» con este proveedor tomará de aquí sus costos.'
+                : 'Sin proveedor la lista sigue siendo válida, pero nadie la propone automáticamente.'}
+            </div>
+          </div>
+        ) : null}
         <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
           <Toggle checked={activa} onChange={setActiva}
             label={activa ? 'Activa' : 'Inactiva'}

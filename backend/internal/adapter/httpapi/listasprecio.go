@@ -35,9 +35,11 @@ func (s *Server) handleListasPrecio(c *fiber.Ctx) error {
 type listaPrecioBody struct {
 	Nombre string `json:"nombre"`
 	Tipo   string `json:"tipo"`
-	Activa bool   `json:"activa"`
-	Moneda string `json:"moneda"`
-	Items  []struct {
+	// proveedorId ata una lista de COMPRA a su proveedor (en una de venta es un 400).
+	ProveedorID string `json:"proveedorId"`
+	Activa      bool   `json:"activa"`
+	Moneda      string `json:"moneda"`
+	Items       []struct {
 		SKU    string  `json:"sku"`
 		Precio float64 `json:"precio"`
 	} `json:"items"`
@@ -45,7 +47,7 @@ type listaPrecioBody struct {
 
 func (b listaPrecioBody) entrada() application.EntradaListaPrecio {
 	ent := application.EntradaListaPrecio{
-		Nombre: b.Nombre, Tipo: b.Tipo, Activa: b.Activa, Moneda: b.Moneda,
+		Nombre: b.Nombre, Tipo: b.Tipo, ProveedorID: b.ProveedorID, Activa: b.Activa, Moneda: b.Moneda,
 	}
 	for _, it := range b.Items {
 		ent.Items = append(ent.Items, listaprecio.ItemLista{SKU: it.SKU, Precio: it.Precio})

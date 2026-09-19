@@ -17,6 +17,19 @@ var (
 	ErrProvNoInvitado        = errors.New("el proveedor no fue incluido en esta solicitud")
 	ErrSolicitudSinPrecios   = errors.New("el proveedor no cotizó ningún precio: no hay nada que convertir en orden")
 	ErrSolicitudNoDisponible = errors.New("el registro de solicitudes de presupuesto no está disponible")
+	// ErrModalidadInvalida: la modalidad no es una de las admitidas.
+	ErrModalidadInvalida = errors.New("la modalidad debe ser adjudicación directa, licitación o lista de precios")
+	// ErrLicitacionUnProveedor: una licitación con un solo invitado no es una
+	// licitación. Si de verdad es uno solo, la modalidad es adjudicación directa.
+	ErrLicitacionUnProveedor = errors.New("una licitación necesita al menos dos proveedores a quienes pedir presupuesto")
+	// ErrDirectaVariosProveedores: si se le pide a varios hubo concurso, no
+	// adjudicación directa. El documento no puede decir lo contrario de lo que hace.
+	ErrDirectaVariosProveedores = errors.New("una adjudicación directa es a un solo proveedor: con varios, la modalidad es licitación")
+	// ErrSinListaDeProveedor: la modalidad es lista de precios pero ese proveedor no
+	// tiene tarifa de compra activa.
+	ErrSinListaDeProveedor = errors.New("ese proveedor no tiene una lista de precios de compra activa")
+	// ErrSKUSinTarifa: la tarifa del proveedor no cubre un producto de la solicitud.
+	ErrSKUSinTarifa = errors.New("la lista de precios del proveedor no tiene tarifa para este producto")
 )
 
 // serieSolicitud es la correlativa de las solicitudes de presupuesto (no es fiscal).
@@ -31,10 +44,49 @@ type LineaSolicitudEntrada struct {
 
 // EntradaSolicitud son los datos para crear/editar una solicitud de presupuesto.
 type EntradaSolicitud struct {
-	SedeID      string
-	Notas       string
+	SedeID string
+	Notas  string
+	// Modalidad: cómo se elige al proveedor (ver compra.Modalidad*). Vacío ⇒
+	// adjudicación directa.
+	Modalidad   string
 	Lineas      []LineaSolicitudEntrada
 	Proveedores []string // ids de proveedores a los que se pide presupuesto
+}
+
+// modalidadResuelta decide qué modalidad se guarda. Si quien crea la solicitud la
+// DECLARA, esa manda (y se valida contra los hechos). Si no dice nada, se DEDUCE de
+// a cuántos se les pide: a varios es un concurso, a uno es directa.
+//
+// Deducir en vez de exigir es lo que mantiene compatible el API y las solicitudes
+// que ya existían: nadie tiene que empezar a mandar un campo nuevo, y el documento
+// igual queda diciendo lo que de verdad pasó.
+func modalidadResuelta(declarada string, n int) string {
+	if declarada != "" {
+		return declarada
+	}
+	if n >= 2 {
+		return compra.ModalidadLicitacion
+	}
+	return compra.ModalidadDirecta
+}
+
+// validarModalidadConProveedores comprueba que una modalidad DECLARADA cuadre con a
+// cuántos se les está pidiendo. Es lo que impide que el documento mienta: una
+// «adjudicación directa» con cuatro invitados fue un concurso, y una «licitación»
+// con uno no lo fue. Sobre una modalidad deducida no aplica — se dedujo de los
+// hechos, así que no puede contradecirlos.
+func validarModalidadConProveedores(declarada string, n int) error {
+	switch declarada {
+	case compra.ModalidadLicitacion:
+		if n < 2 {
+			return ErrLicitacionUnProveedor
+		}
+	case compra.ModalidadDirecta, compra.ModalidadListaPrecios:
+		if n > 1 {
+			return ErrDirectaVariosProveedores
+		}
+	}
+	return nil
 }
 
 // RespuestaLineaEntrada es el precio que un proveedor cotiza para un SKU.
@@ -134,10 +186,21 @@ func (s *Service) CrearSolicitud(empresaID, sedeID, actor, origen string, in Ent
 	if len(lineas) == 0 {
 		return compra.SolicitudCompra{}, ErrSolicitudVacia
 	}
+	if !compra.ModalidadValida(in.Modalidad) {
+		return compra.SolicitudCompra{}, ErrModalidadInvalida
+	}
 	provs, err := s.armarProveedoresSolicitud(empresaID, in.Proveedores)
 	if err != nil {
 		return compra.SolicitudCompra{}, err
 	}
+	// En borrador los proveedores son opcionales, así que la coherencia con la
+	// modalidad solo se exige si ya hay alguno; el control duro es al enviar.
+	if len(provs) > 0 {
+		if err := validarModalidadConProveedores(in.Modalidad, len(provs)); err != nil {
+			return compra.SolicitudCompra{}, err
+		}
+	}
+	modalidad := modalidadResuelta(in.Modalidad, len(provs))
 	sede := in.SedeID
 	if sede == "" {
 		sede = sedeID
@@ -145,7 +208,8 @@ func (s *Service) CrearSolicitud(empresaID, sedeID, actor, origen string, in Ent
 	sol := compra.SolicitudCompra{
 		EmpresaID: empresaID, SedeID: sede,
 		Serie: serieSolicitud, Estado: compra.SolBorrador,
-		Fecha: ahora(), Notas: strings.TrimSpace(in.Notas),
+		Modalidad: modalidad,
+		Fecha:     ahora(), Notas: strings.TrimSpace(in.Notas),
 		Lineas: lineas, Proveedores: provs,
 		Actor: actor, Creada: ahora(), Actualizada: ahora(),
 	}
@@ -193,6 +257,15 @@ func (s *Service) ActualizarSolicitud(empresaID, id, actor, origen string, in En
 			nuevos[i] = ya
 		}
 	}
+	if !compra.ModalidadValida(in.Modalidad) {
+		return compra.SolicitudCompra{}, ErrModalidadInvalida
+	}
+	if len(nuevos) > 0 {
+		if err := validarModalidadConProveedores(in.Modalidad, len(nuevos)); err != nil {
+			return compra.SolicitudCompra{}, err
+		}
+	}
+	sol.Modalidad = modalidadResuelta(in.Modalidad, len(nuevos))
 	sol.Lineas = lineas
 	sol.Proveedores = nuevos
 	sol.Notas = strings.TrimSpace(in.Notas)
@@ -222,6 +295,19 @@ func (s *Service) EnviarSolicitud(empresaID, id, actor, origen string) (compra.S
 	}
 	if len(sol.Proveedores) == 0 {
 		return compra.SolicitudCompra{}, ErrSolicitudSinProv
+	}
+	// Control duro: acá ya no hay excusa de «todavía la estoy armando». Lo que el
+	// documento declare tiene que cuadrar con a cuántos se les pidió.
+	if err := validarModalidadConProveedores(sol.Modalidad, len(sol.Proveedores)); err != nil {
+		return compra.SolicitudCompra{}, err
+	}
+	// En modalidad lista de precios no se le pide presupuesto a nadie: se compra a la
+	// tarifa ya pactada. Sin tarifa activa no hay de dónde sacar los costos, y
+	// enviarla sería prometer una conversión que después falla.
+	if sol.Modalidad == compra.ModalidadListaPrecios {
+		if _, ok := s.ListaDeCompraDe(empresaID, sol.Proveedores[0].ProveedorID); !ok {
+			return compra.SolicitudCompra{}, ErrSinListaDeProveedor
+		}
 	}
 	sol.Estado = compra.SolEnviada
 	sol.Actualizada = ahora()
@@ -351,14 +437,34 @@ func (s *Service) ConvertirEnOrden(empresaID, id, actor, origen, proveedorID str
 	if cotiza == nil {
 		return compra.SolicitudCompra{}, compra.OrdenCompra{}, ErrProvNoInvitado
 	}
-	if !cotiza.Respondida || len(cotiza.Lineas) == 0 {
-		return compra.SolicitudCompra{}, compra.OrdenCompra{}, ErrSolicitudSinPrecios
-	}
-	// Precio cotizado por SKU; solo se llevan a la orden las líneas que el proveedor
-	// coticó (con precio). Las cantidades salen de la solicitud.
+	// De dónde sale el precio depende de la MODALIDAD.
+	//
+	//   - Lista de precios: de la tarifa ya pactada con el proveedor. No se le pidió
+	//     presupuesto, así que exigir una respuesta no tendría sentido; lo que se
+	//     exige es que la tarifa cubra lo que se pide, y se dice qué falta.
+	//   - Directa y licitación: de lo que el proveedor cotizó.
 	precioPorSKU := map[string]float64{}
-	for _, l := range cotiza.Lineas {
-		precioPorSKU[l.SKU] = l.PrecioUnitario
+	if sol.Modalidad == compra.ModalidadListaPrecios {
+		if _, hay := s.ListaDeCompraDe(empresaID, proveedorID); !hay {
+			return compra.SolicitudCompra{}, compra.OrdenCompra{}, ErrSinListaDeProveedor
+		}
+		for _, l := range sol.Lineas {
+			precio, ok := s.CostoPactadoCon(empresaID, proveedorID, l.SKU)
+			if !ok {
+				return compra.SolicitudCompra{}, compra.OrdenCompra{},
+					fmt.Errorf("%w: %s", ErrSKUSinTarifa, l.SKU)
+			}
+			precioPorSKU[l.SKU] = precio
+		}
+	} else {
+		if !cotiza.Respondida || len(cotiza.Lineas) == 0 {
+			return compra.SolicitudCompra{}, compra.OrdenCompra{}, ErrSolicitudSinPrecios
+		}
+		// Solo se llevan a la orden las líneas que el proveedor coticó (con precio).
+		// Las cantidades salen siempre de la solicitud.
+		for _, l := range cotiza.Lineas {
+			precioPorSKU[l.SKU] = l.PrecioUnitario
+		}
 	}
 	entrada := EntradaOC{
 		ProveedorID: proveedorID, SedeID: sol.SedeID,

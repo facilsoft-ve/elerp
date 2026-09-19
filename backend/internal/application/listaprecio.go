@@ -27,9 +27,12 @@ func (s *Service) ConListasPrecio(r listaprecio.Repository) *Service {
 type EntradaListaPrecio struct {
 	Nombre string
 	Tipo   string
-	Activa bool
-	Moneda string
-	Items  []listaprecio.ItemLista
+	// ProveedorID ata una lista de COMPRA a su proveedor. Vacío = lista sin dueño
+	// (sigue siendo válida; simplemente nadie la propone en una orden).
+	ProveedorID string
+	Activa      bool
+	Moneda      string
+	Items       []listaprecio.ItemLista
 }
 
 // normalizarItemsLista limpia los ítems: descarta los que no traen SKU, recorta
@@ -93,8 +96,12 @@ func (s *Service) CrearListaPrecio(empresaID, actor, origen string, in EntradaLi
 	if moneda == "" {
 		moneda = empresa.MonedaVES
 	}
+	provID, err := s.proveedorDeLista(empresaID, in.Tipo, in.ProveedorID)
+	if err != nil {
+		return listaprecio.ListaPrecio{}, err
+	}
 	l := listaprecio.ListaPrecio{
-		EmpresaID: empresaID, Nombre: nombre, Tipo: in.Tipo,
+		EmpresaID: empresaID, Nombre: nombre, Tipo: in.Tipo, ProveedorID: provID,
 		Activa: in.Activa, Moneda: moneda, Items: items,
 	}
 	out := s.listasPrecio.Create(l)
@@ -126,6 +133,11 @@ func (s *Service) ActualizarListaPrecio(empresaID, id, actor, origen string, in 
 	if m := strings.ToUpper(strings.TrimSpace(in.Moneda)); m != "" {
 		cur.Moneda = m
 	}
+	provID, err := s.proveedorDeLista(empresaID, cur.Tipo, in.ProveedorID)
+	if err != nil {
+		return listaprecio.ListaPrecio{}, err
+	}
+	cur.ProveedorID = provID
 	cur.Items = items
 	// El Tipo se conserva de `cur`: no se muta desde la edición.
 
@@ -135,4 +147,64 @@ func (s *Service) ActualizarListaPrecio(empresaID, id, actor, origen string, in 
 	}
 	s.audit.Append(evento(empresaID, actor, origen, "ventas.listaprecio.actualizar", out.ID, out.Nombre))
 	return out, nil
+}
+
+/* --- Listas de COMPRA atadas al proveedor ---------------------------------- */
+
+// ErrListaProveedorSoloCompra: una lista de VENTA no tiene proveedor. El precio
+// al cliente no depende de a quién se le compró.
+var ErrListaProveedorSoloCompra = errors.New("solo una lista de compra puede tener proveedor")
+
+// proveedorDeLista valida el proveedor declarado para una lista. Vacío se acepta
+// (lista sin dueño); en una lista de venta, declararlo es un error, no un dato que
+// se ignora en silencio.
+func (s *Service) proveedorDeLista(empresaID, tipo, provID string) (string, error) {
+	provID = strings.TrimSpace(provID)
+	if provID == "" {
+		return "", nil
+	}
+	if tipo != listaprecio.TipoCompra {
+		return "", ErrListaProveedorSoloCompra
+	}
+	if s.provs == nil {
+		return "", ErrProveedorNoExiste
+	}
+	if _, ok := s.provs.ByID(empresaID, provID); !ok {
+		return "", ErrProveedorNoExiste
+	}
+	return provID, nil
+}
+
+// ListaDeCompraDe devuelve la lista de precios de COMPRA activa de un proveedor.
+// Si tiene más de una activa gana la PRIMERA del maestro: son tarifas negociadas,
+// no promociones que compitan entre sí, y tener dos vigentes es un error de datos
+// que el usuario debe resolver — no algo que el sistema deba adivinar.
+func (s *Service) ListaDeCompraDe(empresaID, proveedorID string) (listaprecio.ListaPrecio, bool) {
+	if s.listasPrecio == nil || strings.TrimSpace(proveedorID) == "" {
+		return listaprecio.ListaPrecio{}, false
+	}
+	for _, l := range s.listasPrecio.List(empresaID) {
+		if l.Tipo == listaprecio.TipoCompra && l.Activa && l.ProveedorID == proveedorID {
+			return l, true
+		}
+	}
+	return listaprecio.ListaPrecio{}, false
+}
+
+// CostoPactadoCon devuelve el costo que la tarifa del proveedor fija para un SKU.
+// El booleano distingue «no hay tarifa» de «la tarifa dice 0»: un precio de cero
+// puede ser legítimo (una muestra, un obsequio) y no debe confundirse con la
+// ausencia de dato, que es lo que deja el costo a criterio de quien compra.
+func (s *Service) CostoPactadoCon(empresaID, proveedorID, sku string) (float64, bool) {
+	lista, ok := s.ListaDeCompraDe(empresaID, proveedorID)
+	if !ok {
+		return 0, false
+	}
+	sku = strings.TrimSpace(sku)
+	for _, it := range lista.Items {
+		if it.SKU == sku {
+			return it.Precio, true
+		}
+	}
+	return 0, false
 }

@@ -1,11 +1,27 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { Icon } from '../components/Icon.jsx'
-import { Button, Badge, Input, Select, VistaDetalle, Modal, Empty, TableSkeleton, useToast, Field } from '../components/primitives.jsx'
+import { Button, Badge, Input, Select, VistaDetalle, Modal, Empty, TableSkeleton, useToast, Field, Segmented } from '../components/primitives.jsx'
 import { fmtCurrency, fmtNum, fmtDate } from '../lib/format.js'
 import { porCodigo } from '../lib/precio.js'
 import { useData } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
+
+/* Modalidad de compra: cómo se elige al proveedor. El servidor la valida contra a
+ * cuántos se les pide, así que el documento no puede decir lo contrario de lo que
+ * hizo. Si no se declara, la deduce él. */
+const MODALIDAD_META = {
+  adjudicacion_directa: { label: 'Adjudicación directa', color: 'slate' },
+  licitacion: { label: 'Licitación', color: 'blue' },
+  lista_precios: { label: 'Lista de precios', color: 'emerald' },
+}
+
+const MODALIDAD_AYUDA = {
+  '': 'Se deduce al guardar: a varios proveedores es una licitación; a uno solo, adjudicación directa.',
+  adjudicacion_directa: 'Se le compra a un solo proveedor, sin concurso. Con varios seleccionados el servidor lo rechaza.',
+  licitacion: 'Se pide presupuesto a varios y se comparan. Necesita al menos dos proveedores.',
+  lista_precios: 'No se pide presupuesto: los costos salen de la tarifa ya pactada con el proveedor, que debe tener una lista de compra activa.',
+}
 import { puedeGestionar } from './ComprasOrdenes.jsx'
 
 /* Solicitudes de presupuesto (RFQ). El paso PREVIO a la orden de compra: se pide
@@ -115,7 +131,12 @@ export function ComprasSolicitudes({ navigate }) {
                   return (
                     <tr key={s.id} className={`border-b border-slate-100 dark:border-slate-800/70 row-hover cursor-pointer ${s.estado === 'cancelada' ? 'opacity-60' : ''}`} onClick={() => setDetalleId(s.id)}>
                       <td className="py-2.5 pr-3 num text-[12.5px] font-medium">{s.numeroCompleto || '—'}</td>
-                      <td className="py-2.5 pr-3 text-center"><Badge size="sm" color={em.color} dot>{em.label}</Badge></td>
+                      <td className="py-2.5 pr-3 text-center">
+                        <Badge size="sm" color={em.color} dot>{em.label}</Badge>
+                        {MODALIDAD_META[s.modalidad]
+                          ? <div className="mt-0.5 text-[11px] text-slate-400">{MODALIDAD_META[s.modalidad].label}</div>
+                          : null}
+                      </td>
                       <td className="py-2.5 pr-3 text-center text-[12.5px] text-slate-500 num">
                         {provs.length ? <>{respondidos}/{provs.length} <span className="text-slate-400">resp.</span></> : '—'}
                       </td>
@@ -151,6 +172,9 @@ function FormSolicitud({ solicitud, onVolver, onSaved, toast }) {
   // Líneas: { sku, nombre, cantidad }
   const [lineas, setLineas] = useState(() => (solicitud?.lineas || []).map((l) => ({ sku: l.sku, nombre: l.nombre, cantidad: l.cantidad })))
   const [provSel, setProvSel] = useState(() => new Set((solicitud?.proveedores || []).map((p) => p.proveedorId)))
+  // Modalidad: cómo se elige al proveedor. Vacío = que la deduzca el servidor de a
+  // cuántos se les pide (a varios, licitación; a uno, adjudicación directa).
+  const [modalidad, setModalidad] = useState(solicitud?.modalidad || '')
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(0)
   const [touched, setTouched] = useState(false)
@@ -213,6 +237,7 @@ function FormSolicitud({ solicitud, onVolver, onSaved, toast }) {
         sedeId, notas: notas.trim() || undefined,
         lineas: lineas.map((l) => ({ sku: l.sku, cantidad: Number(l.cantidad) })),
         proveedores: [...provSel],
+        modalidad: modalidad || undefined,
       }
       if (esEdicion) {
         await api.actualizarSolicitudCompra(solicitud.id, body)
@@ -316,6 +341,20 @@ function FormSolicitud({ solicitud, onVolver, onSaved, toast }) {
         </div>
       </div>
 
+      {/* Modalidad: cómo se elige al proveedor. No es una etiqueta — el servidor la
+          valida contra a cuántos se les pide, y en «lista de precios» los costos
+          salen de la tarifa del proveedor en vez de esperar una respuesta. */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4 mb-4">
+        <div className="text-[12px] font-medium text-slate-500 mb-2">¿Cómo se elige al proveedor?</div>
+        <Segmented value={modalidad} onChange={setModalidad} options={[
+          { value: '', label: 'Deducir' },
+          { value: 'adjudicacion_directa', label: 'Adjudicación directa' },
+          { value: 'licitacion', label: 'Licitación' },
+          { value: 'lista_precios', label: 'Lista de precios' },
+        ]} />
+        <div className="mt-2 text-[11.5px] text-slate-500">{MODALIDAD_AYUDA[modalidad] || MODALIDAD_AYUDA['']}</div>
+      </div>
+
       {/* Proveedores a los que se pide + notas */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4">
@@ -415,6 +454,12 @@ function DetalleSolicitud({ sol, gestiona, onVolver, onEditar, onSaved, toast, n
           <div>
             <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Estado</div>
             <Badge color={em.color} dot>{em.label}</Badge>
+          </div>
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Modalidad</div>
+            {MODALIDAD_META[sol.modalidad]
+              ? <Badge color={MODALIDAD_META[sol.modalidad].color} dot>{MODALIDAD_META[sol.modalidad].label}</Badge>
+              : <span className="text-[12.5px] text-slate-400">No consta</span>}
           </div>
           <div className="flex-1 min-w-[220px]">
             <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Notas</div>
