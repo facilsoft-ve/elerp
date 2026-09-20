@@ -340,6 +340,10 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
   // en unidades tributarias. 0 = no hay ninguna cargada, y eso se avisa: calcular
   // con cero anularía el sustraendo y retendría de más.
   const valorUt = useValorUT()
+  // Acumulado del ejercicio del proveedor elegido, por concepto. Decide el TRAMO
+  // de la escala; sin él la pantalla proyectaría siempre el primero y diría un
+  // número distinto al que guarda el servidor.
+  const [acumulados, setAcumulados] = useState({})
 
   /* Líneas: { sku, nombre, cantidad, costoUnitario, exento }
    *
@@ -411,17 +415,25 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
     const p = proveedores.find((x) => x.id === id) || null
     setRet(perfilRetencionDe(p))
     if (p?.condicionPago) setCondicionesPago(p.condicionPago)
+    // El acumulado es del servidor: la pantalla no lo puede deducir de lo que ve.
+    // Si falla, se queda en vacío y sale el primer tramo — que es lo que el
+    // servidor corregirá al guardar, no un número inventado acá.
+    setAcumulados({})
+    if (!id) return
+    api.acumuladoISLR({ terceroId: id })
+      .then((r) => setAcumulados(r?.acumulados || {}))
+      .catch(() => setAcumulados({}))
   }
 
   // Proyección EN VIVO de lo que se le va a pagar al proveedor. El servidor
   // recalcula con las mismas reglas al guardar y es la autoridad.
   const proyeccion = useMemo(() => proyectarRetenciones({
-    empresa: db.EMPRESA, perfil: ret, conceptos, valorUt,
+    empresa: db.EMPRESA, perfil: ret, conceptos, valorUt, acumulados,
     // El ISLR se retiene por concepto del pago, así que la proyección necesita las
     // líneas: cada una trae el concepto de su producto.
     lineas: lineas.map((l) => ({ conceptoIslr: l.conceptoIslr, total: netoLinea(l) })),
     subtotal: totales.subtotal, iva: totales.iva, total: totales.total,
-  }), [db.EMPRESA, ret, conceptos, valorUt, totales, lineas])
+  }), [db.EMPRESA, ret, conceptos, valorUt, acumulados, totales, lineas])
   // Una fila SIN TARIFA retiene 0 pero tiene que verse: es configuración
   // incompleta, no ausencia de retención.
   const hayRetenciones = proyeccion.ivaMonto > 0 || proyeccion.islrMonto > 0 || proyeccion.detalle.length > 0

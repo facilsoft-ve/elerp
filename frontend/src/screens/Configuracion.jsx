@@ -1641,7 +1641,7 @@ function MaestroConceptosISLR({ puedeEditar }) {
         <Empty icon={<Icon.CircleAlert size={22} />} title="No se pudo cargar el maestro" body={error}
           cta={<Button onClick={cargar} icon={<Icon.Refresh size={15} />}>Reintentar</Button>} />
       ) : filas === null ? (
-        <TableSkeleton rows={5} cols={5} />
+        <TableSkeleton rows={5} cols={7} />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -1652,6 +1652,8 @@ function MaestroConceptosISLR({ puedeEditar }) {
                 <th className="py-2 pr-3 font-medium text-right">Tarifa</th>
                 <th className="py-2 pr-3 font-medium text-right">Sustraendo</th>
                 <th className="py-2 pr-3 font-medium text-right">Mínimo</th>
+                <th className="py-2 pr-3 font-medium text-right">Base</th>
+                <th className="py-2 pr-3 font-medium text-right">Tramo desde</th>
                 {puedeEditar ? <th className="py-2 pr-3 font-medium text-right">Acciones</th> : null}
               </tr>
             </thead>
@@ -1671,6 +1673,15 @@ function MaestroConceptosISLR({ puedeEditar }) {
                   </td>
                   <td className="py-2 pr-3 text-right num text-[12.5px]">
                     {c.baseMinimaUt > 0 ? `${fmtNum(c.baseMinimaUt, 2)} UT` : <span className="text-slate-400">—</span>}
+                  </td>
+                  {/* «Base» es qué porción del pago se grava; vacío = todo. */}
+                  <td className="py-2 pr-3 text-right num text-[12.5px]">
+                    {c.porcentajeBase > 0 && c.porcentajeBase < 100
+                      ? <span className="text-amber-700 dark:text-amber-400">{fmtNum(c.porcentajeBase, 0)} %</span>
+                      : <span className="text-slate-400">100 %</span>}
+                  </td>
+                  <td className="py-2 pr-3 text-right num text-[12.5px]">
+                    {c.desdeAcumuladoUt > 0 ? `${fmtNum(c.desdeAcumuladoUt, 2)} UT` : <span className="text-slate-400">—</span>}
                   </td>
                   {puedeEditar ? (
                     <td className="py-2 pr-3 text-right whitespace-nowrap">
@@ -1702,6 +1713,8 @@ function ConceptoISLRForm({ concepto, onCerrar, onGuardado }) {
     porcentaje: String(concepto?.porcentaje ?? ''),
     sustraendoUt: String(concepto?.sustraendoUt ?? ''),
     baseMinimaUt: String(concepto?.baseMinimaUt ?? ''),
+    porcentajeBase: String(concepto?.porcentajeBase ?? ''),
+    desdeAcumuladoUt: String(concepto?.desdeAcumuladoUt ?? ''),
     activo: concepto ? concepto.activo !== false : true,
   }))
   const [busy, setBusy] = useState(false)
@@ -1719,6 +1732,8 @@ function ConceptoISLRForm({ concepto, onCerrar, onGuardado }) {
         porcentaje: Number(f.porcentaje),
         sustraendoUt: Number(f.sustraendoUt) || 0,
         baseMinimaUt: Number(f.baseMinimaUt) || 0,
+        porcentajeBase: Number(f.porcentajeBase) || 0,
+        desdeAcumuladoUt: Number(f.desdeAcumuladoUt) || 0,
         activo: f.activo,
       })
       onGuardado(`${f.nombre.trim()} · ${fmtNum(Number(f.porcentaje), 2)} %`)
@@ -1751,6 +1766,21 @@ function ConceptoISLRForm({ concepto, onCerrar, onGuardado }) {
             {SUJETOS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
           </Select>
         </Field>
+        {/* TRAMO de la escala. A los no domiciliados no se les retiene un
+            porcentaje fijo sino 15/22/34 % según cuánto se les lleve pagado en el
+            año: eso son TRES filas del mismo concepto y sujeto, con este piso
+            distinto. Casi siempre queda en 0 y no hay escala. */}
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Base gravable (%)" hint="vacío = sobre todo el pago">
+            <Input value={f.porcentajeBase} inputMode="decimal" className="num"
+              onChange={(e) => set('porcentajeBase', e.target.value)} placeholder="100" />
+          </Field>
+          <Field label="Tramo desde (UT acumuladas)" hint="vacío = tarifa única"
+            error={edicion ? '' : ''}>
+            <Input value={f.desdeAcumuladoUt} inputMode="decimal" className="num" disabled={edicion}
+              onChange={(e) => set('desdeAcumuladoUt', e.target.value)} placeholder="0" />
+          </Field>
+        </div>
         <div className="grid grid-cols-3 gap-3">
           <Field label="Tarifa %" required>
             <Input value={f.porcentaje} inputMode="decimal" className="num"
@@ -1769,6 +1799,12 @@ function ConceptoISLRForm({ concepto, onCerrar, onGuardado }) {
           El sustraendo y el mínimo van en <strong>unidades tributarias</strong>, como en el reglamento: los
           bolívares salen de multiplicarlos por la UT del día del documento. Así una providencia nueva se
           absorbe cargando la UT, sin editar esta tabla.
+          {Number(f.desdeAcumuladoUt) > 0 ? (
+            <span className="block mt-1">
+              Este es un <strong>tramo</strong>: aplica cuando lo pagado al proveedor por este concepto en el
+              ejercicio supera las {f.desdeAcumuladoUt} UT. Necesita otra fila que arranque en 0.
+            </span>
+          ) : null}
         </div>
         <Toggle checked={f.activo} onChange={(v) => set('activo', v)}
           label="Activo" hint="un concepto inactivo deja de poder elegirse, sin perder el histórico" />

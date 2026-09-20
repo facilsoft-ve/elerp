@@ -17,11 +17,11 @@ func conceptos() []ConceptoISLR {
 // La misma actividad tiene tarifa distinta según a quién se le retiene: esa es
 // la razón de que el maestro lleve el tipo de sujeto y no solo el concepto.
 func TestConceptoPara_LaTarifaDependeDelSujeto(t *testing.T) {
-	nat, ok := ConceptoPara(conceptos(), "honorarios", SujetoNaturalResidente)
+	nat, ok := ConceptoPara(conceptos(), "honorarios", SujetoNaturalResidente, 0)
 	if !ok || nat.Porcentaje != 3 {
 		t.Errorf("a una persona natural le corresponde 3%%, dio %+v", nat)
 	}
-	jur, ok := ConceptoPara(conceptos(), "honorarios", SujetoJuridicaDomiciliada)
+	jur, ok := ConceptoPara(conceptos(), "honorarios", SujetoJuridicaDomiciliada, 0)
 	if !ok || jur.Porcentaje != 5 {
 		t.Errorf("a una jurídica le corresponde 5%%, dio %+v", jur)
 	}
@@ -30,10 +30,10 @@ func TestConceptoPara_LaTarifaDependeDelSujeto(t *testing.T) {
 // Un concepto dado de baja no puede seguir usándose: si se pudiera, seguiría
 // reteniendo con una tarifa que ya no rige.
 func TestConceptoPara_IgnoraLosInactivos(t *testing.T) {
-	if _, ok := ConceptoPara(conceptos(), "viejo", SujetoJuridicaDomiciliada); ok {
+	if _, ok := ConceptoPara(conceptos(), "viejo", SujetoJuridicaDomiciliada, 0); ok {
 		t.Error("un concepto inactivo no debería resolver")
 	}
-	if _, ok := ConceptoPara(conceptos(), "no-existe", SujetoNaturalResidente); ok {
+	if _, ok := ConceptoPara(conceptos(), "no-existe", SujetoNaturalResidente, 0); ok {
 		t.Error("un concepto inexistente no debería resolver")
 	}
 }
@@ -151,7 +151,7 @@ func TestConceptosPorDefecto_UsablesTalCual(t *testing.T) {
 			t.Errorf("%s: una persona natural residente sin sustraendo retiene de más", c.Codigo)
 		}
 	}
-	if _, ok := ConceptoPara(def, "honorarios", SujetoNaturalResidente); !ok {
+	if _, ok := ConceptoPara(def, "honorarios", SujetoNaturalResidente, 0); !ok {
 		t.Error("honorarios para persona natural es el caso más común y debe venir sembrado")
 	}
 }

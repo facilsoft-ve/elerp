@@ -164,6 +164,7 @@ func (s *Service) proyectarRetencionesOC(empresaID string, prov proveedor.Provee
 	// bolívares. Se resuelve UNA vez para toda la orden, para que dos conceptos de
 	// la misma no puedan quedar valorados con UT distintas.
 	valorUT := s.ValorUTEn(empresaID, "")
+	hoy := ahora()[:10]
 	codigos, bases := basesISLRPorConcepto(lineas)
 	if len(codigos) == 0 {
 		// Respaldo: ninguna línea declara concepto ⇒ el del proveedor sobre el neto
@@ -180,7 +181,14 @@ func (s *Service) proyectarRetencionesOC(empresaID string, prov proveedor.Provee
 		if base <= 0.004 {
 			continue
 		}
-		c, ok := fiscal.ConceptoPara(maestro, cod, perfil.ISLRSujeto)
+		// El TRAMO de la escala lo decide cuánto se le lleva pagado al proveedor en el
+		// ejercicio por este concepto, con esta orden dentro. Se resuelve en dos pasos
+		// porque la porción gravable depende del concepto y el concepto del acumulado.
+		primero, _ := fiscal.ConceptoPara(maestro, cod, perfil.ISLRSujeto, 0)
+		acumulado := s.AcumuladoISLRUT(empresaID, prov.ID, cod, hoy, "") +
+			baseEnUT(primero.BaseGravable(base), valorUT)
+
+		c, ok := fiscal.ConceptoPara(maestro, cod, perfil.ISLRSujeto, acumulado)
 		if !ok {
 			// El maestro conoce el concepto pero no tiene tarifa para ESTE tipo de
 			// sujeto (un flete comprado a una persona natural cuando la tabla solo trae
@@ -209,7 +217,10 @@ func (s *Service) proyectarRetencionesOC(empresaID string, prov proveedor.Provee
 		}
 		monto := round2(c.Retener(base, valorUT))
 		o.RetencionISLRDetalle = append(o.RetencionISLRDetalle, compra.RetencionISLRProyectada{
-			Codigo: c.Codigo, Concepto: c.Nombre, Base: base,
+			Codigo: c.Codigo, Concepto: c.Nombre,
+			// La base que se informa es la GRAVABLE: en los conceptos que no retienen
+			// sobre todo el pago, el neto de las líneas no explica el monto.
+			Base:       round2(c.BaseGravable(base)),
 			Porcentaje: c.Porcentaje, Sustraendo: round2(c.SustraendoEn(valorUT)), Monto: monto,
 		})
 		o.RetencionISLRMonto = round2(o.RetencionISLRMonto + monto)

@@ -449,6 +449,10 @@ export const api = {
   sugerenciaRetencionISLR: ({ codigo, sujeto, base, fecha = '' }) =>
     request(`/api/config/conceptos-islr/sugerencia?codigo=${encodeURIComponent(codigo)}&sujeto=${encodeURIComponent(sujeto)}&base=${encodeURIComponent(base)}&fecha=${encodeURIComponent(fecha)}`),
   guardarConceptoISLR: (body) => request('/api/config/conceptos-islr', { method: 'POST', body: JSON.stringify(body) }),
+  // Acumulado del ejercicio por concepto: decide el TRAMO de la escala (Tarifa 2
+  // de los no domiciliados). Sin él la pantalla proyectaría siempre el primero.
+  acumuladoISLR: ({ terceroId, fecha = '' }) =>
+    request(`/api/config/conceptos-islr/acumulado?terceroId=${encodeURIComponent(terceroId)}&fecha=${encodeURIComponent(fecha)}`),
   // UNIDAD TRIBUTARIA: de ella salen los sustraendos y mínimos de ISLR en
   // bolívares. Solo anexado — una UT pasada no se corrige, se carga la siguiente.
   unidadesTributarias: () => request('/api/config/unidades-tributarias'),

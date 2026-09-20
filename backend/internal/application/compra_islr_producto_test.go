@@ -222,7 +222,7 @@ func TestConcepto_NoSeDuplicaElParCodigoSujeto(t *testing.T) {
 	}
 
 	// Editar una fila existente no choca consigo misma.
-	honorarios, ok := fiscal.ConceptoPara(svc.ConceptosISLR(empDemo), "honorarios", fiscal.SujetoJuridicaDomiciliada)
+	honorarios, ok := fiscal.ConceptoPara(svc.ConceptosISLR(empDemo), "honorarios", fiscal.SujetoJuridicaDomiciliada, 0)
 	if !ok {
 		t.Fatal("el maestro sembrado debería traer honorarios para jurídica")
 	}

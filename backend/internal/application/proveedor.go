@@ -50,7 +50,7 @@ func (s *Service) saneaPerfilProveedor(empresaID string, p *proveedor.Proveedor)
 		// Se comprueba contra el maestro ACÁ, al guardar la ficha, y no al emitir el
 		// comprobante: un concepto que no existe se descubre cuando se configura el
 		// proveedor, no seis semanas después con la factura en la mano.
-		if _, ok := fiscal.ConceptoPara(s.ConceptosISLR(empresaID), p.ConceptoISLRCodigo, p.SujetoISLR); !ok {
+		if !fiscal.ExisteConceptoPara(s.ConceptosISLR(empresaID), p.ConceptoISLRCodigo, p.SujetoISLR) {
 			return ErrConceptoISLRDelProveedorNoExiste
 		}
 	}

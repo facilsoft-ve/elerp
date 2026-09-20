@@ -123,6 +123,10 @@ func (s *Server) registerFiscal(r fiber.Router) {
 	cfg.Get("/conceptos-islr", s.handleConceptosISLR)
 	cfg.Get("/conceptos-islr/sugerencia", s.handleSugerenciaRetencionISLR)
 	cfg.Post("/conceptos-islr", cfgAdmin, s.handleGuardarConceptoISLR)
+	// Acumulado del ejercicio por concepto para un tercero: es lo que decide el
+	// tramo de la Tarifa 2. Lo pide la pantalla de órdenes al elegir proveedor,
+	// porque el tramo no se puede proyectar sin él y el cálculo es del servidor.
+	cfg.Get("/conceptos-islr/acumulado", s.handleAcumuladoISLR)
 
 	// UNIDAD TRIBUTARIA: de ella salen los sustraendos y mínimos de ISLR en
 	// bolívares. Solo anexado — no hay PATCH ni DELETE: una UT pasada no se
@@ -794,8 +798,12 @@ func (s *Server) handleConceptosISLR(c *fiber.Ctx) error {
 func (s *Server) handleSugerenciaRetencionISLR(c *fiber.Ctx) error {
 	// "fecha" es la del hecho; vacía = hoy. De ella sale el valor de la UT, así que
 	// registrar en octubre una factura de agosto usa la UT de agosto.
+	// "terceroId" es el proveedor: de él sale el acumulado del ejercicio que decide
+	// el tramo de la escala. Sin él sale el primer tramo, que es lo correcto para
+	// una consulta suelta.
 	out, err := s.svc.SugerirRetencionISLR(empresaIDOf(c),
-		c.Query("codigo"), c.Query("sujeto"), c.Query("fecha"), c.QueryFloat("base", 0))
+		c.Query("codigo"), c.Query("sujeto"), c.Query("fecha"), c.Query("terceroId"),
+		c.QueryFloat("base", 0))
 	if err != nil {
 		return c.Status(estadoDeConfigISLR(err)).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -814,6 +822,14 @@ func (s *Server) handleGuardarConceptoISLR(c *fiber.Ctx) error {
 		return c.Status(estadoDeConfigISLR(err)).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(out)
+}
+
+// handleAcumuladoISLR devuelve, por código de concepto, cuántas unidades
+// tributarias se le llevan retenidas a un tercero en el ejercicio de una fecha.
+func (s *Server) handleAcumuladoISLR(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
+		"acumulados": s.svc.AcumuladosISLRUTDe(empresaIDOf(c), c.Query("terceroId"), c.Query("fecha")),
+	})
 }
 
 // handleUnidadesTributarias devuelve el histórico de la UT, de la más reciente a

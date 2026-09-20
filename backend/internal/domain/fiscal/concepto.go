@@ -96,7 +96,39 @@ type ConceptoISLR struct {
 	// debajo no hay retención — sin esto se emitirían comprobantes por montos
 	// irrisorios que después hay que anular a mano.
 	BaseMinimaUT float64 `json:"baseMinimaUt" bson:"baseminimaut"`
-	Activo       bool    `json:"activo" bson:"activo"`
+
+	// PorcentajeBase es qué PORCIÓN del pago forma la base gravable (100 = todo).
+	// No todo concepto retiene sobre el monto completo: los honorarios a una persona
+	// jurídica no domiciliada se gravan sobre el 90 %, y el 10 % restante no entra.
+	// Aplicar la tarifa al total en esos casos retiene de más.
+	//
+	// 0 se lee como 100 —«sobre todo el pago»—, que es el caso normal y lo que
+	// tenían las filas cargadas antes de que este campo existiera.
+	PorcentajeBase float64 `json:"porcentajeBase" bson:"porcentajebase"`
+
+	// DesdeAcumuladoUT es el piso del TRAMO, en unidades tributarias ACUMULADAS en
+	// el ejercicio para ese proveedor y concepto. 0 = desde el primer bolívar.
+	//
+	// Existe por la TARIFA 2 del ISLR: a los no domiciliados no se les retiene un
+	// porcentaje fijo sino una escala —15 %, 22 %, 34 %— y el tramo lo decide cuánto
+	// se le lleva pagado en el año, no lo que dice esta factura. Un mismo
+	// (código, sujeto) tiene entonces VARIAS filas, una por tramo; la clave de
+	// unicidad es la terna con este campo.
+	//
+	// Con un solo tramo en 0 —el caso de los domiciliados— el acumulado da igual y
+	// todo se comporta como una tarifa plana.
+	DesdeAcumuladoUT float64 `json:"desdeAcumuladoUt" bson:"desdeacumuladout"`
+
+	Activo bool `json:"activo" bson:"activo"`
+}
+
+// BaseGravable devuelve la porción del pago sobre la que se retiene.
+func (c ConceptoISLR) BaseGravable(monto float64) float64 {
+	pct := c.PorcentajeBase
+	if pct <= 0 {
+		pct = 100 // vacío = sobre todo el pago
+	}
+	return monto * pct / 100
 }
 
 // SustraendoEn convierte el sustraendo a bolívares con el valor de la UT de una
@@ -129,7 +161,11 @@ func (c ConceptoISLR) RequiereUT() bool {
 // el sustraendo y el mínimo, y el resultado es una retención DE MÁS que no falla
 // en ningún lado. Quien llama tiene que comprobar RequiereUT antes y decir que
 // falta la UT, no dejar que el cálculo siga con un cero.
-func (c ConceptoISLR) Retener(base, valorUT float64) float64 {
+// El argumento es el PAGO COMPLETO, no la base gravable: de aplicar
+// PorcentajeBase se encarga esta función. Pedirle al llamante que lo haga antes
+// invitaba a que un camino lo aplicara y otro no.
+func (c ConceptoISLR) Retener(pago, valorUT float64) float64 {
+	base := c.BaseGravable(pago)
 	if base < c.BaseMinimaEn(valorUT) {
 		return 0
 	}
@@ -188,17 +224,62 @@ func ConceptosPorDefecto(empresaID string) []ConceptoISLR {
 	}
 }
 
-// ConceptoPara busca en el maestro el concepto activo de un código para un tipo
-// de sujeto. Es la consulta que resuelve «cuánto le retengo a ESTE proveedor por
-// ESTE servicio».
-func ConceptoPara(conceptos []ConceptoISLR, codigo, sujeto string) (ConceptoISLR, bool) {
+// ConceptoPara resuelve «cuánto le retengo a ESTE proveedor por ESTE servicio»:
+// busca el concepto activo de un código para un tipo de sujeto y, de sus tramos,
+// devuelve el que corresponde al ACUMULADO del ejercicio.
+//
+// El acumulado va en unidades tributarias y DEBE incluir el pago que se está
+// calculando: el tramo lo decide dónde cae el total del año con esta factura
+// dentro, no dónde estaba antes de ella.
+//
+// Gana el tramo de DesdeAcumuladoUT más alto que no supere al acumulado. Con un
+// solo tramo en 0 —el caso de los domiciliados— el acumulado da igual.
+//
+// Pedir el acumulado aunque no haga falta es deliberado: obliga a cada sitio de
+// cálculo a decidir qué acumulado usa, en vez de olvidarse de que existe y
+// retener por el primer tramo para siempre.
+func ConceptoPara(conceptos []ConceptoISLR, codigo, sujeto string, acumuladoUT float64) (ConceptoISLR, bool) {
+	cod := strings.TrimSpace(strings.ToLower(codigo))
+	var elegido ConceptoISLR
+	hay := false
+	for _, c := range conceptos {
+		if strings.ToLower(c.Codigo) != cod || c.Sujeto != sujeto || !c.Activo {
+			continue
+		}
+		if c.DesdeAcumuladoUT > acumuladoUT {
+			continue // el acumulado todavía no llega a este tramo
+		}
+		if !hay || c.DesdeAcumuladoUT > elegido.DesdeAcumuladoUT {
+			elegido, hay = c, true
+		}
+	}
+	// Una escala mal cargada —sin tramo que arranque en 0— dejaría sin resolver un
+	// pago pequeño. Se cae al tramo más bajo que exista: retener por debajo de lo
+	// que toca es preferible a no retener y que nadie se entere.
+	if !hay {
+		for _, c := range conceptos {
+			if strings.ToLower(c.Codigo) != cod || c.Sujeto != sujeto || !c.Activo {
+				continue
+			}
+			if !hay || c.DesdeAcumuladoUT < elegido.DesdeAcumuladoUT {
+				elegido, hay = c, true
+			}
+		}
+	}
+	return elegido, hay
+}
+
+// ExisteConceptoPara dice si el maestro tiene ALGÚN tramo de ese código para ese
+// sujeto. Es la pregunta de la validación —«¿se puede configurar este proveedor
+// así?»—, distinta de la del cálculo, que necesita el acumulado.
+func ExisteConceptoPara(conceptos []ConceptoISLR, codigo, sujeto string) bool {
 	cod := strings.TrimSpace(strings.ToLower(codigo))
 	for _, c := range conceptos {
 		if strings.ToLower(c.Codigo) == cod && c.Sujeto == sujeto && c.Activo {
-			return c, true
+			return true
 		}
 	}
-	return ConceptoISLR{}, false
+	return false
 }
 
 // NombreDeConcepto devuelve el nombre legible de un código, sin importar el

@@ -54,6 +54,21 @@ type Retencion struct {
 	// Concepto es la etiqueta del concepto ISLR (honorarios, arrendamientos, …).
 	// Vacío en IVA.
 	Concepto string `json:"concepto" bson:"concepto"`
+	// ConceptoCodigo es la referencia estable al maestro. El nombre de arriba es
+	// para leer; acumular por él sería atarse a que nadie lo reescriba nunca.
+	ConceptoCodigo string `json:"conceptoCodigo,omitempty" bson:"conceptocodigo,omitempty"`
+	// TerceroID identifica al cliente o proveedor. El RIF es opcional en los
+	// maestros de ElERP, así que acumular por RIF dejaría fuera a quien no lo tenga.
+	TerceroID string `json:"terceroId,omitempty" bson:"terceroid,omitempty"`
+	// BaseUT es la base gravable EXPRESADA EN UNIDADES TRIBUTARIAS con la UT del día
+	// del comprobante. De ella sale el acumulado del ejercicio que decide el tramo
+	// de la Tarifa 2.
+	//
+	// Se guarda convertida y no se recalcula después a propósito: si se guardara en
+	// bolívares, el acumulado cambiaría cada vez que el SENIAT publica una UT nueva
+	// —los pagos viejos valdrían menos UT— y el tramo de diciembre dependería de una
+	// providencia de noviembre. En UT, lo acumulado queda fijo.
+	BaseUT float64 `json:"baseUt,omitempty" bson:"baseut,omitempty"`
 	// Sustraendo se resta al calcular la retención de ISLR (tabla del reglamento).
 	// 0 en IVA.
 	Sustraendo    float64 `json:"sustraendo" bson:"sustraendo"`

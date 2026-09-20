@@ -303,3 +303,54 @@ describe('proyectarRetenciones · la unidad tributaria', () => {
     expect(r.islrMonto).toBe(50)
   })
 })
+
+/* TARIFA 2: LA ESCALA DE LOS NO DOMICILIADOS.
+ *
+ * Misma tabla de casos que islr_tarifa2_test.go en el servidor. El tramo lo
+ * decide el acumulado del ejercicio, no la factura de hoy, y la base es el 90 %
+ * del pago. Con UT = 1 las UT acumuladas se leen como bolívares. */
+describe('proyectarRetenciones · la escala por tramos', () => {
+  const ESCALA = [
+    { codigo: 'hon_ext', nombre: 'Honorarios del exterior', sujeto: 'juridica_no_domiciliada',
+      porcentaje: 15, porcentajeBase: 90, desdeAcumuladoUt: 0, activo: true },
+    { codigo: 'hon_ext', nombre: 'Honorarios del exterior', sujeto: 'juridica_no_domiciliada',
+      porcentaje: 22, porcentajeBase: 90, desdeAcumuladoUt: 2000.01, activo: true },
+    { codigo: 'hon_ext', nombre: 'Honorarios del exterior', sujeto: 'juridica_no_domiciliada',
+      porcentaje: 34, porcentajeBase: 90, desdeAcumuladoUt: 3000.01, activo: true },
+  ]
+  const EXTERIOR = { retieneIslr: true, islrConceptoCodigo: 'hon_ext', islrSujeto: 'juridica_no_domiciliada' }
+  const conAcumulado = (ut) => proyectarRetenciones({
+    empresa: AGENTE, perfil: EXTERIOR, conceptos: ESCALA, valorUt: 1,
+    acumulados: { hon_ext: ut },
+    lineas: [{ conceptoIslr: 'hon_ext', total: 1000 }],
+    ...ORDEN,
+  })
+
+  it('sin nada acumulado cae en el primer tramo', () => {
+    const r = conAcumulado(0)
+    expect(r.detalle[0].porcentaje).toBe(15)
+    // La base es el 90 % del pago: 900, no 1.000. Sobre el total serían 150.
+    expect(r.detalle[0].base).toBe(900)
+    expect(r.islrMonto).toBe(135)
+  })
+
+  it('lo acumulado en el ejercicio empuja el tramo', () => {
+    expect(conAcumulado(1500).detalle[0].porcentaje).toBe(22) // 1.500 + 900 = 2.400
+    expect(conAcumulado(2500).detalle[0].porcentaje).toBe(34) // 2.500 + 900 = 3.400
+  })
+
+  it('el pago de hoy cuenta para decidir el tramo, no solo lo de antes', () => {
+    // 1.200 acumuladas está en el primer tramo, pero con los 900 de este pago
+    // el total del año llega a 2.100 y ya es el segundo.
+    expect(conAcumulado(1200).detalle[0].porcentaje).toBe(22)
+  })
+
+  it('un concepto de un solo tramo ignora el acumulado', () => {
+    const r = proyectarRetenciones({
+      empresa: AGENTE, valorUt: 1, conceptos: CONCEPTOS, acumulados: { honorarios: 999999 },
+      perfil: { retieneIslr: true, islrConceptoCodigo: 'honorarios', islrSujeto: 'juridica_domiciliada' },
+      ...ORDEN,
+    })
+    expect(r.islrMonto).toBe(50)
+  })
+})

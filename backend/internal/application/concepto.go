@@ -70,7 +70,12 @@ func (s *Service) GuardarConceptoISLR(empresaID, actor, origen string, c fiscal.
 	if c.Porcentaje <= 0 || c.Porcentaje > 100 {
 		return fiscal.ConceptoISLR{}, ErrConceptoInvalido
 	}
-	if c.SustraendoUT < 0 || c.BaseMinimaUT < 0 {
+	if c.SustraendoUT < 0 || c.BaseMinimaUT < 0 || c.DesdeAcumuladoUT < 0 {
+		return fiscal.ConceptoISLR{}, ErrConceptoInvalido
+	}
+	// La porción gravable es un porcentaje: 0 se lee como «sobre todo el pago», pero
+	// por encima de 100 gravaría más de lo que se paga.
+	if c.PorcentajeBase < 0 || c.PorcentajeBase > 100 {
 		return fiscal.ConceptoISLR{}, ErrConceptoInvalido
 	}
 	// Un concepto con sustraendo o mínimo en UT no se puede calcular sin saber
@@ -82,16 +87,18 @@ func (s *Service) GuardarConceptoISLR(empresaID, actor, origen string, c fiscal.
 		}
 	}
 	maestro := s.ConceptosISLR(empresaID) // asegura la siembra antes de tocar la tabla
-	// El par (código, sujeto) es la CLAVE de la tabla: es exactamente lo que busca
-	// ConceptoPara, que devuelve la primera coincidencia activa. Con dos filas
-	// vivas del mismo par, editar una puede no cambiar nada porque sigue ganando la
-	// otra — y la tarifa mal aplicada no da ningún error, solo un número distinto
-	// al esperado. Se rechaza al guardar, que es el único momento en que se puede.
+	// La CLAVE de la tabla es la terna (código, sujeto, tramo). Un mismo código y
+	// sujeto tiene VARIAS filas cuando la tarifa es una escala —la Tarifa 2 de los
+	// no domiciliados—, una por tramo; lo que no puede haber es dos tramos que
+	// arranquen en el mismo acumulado, porque entonces cuál gana lo decidiría el
+	// orden de lectura. Y eso no da ningún error: solo una tarifa distinta a la
+	// esperada. Se rechaza al guardar, que es el único momento en que se puede.
 	for _, otro := range maestro {
 		if otro.ID == c.ID || !otro.Activo || !c.Activo {
 			continue
 		}
-		if strings.EqualFold(otro.Codigo, c.Codigo) && otro.Sujeto == c.Sujeto {
+		if strings.EqualFold(otro.Codigo, c.Codigo) && otro.Sujeto == c.Sujeto &&
+			casiIgualUT(otro.DesdeAcumuladoUT, c.DesdeAcumuladoUT) {
 			return fiscal.ConceptoISLR{}, ErrConceptoDuplicado
 		}
 	}
@@ -106,6 +113,14 @@ func (s *Service) GuardarConceptoISLR(empresaID, actor, origen string, c fiscal.
 	out := s.conceptosISLR.Create(c)
 	s.audit.Append(evento(empresaID, actor, origen, "config.concepto_islr.crear", out.Codigo, out.Nombre))
 	return out, nil
+}
+
+// casiIgualUT compara dos pisos de tramo. Se comparan con tolerancia porque son
+// cifras con decimales que viajan por JSON: 2000.01 tecleado dos veces tiene que
+// chocar consigo mismo, y un error de coma flotante no puede colar un duplicado.
+func casiIgualUT(a, b float64) bool {
+	d := a - b
+	return d < 0.005 && d > -0.005
 }
 
 // ErrConceptoISLRDesconocido: la ficha de producto trae un código que el maestro
@@ -162,14 +177,22 @@ type SugerenciaRetencionISLR struct {
 // `fecha` es la del hecho (AAAA-MM-DD); vacía = hoy. Importa porque de ella sale
 // el valor de la UT: registrar en octubre una factura de agosto tiene que usar la
 // UT de agosto, no la de hoy.
-func (s *Service) SugerirRetencionISLR(empresaID, codigo, sujeto, fecha string, base float64) (SugerenciaRetencionISLR, error) {
-	c, ok := fiscal.ConceptoPara(s.ConceptosISLR(empresaID), codigo, sujeto)
+func (s *Service) SugerirRetencionISLR(empresaID, codigo, sujeto, fecha, terceroID string, base float64) (SugerenciaRetencionISLR, error) {
+	// El tramo de la escala depende del acumulado del ejercicio CON este pago
+	// dentro. Sin tercero el acumulado es 0 y sale el primer tramo, que es lo
+	// correcto para una consulta suelta: no hay a quién acumularle.
+	valorUTPrevio := s.ValorUTEn(empresaID, fecha)
+	primero, _ := fiscal.ConceptoPara(s.ConceptosISLR(empresaID), codigo, sujeto, 0)
+	acumulado := s.AcumuladoISLRUT(empresaID, terceroID, codigo, fecha, "") +
+		baseEnUT(primero.BaseGravable(base), valorUTPrevio)
+
+	c, ok := fiscal.ConceptoPara(s.ConceptosISLR(empresaID), codigo, sujeto, acumulado)
 	if !ok {
 		return SugerenciaRetencionISLR{}, ErrConceptoNoExiste
 	}
 	// Sin UT, un concepto que la requiere se calcularía con sustraendo y mínimo en
 	// cero: retendría de más y nadie lo notaría. Se dice que falta.
-	valorUT := s.ValorUTEn(empresaID, fecha)
+	valorUT := valorUTPrevio
 	if c.RequiereUT() && valorUT <= 0 {
 		return SugerenciaRetencionISLR{}, ErrUTNoCargada
 	}
@@ -179,6 +202,9 @@ func (s *Service) SugerirRetencionISLR(empresaID, codigo, sujeto, fecha string, 
 		Porcentaje: c.Porcentaje,
 		Sustraendo: round2(c.SustraendoEn(valorUT)), BaseMinima: round2(c.BaseMinimaEn(valorUT)),
 		ValorUT: valorUT,
-		Base:    base, Monto: monto, Retiene: monto > 0,
+		// La base que se informa es la GRAVABLE, no el pago: es la que multiplicada
+		// por la tarifa da el monto. Devolver el pago dejaría una cifra que no
+		// explica el número de al lado.
+		Base: round2(c.BaseGravable(base)), Monto: monto, Retiene: monto > 0,
 	}, nil
 }

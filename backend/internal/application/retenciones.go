@@ -87,18 +87,35 @@ type EntradaRetencion struct {
 	// Vacíos = comportamiento anterior (se teclea todo).
 	ConceptoCodigo string
 	Sujeto         string
+	// TerceroID es el proveedor (emitida) o el cliente (recibida). Hace falta para
+	// acumular el ejercicio y decidir el tramo de la Tarifa 2.
+	TerceroID string
+	// BaseUT lo RELLENA resolverConcepto: la base gravable convertida con la UT del
+	// día del comprobante. Se guarda para que el acumulado de los próximos no
+	// dependa de la UT que rija entonces.
+	BaseUT float64
 }
 
 // resolverConcepto completa la entrada con la tarifa del MAESTRO cuando se eligió
 // un concepto. Devuelve la entrada tal cual si no se eligió ninguno (el
 // comportamiento de antes) y falla si el concepto no existe — facturar con una
 // tarifa inventada es peor que no poder registrar la retención.
-func (s *Service) resolverConcepto(empresaID string, in EntradaRetencion) (EntradaRetencion, error) {
+func (s *Service) resolverConcepto(empresaID string, in EntradaRetencion, excluirDocID string) (EntradaRetencion, error) {
 	cod := strings.TrimSpace(in.ConceptoCodigo)
 	if cod == "" || s.conceptosISLR == nil {
 		return in, nil
 	}
-	c, ok := fiscal.ConceptoPara(s.ConceptosISLR(empresaID), cod, in.Sujeto)
+	// El tramo de la escala lo decide el acumulado del ejercicio CON este pago
+	// dentro. Para saber en qué tramo cae hace falta antes la porción gravable, y
+	// para eso el concepto: se resuelve en dos pasos, primero el tramo base y con
+	// él la porción, después el tramo definitivo.
+	valorUTPrevio := s.ValorUTEn(empresaID, in.Fecha)
+	base, _ := fiscal.ConceptoPara(s.ConceptosISLR(empresaID), cod, in.Sujeto, 0)
+	gravable := base.BaseGravable(in.Base)
+	acumulado := s.AcumuladoISLRUT(empresaID, in.TerceroID, cod, in.Fecha, excluirDocID) +
+		baseEnUT(gravable, valorUTPrevio)
+
+	c, ok := fiscal.ConceptoPara(s.ConceptosISLR(empresaID), cod, in.Sujeto, acumulado)
 	if !ok {
 		return in, ErrConceptoNoExiste
 	}
@@ -113,6 +130,10 @@ func (s *Service) resolverConcepto(empresaID string, in EntradaRetencion) (Entra
 	}
 	in.Porcentaje = c.Porcentaje
 	in.Sustraendo = round2(c.SustraendoEn(valorUT))
+	// La base del comprobante es la GRAVABLE, no el pago: es lo que se declara. En
+	// los conceptos que retienen sobre todo el pago —casi todos— no cambia nada.
+	in.Base = round2(c.BaseGravable(in.Base))
+	in.BaseUT = baseEnUT(in.Base, valorUT)
 	if strings.TrimSpace(in.Concepto) == "" {
 		in.Concepto = c.Nombre
 	}
@@ -228,7 +249,9 @@ func (s *Service) RegistrarRetencionRecibida(empresaID, actor, origen, documento
 	if _, existe := s.retenciones.ByDocumento(empresaID, fiscal.RetencionRecibida, impuesto, doc.ID); existe {
 		return fiscal.Retencion{}, ErrRetencionDuplicada
 	}
-	in, errConcepto := s.resolverConcepto(empresaID, in)
+	// Sin TerceroID: acá el agente de retención es el CLIENTE, y lo que él lleve
+	// acumulado no lo sabemos ni nos toca. Solo se registra lo que nos retuvo.
+	in, errConcepto := s.resolverConcepto(empresaID, in, doc.ID)
 	if errConcepto != nil {
 		return fiscal.Retencion{}, errConcepto
 	}
@@ -297,7 +320,14 @@ func (s *Service) RegistrarRetencionEmitida(empresaID, actor, origen, facturaCom
 	}
 	// Concepto del MAESTRO también acá: el comprobante que se le EMITE al
 	// proveedor es justo donde la tarifa de ISLR se equivocaba a mano.
-	in, errConcepto := s.resolverConcepto(empresaID, in)
+	// La fecha se fija ANTES de resolver el concepto: de ella salen la UT que
+	// convierte el sustraendo y el ejercicio que acumula. Resolviendo primero, un
+	// comprobante sin fecha se calculaba con la UT de hoy y se guardaba con otra.
+	if strings.TrimSpace(in.Fecha) == "" {
+		in.Fecha = ahora()[:10]
+	}
+	in.TerceroID = fc.ProveedorID
+	in, errConcepto := s.resolverConcepto(empresaID, in, fc.ID)
 	if errConcepto != nil {
 		return fiscal.Retencion{}, errConcepto
 	}
@@ -306,9 +336,6 @@ func (s *Service) RegistrarRetencionEmitida(empresaID, actor, origen, facturaCom
 		return fiscal.Retencion{}, err
 	}
 	// El número del comprobante lo GENERA el sistema (agente): correlativo AAAAMM.
-	if strings.TrimSpace(in.Fecha) == "" {
-		in.Fecha = ahora()[:10]
-	}
 	in.NumeroComprobante = s.numeroComprobanteRetencion(empresaID, impuesto, in.Fecha)
 
 	// Número mostrable de la factura del proveedor: su correlativo, y si no, el
@@ -326,7 +353,9 @@ func (s *Service) RegistrarRetencionEmitida(empresaID, actor, origen, facturaCom
 		DocumentoID: fc.ID, DocumentoNumero: numDoc,
 		NumeroComprobante: strings.TrimSpace(in.NumeroComprobante), Fecha: in.Fecha,
 		TerceroNombre: fc.ProveedorNombre, TerceroRIF: fc.ProveedorRIF,
-		Base: base, Concepto: concepto, Sustraendo: sustraendo,
+		TerceroID: fc.ProveedorID, ConceptoCodigo: strings.ToLower(strings.TrimSpace(in.ConceptoCodigo)),
+		BaseUT: in.BaseUT,
+		Base:   base, Concepto: concepto, Sustraendo: sustraendo,
 		Porcentaje: in.Porcentaje, MontoRetenido: monto,
 		Actor: actor, Registrada: ahora(),
 	})

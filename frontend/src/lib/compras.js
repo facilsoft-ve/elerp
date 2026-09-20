@@ -59,6 +59,10 @@ function basesIslrPorConcepto(lineas) {
 //     que también decide el sustraendo y la base mínima. `conceptos` son los del
 //     maestro (hook useConceptosISLR); sin ellos la proyección de ISLR queda en
 //     cero y la manda el servidor, que sí lo tiene.
+//   - `acumulados` es cuántas UT se le llevan retenidas al proveedor en el
+//     ejercicio, por código de concepto. Decide el TRAMO de la escala (Tarifa 2 de
+//     los no domiciliados). Vacío ⇒ primer tramo, que es lo correcto mientras no
+//     se haya elegido proveedor.
 //   - `valorUt` es el valor de la Unidad Tributaria del día. El maestro guarda el
 //     sustraendo y el mínimo en UT, no en bolívares. Sin UT, un concepto que la
 //     necesita NO se calcula con cero —eso retendría de más en silencio—: se marca
@@ -67,7 +71,7 @@ function basesIslrPorConcepto(lineas) {
 // `detalle` es el desglose por concepto y la fuente de verdad. Los escalares
 // describen el caso de un solo concepto; con varios, `islrPorcentaje` queda en 0
 // porque no existe una tarifa única que describa la mezcla.
-export function proyectarRetenciones({ empresa, perfil, conceptos = [], valorUt = 0, lineas = [], subtotal, iva, total }) {
+export function proyectarRetenciones({ empresa, perfil, conceptos = [], valorUt = 0, acumulados = {}, lineas = [], subtotal, iva, total }) {
   const r2 = (v) => Math.round(v * 100) / 100
   const out = {
     ivaPorcentaje: 0, ivaMonto: 0,
@@ -99,7 +103,18 @@ export function proyectarRetenciones({ empresa, perfil, conceptos = [], valorUt 
 
   for (const g of grupos) {
     if (!(g.base > 0.004)) continue
-    const c = activos.find((x) => String(x.codigo).toLowerCase() === g.codigo && x.sujeto === perfil.islrSujeto)
+    // Tramo de la escala: el de DesdeAcumuladoUT más alto que no supere al
+    // acumulado del ejercicio CON este pago dentro. Espejo de fiscal.ConceptoPara.
+    const tramos = activos.filter((x) => String(x.codigo).toLowerCase() === g.codigo && x.sujeto === perfil.islrSujeto)
+    const pctBaseDe = (x) => (Number(x?.porcentajeBase) > 0 ? Number(x.porcentajeBase) : 100)
+    const primero = tramos.slice().sort((a, b) => (a.desdeAcumuladoUt || 0) - (b.desdeAcumuladoUt || 0))[0]
+    const gravablePrevio = g.base * pctBaseDe(primero) / 100
+    const acumulado = (Number(acumulados[g.codigo]) || 0) + (valorUt > 0 ? gravablePrevio / valorUt : 0)
+    const alcanzables = tramos.filter((x) => (Number(x.desdeAcumuladoUt) || 0) <= acumulado)
+    // Sin tramo alcanzable —una escala mal cargada, sin piso en 0— se cae al más
+    // bajo: retener por debajo es preferible a no retener y que nadie se entere.
+    const c = (alcanzables.length ? alcanzables : tramos)
+      .slice().sort((a, b) => (b.desdeAcumuladoUt || 0) - (a.desdeAcumuladoUt || 0))[alcanzables.length ? 0 : tramos.length - 1]
     if (!c) {
       // El maestro no tiene tarifa de ese concepto para este tipo de sujeto. Se
       // deja constancia con monto 0: callarlo haría que una tabla incompleta se
@@ -109,12 +124,15 @@ export function proyectarRetenciones({ empresa, perfil, conceptos = [], valorUt 
       continue
     }
     const porcentaje = Number(c.porcentaje) || 0
+    // No todo el pago forma la base en algunos conceptos (90 % en honorarios al
+    // exterior). Aplicar la tarifa al total retendría de más.
+    const gravable = g.base * pctBaseDe(c) / 100
     const sustraendoUt = Number(c.sustraendoUt) || 0
     const baseMinimaUt = Number(c.baseMinimaUt) || 0
     if ((sustraendoUt > 0 || baseMinimaUt > 0) && !(valorUt > 0)) {
       // El concepto está en unidades tributarias y no hay UT cargada. Calcular con
       // cero anularía el sustraendo y retendría DE MÁS, sin fallar nada.
-      out.detalle.push({ codigo: c.codigo, concepto: c.nombre, base: g.base, porcentaje, sustraendo: 0, monto: 0, impedimento: 'sin_ut' })
+      out.detalle.push({ codigo: c.codigo, concepto: c.nombre, base: r2(gravable), porcentaje, sustraendo: 0, monto: 0, impedimento: 'sin_ut' })
       continue
     }
     // Base mínima: por debajo de ella el concepto no retiene, y eso NO es lo mismo
@@ -122,11 +140,13 @@ export function proyectarRetenciones({ empresa, perfil, conceptos = [], valorUt 
     // sustraendo sigue a la tarifa (UT × unidades × porcentaje).
     const sustraendoBs = sustraendoUt * valorUt * porcentaje / 100
     let monto = 0
-    if (g.base >= baseMinimaUt * valorUt) {
-      const bruto = g.base * porcentaje / 100 - sustraendoBs
+    if (gravable >= baseMinimaUt * valorUt) {
+      const bruto = gravable * porcentaje / 100 - sustraendoBs
       monto = bruto > 0 ? r2(bruto) : 0
     }
-    out.detalle.push({ codigo: c.codigo, concepto: c.nombre, base: g.base, porcentaje, sustraendo: r2(sustraendoBs), monto })
+    // La base que se informa es la GRAVABLE: con el neto de las líneas, el monto
+    // no se podría rehacer a mano.
+    out.detalle.push({ codigo: c.codigo, concepto: c.nombre, base: r2(gravable), porcentaje, sustraendo: r2(sustraendoBs), monto })
     out.islrMonto = r2(out.islrMonto + monto)
   }
 

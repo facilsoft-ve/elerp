@@ -48,7 +48,7 @@ func TestConceptosISLR_SeSiembranAlPrimerUso(t *testing.T) {
 // LA función del maestro: elegir el concepto y que la tarifa venga con él.
 func TestSugerirRetencionISLR_ResuelveLaTarifa(t *testing.T) {
 	svc := servicioConConceptos(t)
-	sug, err := svc.SugerirRetencionISLR(empDemo, "honorarios", fiscal.SujetoNaturalResidente, "", 10000)
+	sug, err := svc.SugerirRetencionISLR(empDemo, "honorarios", fiscal.SujetoNaturalResidente, "", "", 10000)
 	if err != nil {
 		t.Fatalf("sugerir: %v", err)
 	}
@@ -71,8 +71,8 @@ func TestSugerirRetencionISLR_ResuelveLaTarifa(t *testing.T) {
 // razón de que el maestro lleve el tipo de sujeto.
 func TestSugerirRetencionISLR_DistingueElSujeto(t *testing.T) {
 	svc := servicioConConceptos(t)
-	nat, _ := svc.SugerirRetencionISLR(empDemo, "honorarios", fiscal.SujetoNaturalResidente, "", 10000)
-	jur, _ := svc.SugerirRetencionISLR(empDemo, "honorarios", fiscal.SujetoJuridicaDomiciliada, "", 10000)
+	nat, _ := svc.SugerirRetencionISLR(empDemo, "honorarios", fiscal.SujetoNaturalResidente, "", "", 10000)
+	jur, _ := svc.SugerirRetencionISLR(empDemo, "honorarios", fiscal.SujetoJuridicaDomiciliada, "", "", 10000)
 	if nat.Porcentaje == jur.Porcentaje {
 		t.Errorf("natural y jurídica no pueden dar la misma tarifa: %v", nat.Porcentaje)
 	}
@@ -80,7 +80,7 @@ func TestSugerirRetencionISLR_DistingueElSujeto(t *testing.T) {
 
 func TestSugerirRetencionISLR_ConceptoDesconocido(t *testing.T) {
 	svc := servicioConConceptos(t)
-	if _, err := svc.SugerirRetencionISLR(empDemo, "no-existe", fiscal.SujetoNaturalResidente, "", 100); !errors.Is(err, application.ErrConceptoNoExiste) {
+	if _, err := svc.SugerirRetencionISLR(empDemo, "no-existe", fiscal.SujetoNaturalResidente, "", "", 100); !errors.Is(err, application.ErrConceptoNoExiste) {
 		t.Fatalf("se esperaba ErrConceptoNoExiste, se obtuvo: %v", err)
 	}
 }
@@ -129,7 +129,7 @@ func TestGuardarConceptoISLR_EditarCambiaLoNuevo(t *testing.T) {
 	if _, err := svc.GuardarConceptoISLR(empDemo, actorA, origenTst, honorarios); err != nil {
 		t.Fatalf("editar: %v", err)
 	}
-	sug, _ := svc.SugerirRetencionISLR(empDemo, "honorarios", fiscal.SujetoNaturalResidente, "", 10000)
+	sug, _ := svc.SugerirRetencionISLR(empDemo, "honorarios", fiscal.SujetoNaturalResidente, "", "", 10000)
 	// 10.000 × 6 % = 600, menos el sustraendo, que SIGUE a la tarifa por la fórmula
 	// del reglamento (83,33 UT × 1 × 6 % = 5,00).
 	if !casi(sug.Monto, 595) {
@@ -140,7 +140,7 @@ func TestGuardarConceptoISLR_EditarCambiaLoNuevo(t *testing.T) {
 func TestConceptosISLR_AisladosPorEmpresa(t *testing.T) {
 	svc := servicioConConceptos(t)
 	svc.ConceptosISLR(empDemo)
-	if _, err := svc.SugerirRetencionISLR("emp_otra", "honorarios", fiscal.SujetoNaturalResidente, "", 100); err == nil {
+	if _, err := svc.SugerirRetencionISLR("emp_otra", "honorarios", fiscal.SujetoNaturalResidente, "", "", 100); err == nil {
 		// Otra empresa siembra su PROPIA tabla, no ve la ajena: que resuelva es
 		// correcto, pero tiene que ser con sus filas.
 		propios := svc.ConceptosISLR("emp_otra")
