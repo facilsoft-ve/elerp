@@ -52,15 +52,30 @@ type RetencionISLRProyectada struct {
 	Concepto   string  `json:"concepto" bson:"concepto"`
 	Base       float64 `json:"base" bson:"base"`
 	Porcentaje float64 `json:"porcentaje" bson:"porcentaje"`
+	// Sustraendo es el de la tabla YA CONVERTIDO A BOLÍVARES con la UT del día. El
+	// maestro lo guarda en unidades tributarias; de la orden hacia abajo todo va en
+	// bolívares, para que el documento se explique sin tener que resolver nada.
 	Sustraendo float64 `json:"sustraendo" bson:"sustraendo"`
 	Monto      float64 `json:"monto" bson:"monto"`
-	// SinTarifa marca el concepto que el maestro NO tiene cargado para el tipo de
-	// sujeto de este proveedor (p. ej. un flete comprado a una persona natural
-	// cuando la tabla solo trae la tarifa de jurídica). La fila se guarda con monto
-	// 0 y esta marca a propósito: si se omitiera, una configuración incompleta se
-	// vería igual que «a este proveedor no se le retiene», y nadie la buscaría.
-	SinTarifa bool `json:"sinTarifa,omitempty" bson:"sintarifa,omitempty"`
+	// Impedimento explica por qué este concepto NO pudo retener. Vacío = retuvo
+	// normalmente. La fila se guarda igual, con monto 0: si se omitiera, una
+	// configuración incompleta se vería idéntica a «a este proveedor no se le
+	// retiene», y nadie iría a buscarla.
+	Impedimento string `json:"impedimento,omitempty" bson:"impedimento,omitempty"`
 }
+
+// Causas por las que un concepto no puede retener. Son de CONFIGURACIÓN, no de
+// negocio: las dos se arreglan cargando algo que falta.
+const (
+	// ImpedimentoSinTarifa: el maestro no tiene ese concepto para el tipo de sujeto
+	// del proveedor (un flete comprado a una persona natural cuando la tabla solo
+	// trae la tarifa de jurídica).
+	ImpedimentoSinTarifa = "sin_tarifa"
+	// ImpedimentoSinUT: el concepto tiene sustraendo o mínimo en unidades
+	// tributarias y no hay UT cargada para esa fecha. Calcular con la UT en cero
+	// anularía el sustraendo y retendría DE MÁS, sin fallar en ningún lado.
+	ImpedimentoSinUT = "sin_ut"
+)
 
 // OrdenCompra es un pedido de aprovisionamiento a un proveedor.
 type OrdenCompra struct {

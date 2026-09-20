@@ -183,6 +183,11 @@ type Service struct {
 	// su sustraendo. Se cablea con ConConceptosISLR; sin él, el concepto y el
 	// porcentaje se siguen tecleando en cada comprobante (como antes).
 	conceptosISLR fiscal.ConceptoISLRRepo
+	// uts es el histórico del valor de la Unidad Tributaria, del que salen los
+	// sustraendos y los mínimos de ISLR en bolívares. Se cablea con
+	// ConUnidadesTributarias; sin él, los conceptos que la requieren no calculan y
+	// la orden lo dice, en vez de retener de más con la UT en cero.
+	uts fiscal.UnidadTributariaRepo
 	// sedes da acceso a las COORDENADAS del local, para la presencia estricta
 	// (ver presencia.go). Se cablea con ConSedes; sin él la verificación de
 	// presencia no aplica y todo se comporta como antes.

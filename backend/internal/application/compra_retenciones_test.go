@@ -80,13 +80,16 @@ func TestOC_LaTarifaDeISLRSaleDelMaestro(t *testing.T) {
 
 	o := ocDe(t, svc, prov.ID, sku, nil)
 	casiEq(t, o.RetIVA, 160, "el % propio del proveedor (100%) gana al de la empresa")
-	// Honorarios a persona NATURAL residente: 3 % en el maestro.
+	// Honorarios a persona NATURAL residente: 3 % en el maestro, MENOS el
+	// sustraendo de la tabla (83,33 UT × 1 × 3 % = 2,50). El sustraendo no es un
+	// detalle: sin él se le retiene de más en cada factura.
 	casiEq(t, o.PctISLR, 3, "la tarifa la pone el maestro, no la ficha del proveedor")
-	casiEq(t, o.RetISLR, 30, "retención de ISLR (1.000 × 3%)")
+	casiEq(t, o.Sustraendo, 2.5, "el sustraendo sale del maestro, convertido con la UT")
+	casiEq(t, o.RetISLR, 27.5, "retención de ISLR (1.000 × 3% − 2,50 de sustraendo)")
 	if o.ConceptoISLR != "Honorarios profesionales" {
 		t.Errorf("la orden guarda el nombre del concepto del maestro, se obtuvo %q", o.ConceptoISLR)
 	}
-	casiEq(t, o.Neto, 970, "neto a pagar (1.160 − 160 − 30)")
+	casiEq(t, o.Neto, 972.5, "neto a pagar (1.160 − 160 − 27,50)")
 }
 
 // TestOC_ElSujetoDecideLaTarifa es la razón de ser del maestro: el MISMO concepto
@@ -105,7 +108,7 @@ func TestOC_ElSujetoDecideLaTarifa(t *testing.T) {
 		ConceptoISLRCodigo: "honorarios", SujetoISLR: fiscal.SujetoJuridicaDomiciliada,
 	})
 
-	casiEq(t, ocDe(t, svc, natural.ID, sku, nil).RetISLR, 30, "honorarios a natural residente: 3%")
+	casiEq(t, ocDe(t, svc, natural.ID, sku, nil).RetISLR, 27.5, "honorarios a natural residente: 3% menos sustraendo")
 	casiEq(t, ocDe(t, svc, juridica.ID, sku, nil).RetISLR, 50, "el MISMO concepto a jurídica: 5%")
 }
 
@@ -119,7 +122,7 @@ func TestOC_SustraendoNoDejaLaRetencionNegativa(t *testing.T) {
 	// del maestro, y la proyección la respeta porque el cálculo lo hace el concepto.
 	if _, err := svc.GuardarConceptoISLR(empDemo, actorA, origenTst, fiscal.ConceptoISLR{
 		Codigo: "consultoria_menor", Nombre: "Consultoría de monto menor",
-		Sujeto: fiscal.SujetoJuridicaDomiciliada, Porcentaje: 5, BaseMinima: 5000, Activo: true,
+		Sujeto: fiscal.SujetoJuridicaDomiciliada, Porcentaje: 5, BaseMinimaUT: 5000, Activo: true,
 	}); err != nil {
 		t.Fatalf("crear concepto con base mínima: %v", err)
 	}
@@ -128,7 +131,7 @@ func TestOC_SustraendoNoDejaLaRetencionNegativa(t *testing.T) {
 		RetieneISLR: true, ConceptoISLRCodigo: "consultoria_menor", SujetoISLR: fiscal.SujetoJuridicaDomiciliada,
 	})
 
-	o := ocDe(t, svc, prov.ID, sku, nil) // base 1.000, por debajo del mínimo de 5.000
+	o := ocDe(t, svc, prov.ID, sku, nil) // base 1.000, por debajo del mínimo (5.000 UT × 1)
 	casiEq(t, o.RetISLR, 0, "por debajo de la base mínima del concepto no se retiene")
 	casiEq(t, o.Neto, 1160, "sin retención, el neto es el total")
 }

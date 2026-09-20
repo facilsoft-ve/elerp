@@ -444,8 +444,15 @@ export const api = {
   // resuelve cuánto retener EN EL SERVIDOR: la pantalla muestra, no calcula —
   // dos implementaciones de la misma fórmula terminan discrepando.
   conceptosISLR: () => request('/api/config/conceptos-islr'),
-  sugerenciaRetencionISLR: ({ codigo, sujeto, base }) =>
-    request(`/api/config/conceptos-islr/sugerencia?codigo=${encodeURIComponent(codigo)}&sujeto=${encodeURIComponent(sujeto)}&base=${encodeURIComponent(base)}`),
+  // `fecha` es la del hecho (vacía = hoy): de ella sale el valor de la UT, así que
+  // registrar en octubre una factura de agosto usa la UT de agosto.
+  sugerenciaRetencionISLR: ({ codigo, sujeto, base, fecha = '' }) =>
+    request(`/api/config/conceptos-islr/sugerencia?codigo=${encodeURIComponent(codigo)}&sujeto=${encodeURIComponent(sujeto)}&base=${encodeURIComponent(base)}&fecha=${encodeURIComponent(fecha)}`),
+  guardarConceptoISLR: (body) => request('/api/config/conceptos-islr', { method: 'POST', body: JSON.stringify(body) }),
+  // UNIDAD TRIBUTARIA: de ella salen los sustraendos y mínimos de ISLR en
+  // bolívares. Solo anexado — una UT pasada no se corrige, se carga la siguiente.
+  unidadesTributarias: () => request('/api/config/unidades-tributarias'),
+  cargarUT: (body) => request('/api/config/unidades-tributarias', { method: 'POST', body: JSON.stringify(body) }),
   crearAlicuota: (body) => request('/api/config/alicuotas', { method: 'POST', body: JSON.stringify(body) }),
   actualizarAlicuota: (id, body) => request(`/api/config/alicuotas/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   crearDispositivo: (body) => request('/api/config/dispositivos', { method: 'POST', body: JSON.stringify(body) }),

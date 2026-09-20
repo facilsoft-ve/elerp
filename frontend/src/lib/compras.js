@@ -59,11 +59,15 @@ function basesIslrPorConcepto(lineas) {
 //     que también decide el sustraendo y la base mínima. `conceptos` son los del
 //     maestro (hook useConceptosISLR); sin ellos la proyección de ISLR queda en
 //     cero y la manda el servidor, que sí lo tiene.
+//   - `valorUt` es el valor de la Unidad Tributaria del día. El maestro guarda el
+//     sustraendo y el mínimo en UT, no en bolívares. Sin UT, un concepto que la
+//     necesita NO se calcula con cero —eso retendría de más en silencio—: se marca
+//     con impedimento y se explica.
 //
 // `detalle` es el desglose por concepto y la fuente de verdad. Los escalares
 // describen el caso de un solo concepto; con varios, `islrPorcentaje` queda en 0
 // porque no existe una tarifa única que describa la mezcla.
-export function proyectarRetenciones({ empresa, perfil, conceptos = [], lineas = [], subtotal, iva, total }) {
+export function proyectarRetenciones({ empresa, perfil, conceptos = [], valorUt = 0, lineas = [], subtotal, iva, total }) {
   const r2 = (v) => Math.round(v * 100) / 100
   const out = {
     ivaPorcentaje: 0, ivaMonto: 0,
@@ -101,19 +105,28 @@ export function proyectarRetenciones({ empresa, perfil, conceptos = [], lineas =
       // deja constancia con monto 0: callarlo haría que una tabla incompleta se
       // viera igual que «a este proveedor no se le retiene».
       const nombre = activos.find((x) => String(x.codigo).toLowerCase() === g.codigo)?.nombre || g.codigo
-      out.detalle.push({ codigo: g.codigo, concepto: nombre, base: g.base, porcentaje: 0, sustraendo: 0, monto: 0, sinTarifa: true })
+      out.detalle.push({ codigo: g.codigo, concepto: nombre, base: g.base, porcentaje: 0, sustraendo: 0, monto: 0, impedimento: 'sin_tarifa' })
+      continue
+    }
+    const porcentaje = Number(c.porcentaje) || 0
+    const sustraendoUt = Number(c.sustraendoUt) || 0
+    const baseMinimaUt = Number(c.baseMinimaUt) || 0
+    if ((sustraendoUt > 0 || baseMinimaUt > 0) && !(valorUt > 0)) {
+      // El concepto está en unidades tributarias y no hay UT cargada. Calcular con
+      // cero anularía el sustraendo y retendría DE MÁS, sin fallar nada.
+      out.detalle.push({ codigo: c.codigo, concepto: c.nombre, base: g.base, porcentaje, sustraendo: 0, monto: 0, impedimento: 'sin_ut' })
       continue
     }
     // Base mínima: por debajo de ella el concepto no retiene, y eso NO es lo mismo
-    // que «no aplica». Misma regla que ConceptoISLR.Retener en el servidor.
-    const porcentaje = Number(c.porcentaje) || 0
-    const sustraendo = r2(Number(c.sustraendo) || 0)
+    // que «no aplica». Misma regla que ConceptoISLR.Retener en el servidor: el
+    // sustraendo sigue a la tarifa (UT × unidades × porcentaje).
+    const sustraendoBs = sustraendoUt * valorUt * porcentaje / 100
     let monto = 0
-    if (g.base >= (Number(c.baseMinima) || 0)) {
-      const bruto = g.base * porcentaje / 100 - (Number(c.sustraendo) || 0)
+    if (g.base >= baseMinimaUt * valorUt) {
+      const bruto = g.base * porcentaje / 100 - sustraendoBs
       monto = bruto > 0 ? r2(bruto) : 0
     }
-    out.detalle.push({ codigo: c.codigo, concepto: c.nombre, base: g.base, porcentaje, sustraendo, monto })
+    out.detalle.push({ codigo: c.codigo, concepto: c.nombre, base: g.base, porcentaje, sustraendo: r2(sustraendoBs), monto })
     out.islrMonto = r2(out.islrMonto + monto)
   }
 

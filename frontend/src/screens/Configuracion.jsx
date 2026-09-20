@@ -10,6 +10,7 @@ import { useUI } from '../context/UIContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
 import { invalidarMaestro } from '../components/alicuota.jsx'
+import { invalidarMaestroConceptos, invalidarUT, SUJETOS } from '../components/conceptoIslr.jsx'
 import { SelectorModelo, NotaCatalogo } from '../components/dispositivo.jsx'
 import { MapaSede, BotonMiUbicacion } from '../components/mapaSede.jsx'
 import { fechaCortaVE, explicarFallo } from '../components/tasa.jsx'
@@ -1226,6 +1227,8 @@ function Impuestos() {
   return (
     <div className="max-w-3xl space-y-4">
       <MaestroAlicuotas puedeEditar={puedeEditar} />
+      <MaestroUT puedeEditar={puedeEditar} />
+      <MaestroConceptosISLR puedeEditar={puedeEditar} />
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4 space-y-3.5">
         <div className="text-[13px] font-semibold">Tasas generales de la empresa</div>
         <div className="text-[12.5px] text-slate-500 dark:text-slate-400">
@@ -1445,6 +1448,333 @@ function MaestroAlicuotas({ puedeEditar }) {
           onGuardado={(msg) => { setForm(null); recargar(); toast({ title: 'Maestro actualizado', body: msg }) }} />
       ) : null}
     </div>
+  )
+}
+
+/* --- Unidad Tributaria y conceptos de ISLR ---------------------------------
+ *
+ * Van juntos porque no se entienden por separado: el maestro guarda los
+ * sustraendos y los mínimos en UNIDADES TRIBUTARIAS, y sin el valor de la UT no
+ * se pueden convertir a bolívares. Cargar uno sin el otro deja el cálculo a
+ * medias, y la orden de compra lo dice en vez de inventar un número.
+ */
+
+function MaestroUT({ puedeEditar }) {
+  const toast = useToast()
+  const [datos, setDatos] = useState(null)
+  const [error, setError] = useState('')
+  const [form, setForm] = useState(false)
+
+  const cargar = useCallback(() => {
+    setError('')
+    api.unidadesTributarias()
+      .then(setDatos)
+      .catch((e) => { setDatos({ unidadesTributarias: [] }); setError(e?.message || 'No se pudo cargar la unidad tributaria.') })
+  }, [])
+  useEffect(() => { cargar() }, [cargar])
+
+  const recargar = () => { invalidarUT(); cargar() }
+  const filas = datos?.unidadesTributarias || []
+  const hayVigente = !!datos?.hayVigente
+
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <div className="text-[13px] font-semibold">Unidad Tributaria</div>
+          <div className="text-[12.5px] text-slate-500 dark:text-slate-400 mt-0.5">
+            El reglamento expresa los sustraendos y los mínimos de ISLR en <strong>UT</strong>, no en bolívares.
+            Cargar la UT nueva actualiza toda la tabla de conceptos de una vez, sin tocar una sola fila.
+            Es un <strong>histórico</strong>: una UT pasada no se corrige, se carga la siguiente.
+          </div>
+        </div>
+        {puedeEditar ? (
+          <Button size="sm" icon={<Icon.Plus size={15} />} onClick={() => setForm(true)}>Cargar UT</Button>
+        ) : null}
+      </div>
+
+      {datos && !hayVigente ? (
+        <div className="rounded-lg bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-900/40 px-3 py-2.5 text-[12px] text-amber-900 dark:text-amber-200 flex gap-2.5 items-start mb-3">
+          <Icon.CircleAlert size={15} className="mt-0.5 shrink-0" />
+          <span>
+            <strong>No hay una UT vigente cargada.</strong> Los conceptos de ISLR con sustraendo —los de las
+            personas naturales— no se pueden calcular: la orden de compra lo avisa en vez de retener de más.
+            Cárgala antes de emitir retenciones.
+          </span>
+        </div>
+      ) : null}
+
+      {error ? (
+        <Empty icon={<Icon.CircleAlert size={22} />} title="No se pudo cargar" body={error}
+          cta={<Button onClick={cargar} icon={<Icon.Refresh size={15} />}>Reintentar</Button>} />
+      ) : datos === null ? (
+        <TableSkeleton rows={3} cols={3} />
+      ) : filas.length === 0 ? (
+        <div className="text-[12.5px] text-slate-500 dark:text-slate-400 py-2">
+          Todavía no hay ningún valor cargado.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                <th className="py-2 pr-3 font-medium">Rige desde</th>
+                <th className="py-2 pr-3 font-medium text-right">Valor</th>
+                <th className="py-2 pr-3 font-medium">Fuente</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map((u, i) => (
+                <tr key={u.id} className={`border-b border-slate-100 dark:border-slate-800/70 ${i === 0 ? '' : 'opacity-60'}`}>
+                  <td className="py-2 pr-3 num text-[12.5px] whitespace-nowrap">
+                    {u.vigenteDesde}
+                    {i === 0 && hayVigente ? <Badge size="sm" color="teal" className="ml-1.5">rige hoy</Badge> : null}
+                  </td>
+                  <td className="py-2 pr-3 text-right num text-[12.5px]">{fmtCurrency(u.valor, 'VES')}</td>
+                  <td className="py-2 pr-3 text-[12px] text-slate-500">{u.fuente || <span className="text-slate-400">—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {form ? (
+        <UTForm onCerrar={() => setForm(false)}
+          onGuardado={(msg) => { setForm(false); recargar(); toast({ title: 'Unidad tributaria cargada', body: msg }) }} />
+      ) : null}
+    </div>
+  )
+}
+
+function UTForm({ onCerrar, onGuardado }) {
+  const [f, setF] = useState({ valor: '', vigenteDesde: new Date().toISOString().slice(0, 10), fuente: '' })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const set = (k, v) => { setF((s) => ({ ...s, [k]: v })); setError('') }
+
+  const guardar = async () => {
+    if (!(Number(f.valor) > 0)) { setError('El valor de la UT tiene que ser mayor que cero.'); return }
+    if (!f.vigenteDesde) { setError('Indica desde cuándo rige.'); return }
+    setBusy(true); setError('')
+    try {
+      await api.cargarUT({ valor: Number(f.valor), vigenteDesde: f.vigenteDesde, fuente: f.fuente.trim() })
+      onGuardado(`Bs ${f.valor} desde el ${f.vigenteDesde}.`)
+    } catch (e) {
+      setError(e?.message || 'No se pudo cargar.')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <Modal open title="Cargar unidad tributaria" onClose={onCerrar}
+      footer={<>
+        <Button variant="ghost" onClick={onCerrar}>Cancelar</Button>
+        <Button onClick={guardar} loading={busy}>Cargar</Button>
+      </>}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Valor en bolívares" required>
+            <Input value={f.valor} inputMode="decimal" className="num"
+              onChange={(e) => set('valor', e.target.value)} placeholder="Ej: 40" />
+          </Field>
+          <Field label="Rige desde" required hint="la fecha de la providencia">
+            <Input type="date" value={f.vigenteDesde} onChange={(e) => set('vigenteDesde', e.target.value)} />
+          </Field>
+        </div>
+        <Field label="Fuente" hint="opcional · para poder defender el número">
+          <Input value={f.fuente} onChange={(e) => set('fuente', e.target.value)}
+            placeholder="Gaceta Oficial N.º …" />
+        </Field>
+        <div className="text-[11.5px] text-slate-500 dark:text-slate-400">
+          Se <strong>anexa</strong> al histórico: la UT anterior se conserva para que los comprobantes ya
+          emitidos se sigan explicando con la que regía su día.
+        </div>
+        {error ? <div className="text-[12px] text-[#B3362C] dark:text-red-400">{error}</div> : null}
+      </div>
+    </Modal>
+  )
+}
+
+function MaestroConceptosISLR({ puedeEditar }) {
+  const toast = useToast()
+  const [filas, setFilas] = useState(null)
+  const [error, setError] = useState('')
+  const [form, setForm] = useState(null) // null | {} (nuevo) | concepto (editar)
+
+  const cargar = useCallback(() => {
+    setError('')
+    api.conceptosISLR()
+      .then((r) => setFilas(r?.conceptos || []))
+      .catch((e) => { setFilas([]); setError(e?.message || 'No se pudo cargar el maestro de conceptos.') })
+  }, [])
+  useEffect(() => { cargar() }, [cargar])
+
+  const recargar = () => { invalidarMaestroConceptos(); cargar() }
+  const etiquetaSujeto = (id) => SUJETOS.find((x) => x.id === id)?.label || id
+
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <div className="text-[13px] font-semibold">Conceptos de retención de ISLR</div>
+          <div className="text-[12.5px] text-slate-500 dark:text-slate-400 mt-0.5">
+            La tabla del reglamento. El <strong>producto</strong> apunta a un concepto —qué se paga— y el
+            <strong> proveedor</strong> declara qué tipo de persona es —a quién se le paga—: de ese par sale la
+            tarifa, sin teclear porcentajes.
+          </div>
+        </div>
+        {puedeEditar ? (
+          <Button size="sm" icon={<Icon.Plus size={15} />} onClick={() => setForm({})}>Nuevo concepto</Button>
+        ) : null}
+      </div>
+
+      <div className="rounded-lg bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-900/40 px-3 py-2.5 text-[12px] text-amber-900 dark:text-amber-200 flex gap-2.5 items-start mb-3">
+        <Icon.CircleAlert size={15} className="mt-0.5 shrink-0" />
+        <span>
+          La tabla que trae el sistema es un <strong>punto de partida</strong>, no una fuente legal: revísala
+          contra el reglamento vigente antes de emitir retenciones. Las tarifas de los sujetos
+          <strong> no domiciliados</strong> no vienen cargadas a propósito — un hueco se ve, un número inventado no.
+        </span>
+      </div>
+
+      {error ? (
+        <Empty icon={<Icon.CircleAlert size={22} />} title="No se pudo cargar el maestro" body={error}
+          cta={<Button onClick={cargar} icon={<Icon.Refresh size={15} />}>Reintentar</Button>} />
+      ) : filas === null ? (
+        <TableSkeleton rows={5} cols={5} />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                <th className="py-2 pr-3 font-medium">Concepto</th>
+                <th className="py-2 pr-3 font-medium">A quién se le retiene</th>
+                <th className="py-2 pr-3 font-medium text-right">Tarifa</th>
+                <th className="py-2 pr-3 font-medium text-right">Sustraendo</th>
+                <th className="py-2 pr-3 font-medium text-right">Mínimo</th>
+                {puedeEditar ? <th className="py-2 pr-3 font-medium text-right">Acciones</th> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map((c) => (
+                <tr key={c.id} className={`border-b border-slate-100 dark:border-slate-800/70 ${c.activo ? '' : 'opacity-55'}`}>
+                  <td className="py-2 pr-3 text-[12.5px]">
+                    {c.nombre}
+                    <span className="block num text-[11px] text-slate-400">{c.codigo}</span>
+                  </td>
+                  <td className="py-2 pr-3 text-[12px] text-slate-500">{etiquetaSujeto(c.sujeto)}</td>
+                  <td className="py-2 pr-3 text-right num text-[12.5px]">{fmtNum(c.porcentaje, 2)} %</td>
+                  {/* En UT, que es como lo expresa el reglamento: los bolívares
+                      salen de multiplicarlo por la UT del día del documento. */}
+                  <td className="py-2 pr-3 text-right num text-[12.5px]">
+                    {c.sustraendoUt > 0 ? `${fmtNum(c.sustraendoUt, 2)} UT` : <span className="text-slate-400">—</span>}
+                  </td>
+                  <td className="py-2 pr-3 text-right num text-[12.5px]">
+                    {c.baseMinimaUt > 0 ? `${fmtNum(c.baseMinimaUt, 2)} UT` : <span className="text-slate-400">—</span>}
+                  </td>
+                  {puedeEditar ? (
+                    <td className="py-2 pr-3 text-right whitespace-nowrap">
+                      <Button size="sm" variant="ghost" icon={<Icon.Pencil size={14} />}
+                        onClick={() => setForm(c)}>Editar</Button>
+                    </td>
+                  ) : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {form ? (
+        <ConceptoISLRForm concepto={form.id ? form : null} onCerrar={() => setForm(null)}
+          onGuardado={(msg) => { setForm(null); recargar(); toast({ title: 'Maestro actualizado', body: msg }) }} />
+      ) : null}
+    </div>
+  )
+}
+
+function ConceptoISLRForm({ concepto, onCerrar, onGuardado }) {
+  const edicion = !!concepto
+  const [f, setF] = useState(() => ({
+    codigo: concepto?.codigo || '',
+    nombre: concepto?.nombre || '',
+    sujeto: concepto?.sujeto || SUJETOS[0].id,
+    porcentaje: String(concepto?.porcentaje ?? ''),
+    sustraendoUt: String(concepto?.sustraendoUt ?? ''),
+    baseMinimaUt: String(concepto?.baseMinimaUt ?? ''),
+    activo: concepto ? concepto.activo !== false : true,
+  }))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const set = (k, v) => { setF((s) => ({ ...s, [k]: v })); setError('') }
+
+  const guardar = async () => {
+    if (!f.codigo.trim() || !f.nombre.trim()) { setError('El código y el nombre son obligatorios.'); return }
+    if (!(Number(f.porcentaje) > 0)) { setError('Una tarifa en cero no retiene nada y se ve configurada.'); return }
+    setBusy(true); setError('')
+    try {
+      await api.guardarConceptoISLR({
+        id: concepto?.id || '',
+        codigo: f.codigo.trim(), nombre: f.nombre.trim(), sujeto: f.sujeto,
+        porcentaje: Number(f.porcentaje),
+        sustraendoUt: Number(f.sustraendoUt) || 0,
+        baseMinimaUt: Number(f.baseMinimaUt) || 0,
+        activo: f.activo,
+      })
+      onGuardado(`${f.nombre.trim()} · ${fmtNum(Number(f.porcentaje), 2)} %`)
+    } catch (e) {
+      setError(e?.message || 'No se pudo guardar.')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <Modal open title={edicion ? 'Editar concepto' : 'Nuevo concepto de ISLR'} onClose={onCerrar}
+      footer={<>
+        <Button variant="ghost" onClick={onCerrar}>Cancelar</Button>
+        <Button onClick={guardar} loading={busy}>Guardar</Button>
+      </>}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Código" required hint="lo guarda el producto">
+            <Input value={f.codigo} disabled={edicion} className="num"
+              onChange={(e) => set('codigo', e.target.value)} placeholder="honorarios" />
+          </Field>
+          <Field label="Nombre" required>
+            <Input value={f.nombre} onChange={(e) => set('nombre', e.target.value)}
+              placeholder="Honorarios profesionales" />
+          </Field>
+        </div>
+        {/* El MISMO código con otro sujeto es otra fila, y es justo para lo que
+            existe la tabla: una tarifa por tipo de persona. */}
+        <Field label="A quién se le retiene" required hint="el mismo concepto puede tener una tarifa por cada uno">
+          <Select value={f.sujeto} disabled={edicion} onChange={(e) => set('sujeto', e.target.value)}>
+            {SUJETOS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+          </Select>
+        </Field>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Tarifa %" required>
+            <Input value={f.porcentaje} inputMode="decimal" className="num"
+              onChange={(e) => set('porcentaje', e.target.value)} placeholder="3" />
+          </Field>
+          <Field label="Sustraendo (UT)" hint="0 en jurídicas">
+            <Input value={f.sustraendoUt} inputMode="decimal" className="num"
+              onChange={(e) => set('sustraendoUt', e.target.value)} placeholder="83,33" />
+          </Field>
+          <Field label="Mínimo (UT)" hint="por debajo no retiene">
+            <Input value={f.baseMinimaUt} inputMode="decimal" className="num"
+              onChange={(e) => set('baseMinimaUt', e.target.value)} placeholder="83,33" />
+          </Field>
+        </div>
+        <div className="text-[11.5px] text-slate-500 dark:text-slate-400">
+          El sustraendo y el mínimo van en <strong>unidades tributarias</strong>, como en el reglamento: los
+          bolívares salen de multiplicarlos por la UT del día del documento. Así una providencia nueva se
+          absorbe cargando la UT, sin editar esta tabla.
+        </div>
+        <Toggle checked={f.activo} onChange={(v) => set('activo', v)}
+          label="Activo" hint="un concepto inactivo deja de poder elegirse, sin perder el histórico" />
+        {error ? <div className="text-[12px] text-[#B3362C] dark:text-red-400">{error}</div> : null}
+      </div>
+    </Modal>
   )
 }
 

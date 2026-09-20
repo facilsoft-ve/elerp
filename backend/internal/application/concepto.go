@@ -70,8 +70,16 @@ func (s *Service) GuardarConceptoISLR(empresaID, actor, origen string, c fiscal.
 	if c.Porcentaje <= 0 || c.Porcentaje > 100 {
 		return fiscal.ConceptoISLR{}, ErrConceptoInvalido
 	}
-	if c.Sustraendo < 0 || c.BaseMinima < 0 {
+	if c.SustraendoUT < 0 || c.BaseMinimaUT < 0 {
 		return fiscal.ConceptoISLR{}, ErrConceptoInvalido
+	}
+	// Un concepto con sustraendo o mínimo en UT no se puede calcular sin saber
+	// cuánto vale la UT. Se avisa al GUARDARLO —cuando quien lo configura tiene el
+	// contexto— y no al primer documento que lo use, semanas después.
+	if c.Activo && c.RequiereUT() {
+		if _, ok := s.UTVigenteEn(empresaID, ""); !ok {
+			return fiscal.ConceptoISLR{}, ErrUTNoCargada
+		}
 	}
 	maestro := s.ConceptosISLR(empresaID) // asegura la siembra antes de tocar la tabla
 	// El par (código, sujeto) es la CLAVE de la tabla: es exactamente lo que busca
@@ -133,8 +141,14 @@ type SugerenciaRetencionISLR struct {
 	Nombre     string  `json:"nombre"`
 	Sujeto     string  `json:"sujeto"`
 	Porcentaje float64 `json:"porcentaje"`
+	// Sustraendo y BaseMinima van en BOLÍVARES, ya convertidos con la UT de la
+	// fecha. El maestro los guarda en unidades tributarias; la pantalla muestra
+	// bolívares porque es lo que se compara con la factura que tiene delante.
 	Sustraendo float64 `json:"sustraendo"`
-	Base       float64 `json:"base"`
+	BaseMinima float64 `json:"baseMinima"`
+	// ValorUT es la UT con la que se resolvió, para poder explicar el número.
+	ValorUT float64 `json:"valorUt"`
+	Base    float64 `json:"base"`
 	// Monto es lo que se retendría. 0 con Retiene=false significa que la base no
 	// llega al mínimo del concepto — que NO es lo mismo que «no aplica».
 	Monto   float64 `json:"monto"`
@@ -144,15 +158,27 @@ type SugerenciaRetencionISLR struct {
 // SugerirRetencionISLR resuelve la tarifa de un concepto para un sujeto y
 // calcula cuánto se retendría sobre una base. Es lo que hace que el usuario
 // elija en vez de teclear.
-func (s *Service) SugerirRetencionISLR(empresaID, codigo, sujeto string, base float64) (SugerenciaRetencionISLR, error) {
+//
+// `fecha` es la del hecho (AAAA-MM-DD); vacía = hoy. Importa porque de ella sale
+// el valor de la UT: registrar en octubre una factura de agosto tiene que usar la
+// UT de agosto, no la de hoy.
+func (s *Service) SugerirRetencionISLR(empresaID, codigo, sujeto, fecha string, base float64) (SugerenciaRetencionISLR, error) {
 	c, ok := fiscal.ConceptoPara(s.ConceptosISLR(empresaID), codigo, sujeto)
 	if !ok {
 		return SugerenciaRetencionISLR{}, ErrConceptoNoExiste
 	}
-	monto := round2(c.Retener(base))
+	// Sin UT, un concepto que la requiere se calcularía con sustraendo y mínimo en
+	// cero: retendría de más y nadie lo notaría. Se dice que falta.
+	valorUT := s.ValorUTEn(empresaID, fecha)
+	if c.RequiereUT() && valorUT <= 0 {
+		return SugerenciaRetencionISLR{}, ErrUTNoCargada
+	}
+	monto := round2(c.Retener(base, valorUT))
 	return SugerenciaRetencionISLR{
 		Codigo: c.Codigo, Nombre: c.Nombre, Sujeto: c.Sujeto,
-		Porcentaje: c.Porcentaje, Sustraendo: c.Sustraendo,
-		Base: base, Monto: monto, Retiene: monto > 0,
+		Porcentaje: c.Porcentaje,
+		Sustraendo: round2(c.SustraendoEn(valorUT)), BaseMinima: round2(c.BaseMinimaEn(valorUT)),
+		ValorUT: valorUT,
+		Base:    base, Monto: monto, Retiene: monto > 0,
 	}, nil
 }

@@ -160,6 +160,10 @@ func (s *Service) proyectarRetencionesOC(empresaID string, prov proveedor.Provee
 	}
 
 	maestro := s.ConceptosISLR(empresaID)
+	// La UT del día de la orden: de ella salen el sustraendo y el mínimo en
+	// bolívares. Se resuelve UNA vez para toda la orden, para que dos conceptos de
+	// la misma no puedan quedar valorados con UT distintas.
+	valorUT := s.ValorUTEn(empresaID, "")
 	codigos, bases := basesISLRPorConcepto(lineas)
 	if len(codigos) == 0 {
 		// Respaldo: ninguna línea declara concepto ⇒ el del proveedor sobre el neto
@@ -188,14 +192,25 @@ func (s *Service) proyectarRetencionesOC(empresaID string, prov proveedor.Provee
 				nombre = cod
 			}
 			o.RetencionISLRDetalle = append(o.RetencionISLRDetalle, compra.RetencionISLRProyectada{
-				Codigo: cod, Concepto: nombre, Base: base, SinTarifa: true,
+				Codigo: cod, Concepto: nombre, Base: base,
+				Impedimento: compra.ImpedimentoSinTarifa,
 			})
 			continue
 		}
-		monto := round2(c.Retener(base))
+		if c.RequiereUT() && valorUT <= 0 {
+			// El concepto tiene sustraendo o mínimo en unidades tributarias y no hay UT
+			// cargada. Seguir con la UT en cero anularía el sustraendo y retendría DE
+			// MÁS, sin que fallara nada: es justo el error que hay que hacer visible.
+			o.RetencionISLRDetalle = append(o.RetencionISLRDetalle, compra.RetencionISLRProyectada{
+				Codigo: c.Codigo, Concepto: c.Nombre, Base: base, Porcentaje: c.Porcentaje,
+				Impedimento: compra.ImpedimentoSinUT,
+			})
+			continue
+		}
+		monto := round2(c.Retener(base, valorUT))
 		o.RetencionISLRDetalle = append(o.RetencionISLRDetalle, compra.RetencionISLRProyectada{
 			Codigo: c.Codigo, Concepto: c.Nombre, Base: base,
-			Porcentaje: c.Porcentaje, Sustraendo: round2(c.Sustraendo), Monto: monto,
+			Porcentaje: c.Porcentaje, Sustraendo: round2(c.SustraendoEn(valorUT)), Monto: monto,
 		})
 		o.RetencionISLRMonto = round2(o.RetencionISLRMonto + monto)
 	}

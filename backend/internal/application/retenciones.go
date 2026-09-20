@@ -102,8 +102,17 @@ func (s *Service) resolverConcepto(empresaID string, in EntradaRetencion) (Entra
 	if !ok {
 		return in, ErrConceptoNoExiste
 	}
+	// El sustraendo del maestro está en UNIDADES TRIBUTARIAS: se convierte a
+	// bolívares con la UT que regía EL DÍA DEL COMPROBANTE, no la de hoy. Es lo que
+	// hace que registrar hoy una retención de agosto dé el mismo número que dio en
+	// agosto. Sin UT cargada se falla: un sustraendo en cero retiene de más, y un
+	// comprobante emitido con esa cifra hay que anularlo y rehacerlo.
+	valorUT := s.ValorUTEn(empresaID, in.Fecha)
+	if c.RequiereUT() && valorUT <= 0 {
+		return in, ErrUTNoCargada
+	}
 	in.Porcentaje = c.Porcentaje
-	in.Sustraendo = c.Sustraendo
+	in.Sustraendo = round2(c.SustraendoEn(valorUT))
 	if strings.TrimSpace(in.Concepto) == "" {
 		in.Concepto = c.Nombre
 	}

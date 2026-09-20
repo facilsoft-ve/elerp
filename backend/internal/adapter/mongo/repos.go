@@ -10,64 +10,65 @@ import (
 
 // Store agrupa todos los repos Mongo. New lo construye desde una *Database.
 type Store struct {
-	Productos          *ProductoRepo
-	Movimientos        *MovimientoRepo
-	Transferencias     *TransferenciaRepo
-	Rubros             *RubroRepo
-	Audit              *AuditRepo
-	Organizaciones     *OrganizacionRepo
-	Empresas           *EmpresaRepo
-	Sedes              *SedeRepo
-	Usuarios           *UsuarioRepo
-	Membresias         *MembresiaRepo
-	Credenciales       *CredencialRepo
-	Clientes           *ClienteRepo
-	Documentos         *DocumentoRepo
-	Numerador          *NumeradorRepo
-	CuentasCobro       *CuentaCobroRepo
-	MetodosPago        *MetodoPagoRepo
-	Dispositivos       *DispositivoFiscalRepo
-	CierresZ           *CierreZRepo
-	Cotizaciones       *CotizacionRepo
-	Cajas              *CajaRepo
-	Cajeros            *CajeroRepo
-	SesionesCaja       *SesionCajaRepo
-	Tasas              *TasaRepo
-	VentasEnEspera     *VentaEnEsperaRepo
-	Cobros             *CobroRepo
-	PagosProveedor     *PagoProveedorRepo
-	CuentasContables   *CuentaContableRepo
-	Asientos           *AsientoRepo
-	Periodos           *PeriodoRepo
-	Proveedores        *ProveedorRepo
-	OrdenesCompra      *OrdenCompraRepo
-	FacturasCompra     *FacturaCompraRepo
-	NotasCompra        *NotaCompraRepo
-	Solicitudes        *SolicitudCompraRepo
-	Retenciones        *RetencionRepo
-	ListasPrecio       *ListaPrecioRepo
-	Cupones            *CuponRepo
-	Promociones        *PromocionRepo
-	Unidades           *UnidadMedidaRepo
-	Almacenes          *AlmacenRepo
-	Modulos            *ModuloRepo
-	Legal              *LegalRepo
-	Plantillas         *PlantillaRepo
-	Mesas              *MesaRepo
-	Planos             *PlanoRepo
-	Asignaciones       *AsignacionRepo
-	ConfigSalon        *ConfigSalonRepo
-	Impresoras         *ImpresoraRepo
-	Cuentas            *CuentaRepo
-	Reservas           *ReservaRepo
-	Mesoneros          *MesoneroRepo
-	Turnos             *TurnoRepo
-	Alicuotas          *AlicuotaRepo
-	Series             *SerieRepo
-	ConfigDigital      *ConfigDigitalRepo
-	EmisionesDigitales *EmisionDigitalRepo
-	ConceptosISLR      *ConceptoISLRRepo
-	Horarios           *HorarioRepo
+	Productos           *ProductoRepo
+	Movimientos         *MovimientoRepo
+	Transferencias      *TransferenciaRepo
+	Rubros              *RubroRepo
+	Audit               *AuditRepo
+	Organizaciones      *OrganizacionRepo
+	Empresas            *EmpresaRepo
+	Sedes               *SedeRepo
+	Usuarios            *UsuarioRepo
+	Membresias          *MembresiaRepo
+	Credenciales        *CredencialRepo
+	Clientes            *ClienteRepo
+	Documentos          *DocumentoRepo
+	Numerador           *NumeradorRepo
+	CuentasCobro        *CuentaCobroRepo
+	MetodosPago         *MetodoPagoRepo
+	Dispositivos        *DispositivoFiscalRepo
+	CierresZ            *CierreZRepo
+	Cotizaciones        *CotizacionRepo
+	Cajas               *CajaRepo
+	Cajeros             *CajeroRepo
+	SesionesCaja        *SesionCajaRepo
+	Tasas               *TasaRepo
+	VentasEnEspera      *VentaEnEsperaRepo
+	Cobros              *CobroRepo
+	PagosProveedor      *PagoProveedorRepo
+	CuentasContables    *CuentaContableRepo
+	Asientos            *AsientoRepo
+	Periodos            *PeriodoRepo
+	Proveedores         *ProveedorRepo
+	OrdenesCompra       *OrdenCompraRepo
+	FacturasCompra      *FacturaCompraRepo
+	NotasCompra         *NotaCompraRepo
+	Solicitudes         *SolicitudCompraRepo
+	Retenciones         *RetencionRepo
+	ListasPrecio        *ListaPrecioRepo
+	Cupones             *CuponRepo
+	Promociones         *PromocionRepo
+	Unidades            *UnidadMedidaRepo
+	Almacenes           *AlmacenRepo
+	Modulos             *ModuloRepo
+	Legal               *LegalRepo
+	Plantillas          *PlantillaRepo
+	Mesas               *MesaRepo
+	Planos              *PlanoRepo
+	Asignaciones        *AsignacionRepo
+	ConfigSalon         *ConfigSalonRepo
+	Impresoras          *ImpresoraRepo
+	Cuentas             *CuentaRepo
+	Reservas            *ReservaRepo
+	Mesoneros           *MesoneroRepo
+	Turnos              *TurnoRepo
+	Alicuotas           *AlicuotaRepo
+	Series              *SerieRepo
+	ConfigDigital       *ConfigDigitalRepo
+	EmisionesDigitales  *EmisionDigitalRepo
+	ConceptosISLR       *ConceptoISLRRepo
+	UnidadesTributarias *UnidadTributariaRepo
+	Horarios            *HorarioRepo
 }
 
 // New arma el Store cableando cada repo a su colección.
@@ -105,8 +106,9 @@ func New(db *gomongo.Database) *Store {
 	st.attachAlicuotas(db)
 	st.attachSeries(db)
 	st.attachFacturacionDigital(db)
-	st.attachConceptosISLR(db) // definido en concepto.go (conceptos ISLR)    // definido en impuesto.go (maestro de impuestos)
-	st.attachMesoneros(db)     // definido en mesonero.go (credenciales + turnos)
+	st.attachConceptosISLR(db)
+	st.attachUnidadesTributarias(db) // definido en ut.go (histórico de la UT) // definido en concepto.go (conceptos ISLR)    // definido en impuesto.go (maestro de impuestos)
+	st.attachMesoneros(db)           // definido en mesonero.go (credenciales + turnos)
 	return st
 }
 

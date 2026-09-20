@@ -24,9 +24,16 @@ import { fmtNum } from '../lib/format.js'
 // Centinela de la salida a texto libre: no puede chocar con un código real.
 const OTRO = '__otro__'
 
+/* Los CUATRO sujetos del reglamento: naturaleza (natural o jurídica) por
+ * residencia. Las no domiciliadas no son un caso exótico —a un proveedor del
+ * exterior se le retiene, y más alto—: sin ellas, un pago al exterior se
+ * clasificaría como domiciliado, que es la única opción que habría, y retendría
+ * de menos. */
 export const SUJETOS = [
   { id: 'natural_residente', label: 'Persona natural residente' },
+  { id: 'natural_no_residente', label: 'Persona natural no residente' },
   { id: 'juridica_domiciliada', label: 'Persona jurídica domiciliada' },
+  { id: 'juridica_no_domiciliada', label: 'Persona jurídica no domiciliada' },
 ]
 
 /* El maestro es del tenant y no cambia mientras dura el modal: se pide UNA vez
@@ -43,6 +50,41 @@ const cargarMaestro = () => {
     })
   }
   return maestroPromesa
+}
+
+// invalidarMaestroConceptos lo vuelve a pedir tras editarlo en Configuración. Sin
+// esto, cambiar una tarifa no se vería hasta recargar la aplicación.
+export function invalidarMaestroConceptos() { maestroPromesa = null }
+
+/* El valor de la UT se pide igual que el maestro: es configuración del tenant y
+ * no cambia mientras dura una pantalla. */
+let utPromesa = null
+const cargarUT = () => {
+  if (!utPromesa) {
+    utPromesa = api.unidadesTributarias().catch((e) => { utPromesa = null; throw e })
+  }
+  return utPromesa
+}
+
+// invalidarUT la vuelve a pedir tras cargar una nueva en Configuración.
+export function invalidarUT() { utPromesa = null }
+
+/* useValorUT devuelve el valor de la UT vigente HOY, o 0 si no hay ninguna
+ * cargada.
+ *
+ * Cero NO significa «la UT vale cero»: significa que FALTA. Quien lo use tiene
+ * que decirlo en vez de calcular con él — un sustraendo anulado retiene de más y
+ * no falla en ningún lado. */
+export function useValorUT() {
+  const [valor, setValor] = useState(0)
+  useEffect(() => {
+    let vivo = true
+    cargarUT()
+      .then((r) => { if (vivo) setValor(r?.hayVigente ? (Number(r?.vigente?.valor) || 0) : 0) })
+      .catch(() => { if (vivo) setValor(0) })
+    return () => { vivo = false }
+  }, [])
+  return valor
 }
 
 /* useConceptosISLR devuelve los conceptos activos agrupados por código. Nunca

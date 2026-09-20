@@ -153,8 +153,8 @@ func TestOC_ConceptoSinTarifaParaEseSujetoQuedaVisible(t *testing.T) {
 		t.Fatalf("el concepto sin tarifa debía dejar constancia: %+v", oc.RetencionISLRDetalle)
 	}
 	d := oc.RetencionISLRDetalle[0]
-	if !d.SinTarifa {
-		t.Fatal("la fila debía venir marcada como sin tarifa para ese sujeto")
+	if d.Impedimento != compra.ImpedimentoSinTarifa {
+		t.Fatalf("la fila debía venir marcada como sin tarifa para ese sujeto: %q", d.Impedimento)
 	}
 	if d.Concepto == "" || d.Concepto == d.Codigo {
 		t.Fatalf("la fila debía nombrar el concepto del maestro, trae %q", d.Concepto)

@@ -116,13 +116,19 @@ func (s *Server) registerFiscal(r fiber.Router) {
 	cfg.Post("/alicuotas", cfgAdmin, s.handleCrearAlicuota)
 	cfg.Patch("/alicuotas/:id", cfgAdmin, s.handleActualizarAlicuota)
 
-	// Maestro de CONCEPTOS ISLR. Solo lectura por ahora: lo consume el selector
-	// del modal de retención, que es donde la tarifa dejaba de tecetarse. La
-	// edición de la tabla es material de Configuración y va aparte.
+	// Maestro de CONCEPTOS ISLR. Lo consume el selector del modal de retención y
+	// la ficha de producto; la edición es de Configuración y exige rol.
 	// "/sugerencia" resuelve la tarifa y el monto EN EL SERVIDOR: la pantalla
 	// muestra, no calcula.
 	cfg.Get("/conceptos-islr", s.handleConceptosISLR)
 	cfg.Get("/conceptos-islr/sugerencia", s.handleSugerenciaRetencionISLR)
+	cfg.Post("/conceptos-islr", cfgAdmin, s.handleGuardarConceptoISLR)
+
+	// UNIDAD TRIBUTARIA: de ella salen los sustraendos y mínimos de ISLR en
+	// bolívares. Solo anexado — no hay PATCH ni DELETE: una UT pasada no se
+	// corrige, se carga la siguiente (ver domain/fiscal/ut.go).
+	cfg.Get("/unidades-tributarias", s.handleUnidadesTributarias)
+	cfg.Post("/unidades-tributarias", cfgAdmin, s.handleCargarUT)
 
 	cfg.Get("/dispositivos/catalogo", s.handleCatalogoDispositivos)
 	cfg.Get("/dispositivos", s.handleDispositivos)
@@ -786,12 +792,59 @@ func (s *Server) handleConceptosISLR(c *fiber.Ctx) error {
 // lo hiciera la pantalla habría dos implementaciones de la misma fórmula y una
 // de las dos se quedaría vieja.
 func (s *Server) handleSugerenciaRetencionISLR(c *fiber.Ctx) error {
+	// "fecha" es la del hecho; vacía = hoy. De ella sale el valor de la UT, así que
+	// registrar en octubre una factura de agosto usa la UT de agosto.
 	out, err := s.svc.SugerirRetencionISLR(empresaIDOf(c),
-		c.Query("codigo"), c.Query("sujeto"), c.QueryFloat("base", 0))
+		c.Query("codigo"), c.Query("sujeto"), c.Query("fecha"), c.QueryFloat("base", 0))
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(out)
+}
+
+// handleGuardarConceptoISLR da de alta o edita una fila del maestro. Sin id crea;
+// con id edita.
+func (s *Server) handleGuardarConceptoISLR(c *fiber.Ctx) error {
+	var in fiscal.ConceptoISLR
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.GuardarConceptoISLR(empresaIDOf(c), principalOf(c).UserID, origen(c), in)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+// handleUnidadesTributarias devuelve el histórico de la UT, de la más reciente a
+// la más vieja, más cuál rige hoy.
+func (s *Server) handleUnidadesTributarias(c *fiber.Ctx) error {
+	emp := empresaIDOf(c)
+	vigente, hay := s.svc.UTVigenteEn(emp, c.Query("fecha"))
+	return c.JSON(fiber.Map{
+		"unidadesTributarias": s.svc.UnidadesTributarias(emp),
+		"vigente":             vigente,
+		"hayVigente":          hay,
+	})
+}
+
+// handleCargarUT anexa un valor de la UT al histórico.
+func (s *Server) handleCargarUT(c *fiber.Ctx) error {
+	var in struct {
+		Valor        float64 `json:"valor"`
+		VigenteDesde string  `json:"vigenteDesde"`
+		Fuente       string  `json:"fuente"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.CargarUT(empresaIDOf(c), principalOf(c).UserID, origen(c), fiscal.UnidadTributaria{
+		Valor: in.Valor, VigenteDesde: in.VigenteDesde, Fuente: in.Fuente,
+	})
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
 }
 
 func (s *Server) handleAlicuotas(c *fiber.Ctx) error {

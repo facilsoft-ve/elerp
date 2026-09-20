@@ -6,7 +6,7 @@ import { fmtCurrency, fmtNum, fmtDate } from '../lib/format.js'
 import { calcularTotales, IVA_TASA } from '../lib/fiscal.js'
 import { porCodigo } from '../lib/precio.js'
 import { COND_PAGO, RET_IVA_DEFAULT, perfilRetencionDe, proyectarRetenciones } from '../lib/compras.js'
-import { useConceptosISLR, SUJETOS } from '../components/conceptoIslr.jsx'
+import { useConceptosISLR, useValorUT, SUJETOS } from '../components/conceptoIslr.jsx'
 import { useData } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
@@ -226,6 +226,13 @@ export function ComprasOrdenes() {
  * concepto para el tipo de sujeto del proveedor, y callarlo haría que una tabla
  * incompleta se viera igual que «a este proveedor no se le retiene».
  */
+/* Por qué un concepto no pudo retener. Las dos causas son de CONFIGURACIÓN y se
+ * arreglan cargando algo que falta, así que el mensaje dice QUÉ cargar. */
+const MOTIVO_IMPEDIMENTO = {
+  sin_tarifa: 'El maestro no tiene la tarifa de este concepto para el tipo de proveedor: no se retiene.',
+  sin_ut: 'Falta cargar el valor de la Unidad Tributaria: sin él, el sustraendo daría cero y se retendría de más.',
+}
+
 function DesgloseISLR({ detalle = [], monto = 0, porcentaje = 0, concepto = '', ccy = 'VES' }) {
   // Órdenes anteriores al desglose solo tienen los escalares: se leen igual.
   if (detalle.length === 0) {
@@ -245,15 +252,13 @@ function DesgloseISLR({ detalle = [], monto = 0, porcentaje = 0, concepto = '', 
       {detalle.map((d) => (
         <div key={d.codigo} className="flex items-center justify-between">
           <span className="text-slate-500">
-            Retención ISLR{d.sinTarifa ? '' : <> <span className="text-slate-400">{fmtNum(d.porcentaje, 0)}%</span></>}
+            Retención ISLR{d.impedimento === 'sin_tarifa' ? '' : <> <span className="text-slate-400">{fmtNum(d.porcentaje, 0)}%</span></>}
             <span className="block text-[11px] text-slate-400">{d.concepto}</span>
-            {d.sinTarifa ? (
-              <span className="block text-[11px] text-amber-700 dark:text-amber-400">
-                El maestro no tiene la tarifa de este concepto para el tipo de proveedor: no se retiene.
-              </span>
+            {d.impedimento ? (
+              <span className="block text-[11px] text-amber-700 dark:text-amber-400">{MOTIVO_IMPEDIMENTO[d.impedimento]}</span>
             ) : null}
           </span>
-          <span className="num private-mask">{d.sinTarifa ? '—' : <>− {fmtCurrency(d.monto, ccy)}</>}</span>
+          <span className="num private-mask">{d.impedimento ? '—' : <>− {fmtCurrency(d.monto, ccy)}</>}</span>
         </div>
       ))}
     </>
@@ -331,6 +336,10 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
   const proveedorSel = proveedores.find((p) => p.id === proveedorId) || null
   // Maestro de conceptos de ISLR: de ahí sale la tarifa, igual que en el servidor.
   const { conceptos, porCodigo, sujetosDe } = useConceptosISLR()
+  // La UT convierte a bolívares el sustraendo y el mínimo, que el maestro guarda
+  // en unidades tributarias. 0 = no hay ninguna cargada, y eso se avisa: calcular
+  // con cero anularía el sustraendo y retendría de más.
+  const valorUt = useValorUT()
 
   /* Líneas: { sku, nombre, cantidad, costoUnitario, exento }
    *
@@ -407,12 +416,12 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
   // Proyección EN VIVO de lo que se le va a pagar al proveedor. El servidor
   // recalcula con las mismas reglas al guardar y es la autoridad.
   const proyeccion = useMemo(() => proyectarRetenciones({
-    empresa: db.EMPRESA, perfil: ret, conceptos,
+    empresa: db.EMPRESA, perfil: ret, conceptos, valorUt,
     // El ISLR se retiene por concepto del pago, así que la proyección necesita las
     // líneas: cada una trae el concepto de su producto.
     lineas: lineas.map((l) => ({ conceptoIslr: l.conceptoIslr, total: netoLinea(l) })),
     subtotal: totales.subtotal, iva: totales.iva, total: totales.total,
-  }), [db.EMPRESA, ret, conceptos, totales, lineas])
+  }), [db.EMPRESA, ret, conceptos, valorUt, totales, lineas])
   // Una fila SIN TARIFA retiene 0 pero tiene que verse: es configuración
   // incompleta, no ausencia de retención.
   const hayRetenciones = proyeccion.ivaMonto > 0 || proyeccion.islrMonto > 0 || proyeccion.detalle.length > 0

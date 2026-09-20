@@ -12,10 +12,15 @@ const AGENTE = { agenteRetencionIVA: true, agenteRetencionISLR: true, retencionI
 /* Maestro de conceptos, como lo devuelve el API. El mismo código con DOS tarifas
  * según el sujeto es justo lo que el texto libre no podía expresar. */
 const CONCEPTOS = [
-  { codigo: 'honorarios', nombre: 'Honorarios profesionales', sujeto: 'natural_residente', porcentaje: 3, sustraendo: 0, activo: true },
-  { codigo: 'honorarios', nombre: 'Honorarios profesionales', sujeto: 'juridica_domiciliada', porcentaje: 5, sustraendo: 0, activo: true },
-  { codigo: 'consultoria', nombre: 'Consultoría', sujeto: 'juridica_domiciliada', porcentaje: 5, sustraendo: 0, baseMinima: 5000, activo: true },
+  { codigo: 'honorarios', nombre: 'Honorarios profesionales', sujeto: 'natural_residente', porcentaje: 3, sustraendoUt: 0, activo: true },
+  { codigo: 'honorarios', nombre: 'Honorarios profesionales', sujeto: 'juridica_domiciliada', porcentaje: 5, sustraendoUt: 0, activo: true },
+  { codigo: 'consultoria', nombre: 'Consultoría', sujeto: 'juridica_domiciliada', porcentaje: 5, sustraendoUt: 0, baseMinimaUt: 5000, activo: true },
 ]
+
+/* El sustraendo y el mínimo del maestro van en UNIDADES TRIBUTARIAS: los
+ * bolívares salen de multiplicarlos por la UT del día. En las pruebas la UT vale
+ * 1 para que los números se puedan seguir a mano. */
+const UT = 1
 
 describe('COND_PAGO', () => {
   it('arranca en Contado y ofrece los plazos usuales', () => {
@@ -73,7 +78,7 @@ describe('proyectarRetenciones', () => {
 
   it('la tarifa de ISLR sale del maestro, no del perfil', () => {
     const r = proyectarRetenciones({
-      empresa: AGENTE, conceptos: CONCEPTOS,
+      empresa: AGENTE, conceptos: CONCEPTOS, valorUt: UT,
       perfil: { retieneIslr: true, islrConceptoCodigo: 'honorarios', islrSujeto: 'natural_residente' },
       ...ORDEN,
     })
@@ -83,7 +88,7 @@ describe('proyectarRetenciones', () => {
   })
 
   it('el MISMO concepto cobra distinto según el sujeto', () => {
-    const base = { empresa: AGENTE, conceptos: CONCEPTOS, ...ORDEN }
+    const base = { empresa: AGENTE, conceptos: CONCEPTOS, valorUt: UT, ...ORDEN }
     const natural = proyectarRetenciones({ ...base, perfil: { retieneIslr: true, islrConceptoCodigo: 'honorarios', islrSujeto: 'natural_residente' } })
     const juridica = proyectarRetenciones({ ...base, perfil: { retieneIslr: true, islrConceptoCodigo: 'honorarios', islrSujeto: 'juridica_domiciliada' } })
     expect(natural.islrMonto).toBe(30)  // 3%
@@ -92,7 +97,7 @@ describe('proyectarRetenciones', () => {
 
   it('por debajo de la base mínima del concepto no se retiene', () => {
     const r = proyectarRetenciones({
-      empresa: AGENTE, conceptos: CONCEPTOS,
+      empresa: AGENTE, conceptos: CONCEPTOS, valorUt: UT,
       perfil: { retieneIslr: true, islrConceptoCodigo: 'consultoria', islrSujeto: 'juridica_domiciliada' },
       ...ORDEN, // base 1.000, mínimo 5.000
     })
@@ -102,7 +107,7 @@ describe('proyectarRetenciones', () => {
 
   it('un concepto que no está en el maestro no retiene: lo resuelve el servidor', () => {
     const r = proyectarRetenciones({
-      empresa: AGENTE, conceptos: CONCEPTOS,
+      empresa: AGENTE, conceptos: CONCEPTOS, valorUt: UT,
       perfil: { retieneIslr: true, islrConceptoCodigo: 'no_existe', islrSujeto: 'natural_residente' },
       ...ORDEN,
     })
@@ -112,7 +117,7 @@ describe('proyectarRetenciones', () => {
   it('un sustraendo mayor que el cálculo no vuelve negativa la retención', () => {
     const r = proyectarRetenciones({
       empresa: AGENTE,
-      conceptos: [{ codigo: 'x', sujeto: 'juridica_domiciliada', porcentaje: 2, sustraendo: 500, activo: true }],
+      conceptos: [{ codigo: 'x', sujeto: 'juridica_domiciliada', porcentaje: 2, sustraendoUt: 25000, activo: true }], valorUt: UT,
       perfil: { retieneIslr: true, islrConceptoCodigo: 'x', islrSujeto: 'juridica_domiciliada' },
       ...ORDEN,
     })
@@ -133,7 +138,7 @@ describe('proyectarRetenciones', () => {
 
   it('combina ambas retenciones en el neto', () => {
     const r = proyectarRetenciones({
-      empresa: AGENTE, conceptos: CONCEPTOS,
+      empresa: AGENTE, conceptos: CONCEPTOS, valorUt: UT,
       perfil: { retieneIva: true, ivaPorcentaje: 100, retieneIslr: true, islrConceptoCodigo: 'honorarios', islrSujeto: 'natural_residente' },
       ...ORDEN,
     })
@@ -159,7 +164,7 @@ describe('proyectarRetenciones', () => {
  * que permite probar el concepto sin tarifa para el sujeto del proveedor. */
 const CONCEPTOS_CON_FLETES = [
   ...CONCEPTOS,
-  { codigo: 'fletes', nombre: 'Fletes y transporte', sujeto: 'juridica_domiciliada', porcentaje: 3, sustraendo: 0, activo: true },
+  { codigo: 'fletes', nombre: 'Fletes y transporte', sujeto: 'juridica_domiciliada', porcentaje: 3, sustraendoUt: 0, activo: true },
 ]
 
 const JURIDICA = { retieneIva: false, ivaPorcentaje: 0, retieneIslr: true, islrConceptoCodigo: 'honorarios', islrSujeto: 'juridica_domiciliada' }
@@ -170,7 +175,7 @@ describe('proyectarRetenciones · el concepto sale de las líneas', () => {
       empresa: AGENTE,
       // El perfil dice fletes (3 %), pero se compró una consultoría de honorarios.
       perfil: { ...JURIDICA, islrConceptoCodigo: 'fletes' },
-      conceptos: CONCEPTOS_CON_FLETES,
+      conceptos: CONCEPTOS_CON_FLETES, valorUt: UT,
       lineas: [{ conceptoIslr: 'honorarios', total: 1000 }],
       ...ORDEN,
     })
@@ -182,7 +187,7 @@ describe('proyectarRetenciones · el concepto sale de las líneas', () => {
 
   it('la mercancía no entra en la base: solo el neto de las líneas con concepto', () => {
     const r = proyectarRetenciones({
-      empresa: AGENTE, perfil: JURIDICA, conceptos: CONCEPTOS_CON_FLETES,
+      empresa: AGENTE, perfil: JURIDICA, conceptos: CONCEPTOS_CON_FLETES, valorUt: UT,
       lineas: [{ conceptoIslr: 'honorarios', total: 1000 }, { conceptoIslr: '', total: 1000 }],
       subtotal: 2000, iva: 320, total: 2320,
     })
@@ -193,7 +198,7 @@ describe('proyectarRetenciones · el concepto sale de las líneas', () => {
 
   it('varios conceptos se desglosan y el porcentaje único deja de existir', () => {
     const r = proyectarRetenciones({
-      empresa: AGENTE, perfil: JURIDICA, conceptos: CONCEPTOS_CON_FLETES,
+      empresa: AGENTE, perfil: JURIDICA, conceptos: CONCEPTOS_CON_FLETES, valorUt: UT,
       lineas: [{ conceptoIslr: 'honorarios', total: 1000 }, { conceptoIslr: 'fletes', total: 1000 }],
       subtotal: 2000, iva: 320, total: 2320,
     })
@@ -209,12 +214,12 @@ describe('proyectarRetenciones · el concepto sale de las líneas', () => {
     const r = proyectarRetenciones({
       empresa: AGENTE,
       perfil: { ...JURIDICA, islrSujeto: 'natural_residente' },
-      conceptos: CONCEPTOS_CON_FLETES,
+      conceptos: CONCEPTOS_CON_FLETES, valorUt: UT,
       lineas: [{ conceptoIslr: 'fletes', total: 1000 }],
       ...ORDEN,
     })
     expect(r.detalle).toHaveLength(1)
-    expect(r.detalle[0].sinTarifa).toBe(true)
+    expect(r.detalle[0].impedimento).toBe('sin_tarifa')
     expect(r.detalle[0].concepto).toBe('Fletes y transporte')
     expect(r.detalle[0].base).toBe(1000)
     expect(r.islrMonto).toBe(0)
@@ -222,7 +227,7 @@ describe('proyectarRetenciones · el concepto sale de las líneas', () => {
 
   it('sin concepto en ninguna línea manda el del proveedor sobre el neto', () => {
     const r = proyectarRetenciones({
-      empresa: AGENTE, perfil: JURIDICA, conceptos: CONCEPTOS_CON_FLETES,
+      empresa: AGENTE, perfil: JURIDICA, conceptos: CONCEPTOS_CON_FLETES, valorUt: UT,
       lineas: [{ conceptoIslr: '', total: 1000 }],
       ...ORDEN,
     })
@@ -237,12 +242,64 @@ describe('proyectarRetenciones · el concepto sale de las líneas', () => {
     const r = proyectarRetenciones({
       empresa: AGENTE,
       perfil: { ...JURIDICA, islrConceptoCodigo: 'consultoria' },
-      conceptos: CONCEPTOS_CON_FLETES,
+      conceptos: CONCEPTOS_CON_FLETES, valorUt: UT,
       lineas: [{ conceptoIslr: 'consultoria', total: 1000 }, { conceptoIslr: 'honorarios', total: 6000 }],
       subtotal: 7000, iva: 1120, total: 8120,
     })
     const consultoria = r.detalle.find((d) => d.codigo === 'consultoria')
     expect(consultoria.monto).toBe(0)
     expect(r.islrMonto).toBe(300) // solo honorarios: 5% de 6.000
+  })
+})
+
+/* EL SUSTRAENDO VIVE EN UNIDADES TRIBUTARIAS.
+ *
+ * Misma tabla de casos que ut_test.go en el servidor. Si estos números y los de
+ * allá dejan de coincidir, uno de los dos está mintiendo. */
+describe('proyectarRetenciones · la unidad tributaria', () => {
+  // Honorarios a persona natural con el sustraendo del reglamento (83,33 UT).
+  const CON_SUSTRAENDO = [
+    { codigo: 'honorarios', nombre: 'Honorarios profesionales', sujeto: 'natural_residente',
+      porcentaje: 3, sustraendoUt: 83.33, baseMinimaUt: 83.33, activo: true },
+  ]
+  const NATURAL = { retieneIslr: true, islrConceptoCodigo: 'honorarios', islrSujeto: 'natural_residente' }
+
+  it('el sustraendo se convierte a bolívares con la UT del día', () => {
+    const r = proyectarRetenciones({
+      empresa: AGENTE, perfil: NATURAL, conceptos: CON_SUSTRAENDO, valorUt: 10, ...ORDEN,
+    })
+    // Mínimo 83,33 × 10 = 833,30 ≤ 1.000 ⇒ retiene.
+    // Sustraendo 83,33 × 10 × 3 % = 25,00. Retención 30 − 25 = 5,00.
+    expect(r.detalle[0].sustraendo).toBe(25)
+    expect(r.islrMonto).toBe(5)
+  })
+
+  it('subir la UT sube el sustraendo sin tocar el maestro', () => {
+    const con = (valorUt) => proyectarRetenciones({
+      empresa: AGENTE, perfil: NATURAL, conceptos: CON_SUSTRAENDO, valorUt, ...ORDEN,
+    }).detalle[0].sustraendo
+    expect(con(10)).toBe(25)
+    expect(con(20)).toBe(50)
+  })
+
+  it('sin UT cargada NO calcula con cero: lo dice', () => {
+    const r = proyectarRetenciones({
+      empresa: AGENTE, perfil: NATURAL, conceptos: CON_SUSTRAENDO, valorUt: 0, ...ORDEN,
+    })
+    // Con la UT en cero el sustraendo se anularía y retendría 30 —de más— sin
+    // fallar nada. Ese es exactamente el error que hay que hacer visible.
+    expect(r.detalle[0].impedimento).toBe('sin_ut')
+    expect(r.islrMonto).toBe(0)
+    expect(r.neto).toBe(1160)
+  })
+
+  it('una tarifa sin sustraendo ni mínimo no depende de la UT', () => {
+    const r = proyectarRetenciones({
+      empresa: AGENTE, valorUt: 0, conceptos: CONCEPTOS,
+      perfil: { retieneIslr: true, islrConceptoCodigo: 'honorarios', islrSujeto: 'juridica_domiciliada' },
+      ...ORDEN,
+    })
+    expect(r.detalle[0].impedimento).toBeUndefined()
+    expect(r.islrMonto).toBe(50)
   })
 })
