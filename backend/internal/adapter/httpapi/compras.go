@@ -144,7 +144,7 @@ func (s *Server) handleRetencionEmitida(c *fiber.Ctx) error {
 			ConceptoCodigo: in.ConceptoCodigo, Sujeto: in.Sujeto,
 		})
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(estadoDeConfigISLR(err)).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(out)
 }

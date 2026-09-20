@@ -305,7 +305,7 @@ func (s *Server) handleRetencionRecibida(c *fiber.Ctx) error {
 			ConceptoCodigo: in.ConceptoCodigo, Sujeto: in.Sujeto,
 		})
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(estadoDeConfigISLR(err)).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(out)
 }
@@ -797,7 +797,7 @@ func (s *Server) handleSugerenciaRetencionISLR(c *fiber.Ctx) error {
 	out, err := s.svc.SugerirRetencionISLR(empresaIDOf(c),
 		c.Query("codigo"), c.Query("sujeto"), c.Query("fecha"), c.QueryFloat("base", 0))
 	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(estadoDeConfigISLR(err)).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(out)
 }
@@ -811,7 +811,7 @@ func (s *Server) handleGuardarConceptoISLR(c *fiber.Ctx) error {
 	}
 	out, err := s.svc.GuardarConceptoISLR(empresaIDOf(c), principalOf(c).UserID, origen(c), in)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(estadoDeConfigISLR(err)).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(out)
 }
@@ -842,7 +842,7 @@ func (s *Server) handleCargarUT(c *fiber.Ctx) error {
 		Valor: in.Valor, VigenteDesde: in.VigenteDesde, Fuente: in.Fuente,
 	})
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(estadoDeConfigISLR(err)).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(out)
 }
@@ -958,6 +958,30 @@ func (s *Server) handleNCAjustePrecio(c *fiber.Ctx) error {
 		return errorDeNota(c, err)
 	}
 	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+// estadoDeConfigISLR traduce los fallos de configuración de ISLR con la misma
+// convención que el resto del API (ver errorDeNota): 404 lo que no existe, 409 lo
+// que choca con el ESTADO del sistema, 400 lo demás.
+//
+// La distinción no es cosmética. «Ese concepto no existe» se arregla eligiendo
+// otro; «falta cargar la unidad tributaria» se arregla en Configuración, y hasta
+// que alguien lo haga NINGÚN concepto con sustraendo va a resolver. Devolver 404
+// para los dos mandaba a buscar al sitio equivocado — a revisar el catálogo de
+// conceptos cuando lo que faltaba estaba en otra pantalla.
+//
+// Devuelve 400 por defecto, que es lo que hacían todos estos handlers: así los
+// que ya tratan otros errores no cambian de comportamiento al adoptarla.
+func estadoDeConfigISLR(err error) int {
+	switch {
+	case errors.Is(err, application.ErrConceptoNoExiste):
+		return fiber.StatusNotFound
+	case errors.Is(err, application.ErrUTNoCargada),
+		errors.Is(err, application.ErrConceptoDuplicado),
+		errors.Is(err, application.ErrUTRepetida):
+		return fiber.StatusConflict
+	}
+	return fiber.StatusBadRequest
 }
 
 // errorDeNota traduce los fallos de las notas: 404 lo que no existe, 409 lo que
