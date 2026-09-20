@@ -30,6 +30,36 @@ type Linea struct {
 	Total float64 `json:"total" bson:"total"`
 	// Exento marca la línea como no gravada con IVA crédito fiscal.
 	Exento bool `json:"exento" bson:"exento"`
+	// ConceptoISLR es el código del concepto de retención que trae el PRODUCTO
+	// (inventario.Producto.ConceptoISLR), copiado al armar la orden. Vacío = no
+	// sujeto, que es el caso de toda mercancía.
+	//
+	// Se copia en vez de leerse del catálogo al proyectar porque la orden tiene que
+	// seguir explicando su número cuando alguien reclasifique el producto mañana —
+	// la misma razón por la que se copia la tasa de cambio.
+	ConceptoISLR string `json:"conceptoIslr,omitempty" bson:"conceptoislr,omitempty"`
+}
+
+// RetencionISLRProyectada es una fila del desglose de ISLR de la orden: un
+// concepto, la base que le corresponde y lo que se retendría por él.
+//
+// El desglose existe porque el ISLR se retiene POR CONCEPTO DEL PAGO, y una sola
+// orden puede mezclarlos: honorarios de un técnico y el flete de lo que trajo se
+// retienen a tarifas distintas y se declaran por separado. Un solo par
+// concepto/porcentaje en la orden no puede expresar eso.
+type RetencionISLRProyectada struct {
+	Codigo     string  `json:"codigo" bson:"codigo"`
+	Concepto   string  `json:"concepto" bson:"concepto"`
+	Base       float64 `json:"base" bson:"base"`
+	Porcentaje float64 `json:"porcentaje" bson:"porcentaje"`
+	Sustraendo float64 `json:"sustraendo" bson:"sustraendo"`
+	Monto      float64 `json:"monto" bson:"monto"`
+	// SinTarifa marca el concepto que el maestro NO tiene cargado para el tipo de
+	// sujeto de este proveedor (p. ej. un flete comprado a una persona natural
+	// cuando la tabla solo trae la tarifa de jurídica). La fila se guarda con monto
+	// 0 y esta marca a propósito: si se omitiera, una configuración incompleta se
+	// vería igual que «a este proveedor no se le retiene», y nadie la buscaría.
+	SinTarifa bool `json:"sinTarifa,omitempty" bson:"sintarifa,omitempty"`
 }
 
 // OrdenCompra es un pedido de aprovisionamiento a un proveedor.
@@ -71,6 +101,18 @@ type OrdenCompra struct {
 	// impuesto o el proveedor no lo tiene activado.
 	RetencionIVAPorcentaje float64 `json:"retencionIvaPorcentaje" bson:"retencionivaporcentaje"`
 	RetencionIVAMonto      float64 `json:"retencionIvaMonto" bson:"retencionivamonto"`
+
+	// RetencionISLRDetalle es el desglose POR CONCEPTO y la fuente de verdad del
+	// ISLR de la orden. Los cuatro escalares de abajo se conservan por
+	// compatibilidad y porque el caso de un solo concepto es el habitual:
+	//
+	//   - 0 conceptos ⇒ todo en cero.
+	//   - 1 concepto  ⇒ los escalares lo describen (como siempre).
+	//   - N conceptos ⇒ Monto es la SUMA y Concepto lista los nombres, pero
+	//     Porcentaje y Sustraendo quedan en 0: no existe una tarifa única que
+	//     describa la mezcla, e inventar un promedio sería un número que nadie
+	//     podría declarar. Quien muestre un porcentaje tiene que mirar el detalle.
+	RetencionISLRDetalle []RetencionISLRProyectada `json:"retencionIslrDetalle,omitempty" bson:"retencionislrdetalle,omitempty"`
 
 	RetencionISLRConcepto   string  `json:"retencionIslrConcepto" bson:"retencionislrconcepto"`
 	RetencionISLRPorcentaje float64 `json:"retencionIslrPorcentaje" bson:"retencionislrporcentaje"`

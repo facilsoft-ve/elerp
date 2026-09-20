@@ -17,6 +17,10 @@ var (
 	ErrConceptoNoExiste    = errors.New("el concepto de ISLR no existe")
 	ErrConceptoInvalido    = errors.New("el concepto de ISLR está incompleto o mal formado")
 	ErrConceptosNoCargados = errors.New("el maestro de conceptos de ISLR no está disponible")
+	// ErrConceptoDuplicado: ya hay una fila activa para ese par (código, sujeto).
+	// El par es la clave con la que se resuelve la tarifa; duplicarlo no da error en
+	// ningún lado, solo hace que gane una de las dos sin decir cuál.
+	ErrConceptoDuplicado = errors.New("ya existe un concepto activo con ese código para ese tipo de sujeto")
 )
 
 // ConConceptosISLR cablea el maestro de conceptos.
@@ -69,7 +73,20 @@ func (s *Service) GuardarConceptoISLR(empresaID, actor, origen string, c fiscal.
 	if c.Sustraendo < 0 || c.BaseMinima < 0 {
 		return fiscal.ConceptoISLR{}, ErrConceptoInvalido
 	}
-	s.ConceptosISLR(empresaID) // asegura la siembra antes de tocar la tabla
+	maestro := s.ConceptosISLR(empresaID) // asegura la siembra antes de tocar la tabla
+	// El par (código, sujeto) es la CLAVE de la tabla: es exactamente lo que busca
+	// ConceptoPara, que devuelve la primera coincidencia activa. Con dos filas
+	// vivas del mismo par, editar una puede no cambiar nada porque sigue ganando la
+	// otra — y la tarifa mal aplicada no da ningún error, solo un número distinto
+	// al esperado. Se rechaza al guardar, que es el único momento en que se puede.
+	for _, otro := range maestro {
+		if otro.ID == c.ID || !otro.Activo || !c.Activo {
+			continue
+		}
+		if strings.EqualFold(otro.Codigo, c.Codigo) && otro.Sujeto == c.Sujeto {
+			return fiscal.ConceptoISLR{}, ErrConceptoDuplicado
+		}
+	}
 	if c.ID != "" {
 		if _, ok := s.conceptosISLR.ByID(empresaID, c.ID); !ok {
 			return fiscal.ConceptoISLR{}, ErrConceptoNoExiste
@@ -81,6 +98,32 @@ func (s *Service) GuardarConceptoISLR(empresaID, actor, origen string, c fiscal.
 	out := s.conceptosISLR.Create(c)
 	s.audit.Append(evento(empresaID, actor, origen, "config.concepto_islr.crear", out.Codigo, out.Nombre))
 	return out, nil
+}
+
+// ErrConceptoISLRDesconocido: la ficha de producto trae un código que el maestro
+// no tiene. Se rechaza en vez de guardarse, por lo mismo que la alícuota: un
+// producto clasificado con un concepto inexistente no retendría nada, y esa
+// ausencia se ve igual que «no es un servicio».
+var ErrConceptoISLRDesconocido = errors.New("ese concepto de ISLR no existe en el maestro")
+
+// validarConceptoISLRProducto comprueba que el código del producto exista en el
+// maestro, y de paso lo SIEMBRA si la empresa todavía no lo tiene.
+//
+// Solo valida el CÓDIGO, no el sujeto: el producto declara QUÉ se paga
+// (honorarios, flete) y el proveedor declara A QUIÉN (natural o jurídica). Es la
+// división que hace que la tarifa se pueda resolver sola al comprar; pedirle el
+// sujeto a la ficha del producto sería preguntarle algo que no puede saber.
+//
+// Código vacío es válido y es el caso de toda mercancía: no sujeto a retención.
+func (s *Service) validarConceptoISLRProducto(empresaID, codigo string) (string, error) {
+	cod := strings.ToLower(strings.TrimSpace(codigo))
+	if cod == "" || s.conceptosISLR == nil {
+		return cod, nil
+	}
+	if !fiscal.ExisteConcepto(s.ConceptosISLR(empresaID), cod) {
+		return "", ErrConceptoISLRDesconocido
+	}
+	return cod, nil
 }
 
 // SugerenciaRetencionISLR es lo que la pantalla precarga al registrar una

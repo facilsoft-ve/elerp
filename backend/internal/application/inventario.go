@@ -216,6 +216,11 @@ func (s *Service) CrearProducto(empresaID, actor, origen string, p inventario.Pr
 	if cod != "" {
 		p.ExentoIVA = cod == fiscal.CodExento
 	}
+	conc, err := s.validarConceptoISLRProducto(empresaID, p.ConceptoISLR)
+	if err != nil {
+		return inventario.Producto{}, err
+	}
+	p.ConceptoISLR = conc
 	if _, ok := s.productos.BySKU(empresaID, p.SKU); ok {
 		return inventario.Producto{}, ErrSKUDuplicado
 	}
@@ -335,12 +340,15 @@ type CambiosProducto struct {
 	// AlicuotaCodigo es *string: nil = no se toca; "" vuelve al comportamiento
 	// heredado (manda ExentoIVA).
 	AlicuotaCodigo *string
-	Activo         *bool
-	EsCombo        *bool
-	Componentes    []inventario.ComboComponente
-	EsPlato        *bool
-	Receta         []inventario.ComboComponente
-	EsInsumo       *bool
+	// ConceptoISLR es *string: nil = no se toca; "" deja de clasificar el producto
+	// como servicio sujeto a retención.
+	ConceptoISLR *string
+	Activo       *bool
+	EsCombo      *bool
+	Componentes  []inventario.ComboComponente
+	EsPlato      *bool
+	Receta       []inventario.ComboComponente
+	EsInsumo     *bool
 	// ComanderaID es *string: nil = no enviado = no se toca; "" vacía la elección y
 	// devuelve el producto al ruteo por rubro.
 	ComanderaID *string
@@ -476,6 +484,13 @@ func (s *Service) ActualizarProducto(empresaID, actor, origen, sku string, cambi
 		if p.AlicuotaCodigo != "" {
 			p.ExentoIVA = p.AlicuotaCodigo == fiscal.CodExento
 		}
+	}
+	if cambios.ConceptoISLR != nil {
+		conc, err := s.validarConceptoISLRProducto(empresaID, *cambios.ConceptoISLR)
+		if err != nil {
+			return inventario.Producto{}, err
+		}
+		p.ConceptoISLR = conc
 	}
 	if cambios.Activo != nil {
 		p.Activo = *cambios.Activo

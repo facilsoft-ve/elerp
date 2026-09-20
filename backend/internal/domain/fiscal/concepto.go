@@ -119,6 +119,34 @@ func ConceptoPara(conceptos []ConceptoISLR, codigo, sujeto string) (ConceptoISLR
 	return ConceptoISLR{}, false
 }
 
+// NombreDeConcepto devuelve el nombre legible de un código, sin importar el
+// sujeto. Sirve para NOMBRAR un concepto que el maestro conoce pero del que no
+// tiene tarifa para cierto sujeto: «Fletes y transporte» dice mucho más que
+// «fletes» cuando hay que explicar por qué no se retuvo.
+func NombreDeConcepto(conceptos []ConceptoISLR, codigo string) string {
+	cod := strings.TrimSpace(strings.ToLower(codigo))
+	for _, c := range conceptos {
+		if strings.ToLower(c.Codigo) == cod {
+			return c.Nombre
+		}
+	}
+	return ""
+}
+
+// ExisteConcepto dice si el maestro conoce ese código para ALGÚN sujeto. Es lo
+// que valida la ficha de producto: el producto clasifica el CONCEPTO (qué se
+// paga) y el sujeto lo pone el proveedor (a quién se le paga), así que exigir
+// acá un sujeto sería pedirle a la ficha algo que no sabe.
+func ExisteConcepto(conceptos []ConceptoISLR, codigo string) bool {
+	cod := strings.TrimSpace(strings.ToLower(codigo))
+	for _, c := range conceptos {
+		if strings.ToLower(c.Codigo) == cod && c.Activo {
+			return true
+		}
+	}
+	return false
+}
+
 // CodigosDeConcepto devuelve los códigos distintos del maestro, ordenados. Es lo
 // que ofrece el selector de la ficha de producto.
 func CodigosDeConcepto(conceptos []ConceptoISLR) []string {

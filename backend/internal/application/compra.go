@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/mornix/elerp/internal/domain/compra"
@@ -88,6 +89,30 @@ func (s *Service) porcentajeRetencionIVA(empresaID string, delProveedor float64)
 	return porcentajeRetencionIVADefault
 }
 
+// basesISLRPorConcepto agrupa el NETO de las líneas por concepto de retención,
+// devolviendo los códigos ordenados y su base. El orden es alfabético y no el de
+// las líneas a propósito: el desglose de dos órdenes con los mismos conceptos
+// tiene que salir igual, y un mapa de Go no garantiza ningún orden.
+//
+// Las líneas sin concepto (toda mercancía) no entran en ninguna base: sobre la
+// compra de un producto no se retiene ISLR.
+func basesISLRPorConcepto(lineas []compra.Linea) ([]string, map[string]float64) {
+	bases := map[string]float64{}
+	codigos := []string{}
+	for _, l := range lineas {
+		cod := strings.ToLower(strings.TrimSpace(l.ConceptoISLR))
+		if cod == "" {
+			continue
+		}
+		if _, visto := bases[cod]; !visto {
+			codigos = append(codigos, cod)
+		}
+		bases[cod] = round2(bases[cod] + l.Total)
+	}
+	sort.Strings(codigos)
+	return codigos, bases
+}
+
 // proyectarRetencionesOC calcula lo que se le retendrá al proveedor cuando llegue su
 // factura, y por tanto el NETO que se le va a pagar. Es una proyección que se graba
 // en la orden; el comprobante que vale ante el SENIAT se emite después, sobre la
@@ -98,11 +123,24 @@ func (s *Service) porcentajeRetencionIVA(empresaID string, delProveedor float64)
 // activado. Si falta cualquiera, el monto es 0 — no se inventa una retención que
 // después nadie podría emitir.
 //
-// Bases: el IVA se retiene sobre el IVA de la orden; el ISLR, sobre el neto (el
-// subtotal sin impuesto), que es el ingreso del proveedor, y se le resta el
-// sustraendo de la tabla del reglamento sin bajar de cero.
+// DE DÓNDE SALE EL CONCEPTO. El ISLR se retiene por el CONCEPTO DEL PAGO —qué se
+// está pagando—, así que lo declara el PRODUCTO (inventario.Producto.ConceptoISLR)
+// y se retiene línea por línea, agrupando por concepto. El concepto del perfil del
+// proveedor es el RESPALDO para cuando ninguna línea lo declara: servicios que no
+// están en el catálogo, o catálogos todavía sin clasificar.
+//
+// El perfil del proveedor (y su ajuste por orden) sigue mandando en lo suyo: si se
+// retiene o no, y el TIPO DE SUJETO, que es de quien cobra y no de lo que se compra.
+// Por eso un ajuste por orden no puede reclasificar un servicio que el catálogo ya
+// clasificó: para eso se corrige la ficha del producto, que es donde vive.
+//
+// Bases: el IVA se retiene sobre el IVA de la orden; el ISLR, sobre el neto de las
+// líneas de cada concepto, que es el ingreso del proveedor. El cálculo lo hace el
+// propio concepto (fiscal.ConceptoISLR.Retener), que ya sabe de base mínima y de
+// sustraendo: si la proyección lo repitiera por su cuenta, tarde o temprano diría un
+// número distinto al del comprobante que se emite después.
 func (s *Service) proyectarRetencionesOC(empresaID string, prov proveedor.Proveedor, in *RetencionesOCEntrada,
-	subtotal, iva float64) (o compra.OrdenCompra) {
+	lineas []compra.Linea, subtotal, iva float64) (o compra.OrdenCompra) {
 	perfil := RetencionesOCEntrada{
 		RetieneIVA: prov.RetieneIVA, IVAPorcentaje: prov.RetencionIVAPorcentaje,
 		RetieneISLR:        prov.RetieneISLR,
@@ -117,17 +155,66 @@ func (s *Service) proyectarRetencionesOC(empresaID string, prov proveedor.Provee
 		o.RetencionIVAPorcentaje = s.porcentajeRetencionIVA(empresaID, perfil.IVAPorcentaje)
 		o.RetencionIVAMonto = round2(iva * o.RetencionIVAPorcentaje / 100)
 	}
-	// ISLR: la tarifa sale del MAESTRO, y el cálculo lo hace el propio concepto
-	// (fiscal.ConceptoISLR.Retener), que ya sabe de base mínima y sustraendo. Si la
-	// proyección lo recalculara por su cuenta, tarde o temprano diría un número
-	// distinto al del comprobante que se emite después.
-	if emp.AgenteRetencionISLR && perfil.RetieneISLR && subtotal > 0.004 {
-		if c, ok := fiscal.ConceptoPara(s.ConceptosISLR(empresaID), strings.TrimSpace(perfil.ISLRConceptoCodigo), perfil.ISLRSujeto); ok {
-			o.RetencionISLRConcepto = c.Nombre
-			o.RetencionISLRPorcentaje = c.Porcentaje
-			o.RetencionISLRSustraendo = round2(c.Sustraendo)
-			o.RetencionISLRMonto = round2(c.Retener(subtotal))
+	if !emp.AgenteRetencionISLR || !perfil.RetieneISLR {
+		return o
+	}
+
+	maestro := s.ConceptosISLR(empresaID)
+	codigos, bases := basesISLRPorConcepto(lineas)
+	if len(codigos) == 0 {
+		// Respaldo: ninguna línea declara concepto ⇒ el del proveedor sobre el neto
+		// completo, que es como funcionaba antes de que el producto lo clasificara.
+		cod := strings.ToLower(strings.TrimSpace(perfil.ISLRConceptoCodigo))
+		if cod == "" || subtotal <= 0.004 {
+			return o
 		}
+		codigos, bases = []string{cod}, map[string]float64{cod: subtotal}
+	}
+
+	for _, cod := range codigos {
+		base := bases[cod]
+		if base <= 0.004 {
+			continue
+		}
+		c, ok := fiscal.ConceptoPara(maestro, cod, perfil.ISLRSujeto)
+		if !ok {
+			// El maestro conoce el concepto pero no tiene tarifa para ESTE tipo de
+			// sujeto (un flete comprado a una persona natural cuando la tabla solo trae
+			// la de jurídica). Se deja constancia con monto 0 en vez de omitir la fila:
+			// callarlo haría que una tabla incompleta se viera exactamente igual que
+			// «a este proveedor no se le retiene», y nadie iría a buscarla.
+			nombre := fiscal.NombreDeConcepto(maestro, cod)
+			if nombre == "" {
+				nombre = cod
+			}
+			o.RetencionISLRDetalle = append(o.RetencionISLRDetalle, compra.RetencionISLRProyectada{
+				Codigo: cod, Concepto: nombre, Base: base, SinTarifa: true,
+			})
+			continue
+		}
+		monto := round2(c.Retener(base))
+		o.RetencionISLRDetalle = append(o.RetencionISLRDetalle, compra.RetencionISLRProyectada{
+			Codigo: c.Codigo, Concepto: c.Nombre, Base: base,
+			Porcentaje: c.Porcentaje, Sustraendo: round2(c.Sustraendo), Monto: monto,
+		})
+		o.RetencionISLRMonto = round2(o.RetencionISLRMonto + monto)
+	}
+
+	// Escalares: describen el caso de UN concepto, que es el habitual. Con varios,
+	// solo el monto (la suma) y la lista de nombres significan algo — un porcentaje
+	// único de una mezcla de tarifas sería un número que nadie podría declarar.
+	switch len(o.RetencionISLRDetalle) {
+	case 0:
+	case 1:
+		d := o.RetencionISLRDetalle[0]
+		o.RetencionISLRConcepto = d.Concepto
+		o.RetencionISLRPorcentaje, o.RetencionISLRSustraendo = d.Porcentaje, d.Sustraendo
+	default:
+		nombres := make([]string, 0, len(o.RetencionISLRDetalle))
+		for _, d := range o.RetencionISLRDetalle {
+			nombres = append(nombres, d.Concepto)
+		}
+		o.RetencionISLRConcepto = strings.Join(nombres, " · ")
 	}
 	return o
 }
@@ -198,6 +285,9 @@ func (s *Service) armarLineasOC(empresaID string, in EntradaOC) ([]compra.Linea,
 			ProductoID: p.ID, SKU: p.SKU, Nombre: p.Nombre,
 			Cantidad: l.Cantidad, CostoUnitario: l.CostoUnitario, CantidadRecibida: 0,
 			Total: round2(l.CostoUnitario * l.Cantidad), Exento: exento,
+			// El concepto de ISLR se copia del catálogo: es lo que hace que la
+			// retención salga sola en vez de teclearse. Vacío en toda mercancía.
+			ConceptoISLR: p.ConceptoISLR,
 		})
 	}
 	var subtotal, baseImponible float64
@@ -251,10 +341,11 @@ func (s *Service) CrearOrdenCompra(empresaID, sedeID, actor, origen string, in E
 		Actor: actor, Creada: ahora(), Actualizada: ahora(),
 	}
 	// Retenciones proyectadas: cuánto se le va a pagar de verdad al proveedor.
-	ret := s.proyectarRetencionesOC(empresaID, prov, in.Retenciones, subtotal, iva)
+	ret := s.proyectarRetencionesOC(empresaID, prov, in.Retenciones, lineas, subtotal, iva)
 	o.RetencionIVAPorcentaje, o.RetencionIVAMonto = ret.RetencionIVAPorcentaje, ret.RetencionIVAMonto
 	o.RetencionISLRConcepto, o.RetencionISLRPorcentaje = ret.RetencionISLRConcepto, ret.RetencionISLRPorcentaje
 	o.RetencionISLRSustraendo, o.RetencionISLRMonto = ret.RetencionISLRSustraendo, ret.RetencionISLRMonto
+	o.RetencionISLRDetalle = ret.RetencionISLRDetalle
 	// Los tres importes ya vienen redondeados a dos decimales: restarlos no necesita
 	// otro round2, que además truncaría hacia cero si el neto diera negativo.
 	o.NetoAPagar = total - o.RetencionIVAMonto - o.RetencionISLRMonto

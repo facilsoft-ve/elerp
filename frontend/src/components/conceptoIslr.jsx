@@ -181,3 +181,51 @@ export function SelectorConceptoISLR({ base = 0, valor, onChange, disabled = fal
 
 // esTextoLibre indica si el valor del selector es un concepto fuera del maestro.
 export const esTextoLibre = (valor) => !valor?.codigo || valor.codigo === OTRO
+
+/* SelectorConceptoProducto — clasifica la FICHA DE UN PRODUCTO.
+ *
+ * Pide SOLO el concepto, sin sujeto: el producto declara QUÉ se paga (honorarios,
+ * flete) y el proveedor declara A QUIÉN (persona natural o jurídica). De ese par
+ * sale la tarifa al comprar. Preguntarle acá el sujeto sería pedirle a la ficha
+ * algo que no puede saber — el mismo servicio se le compra a los dos.
+ *
+ * Vacío es el caso normal y por eso encabeza la lista: toda mercancía va sin
+ * concepto. Solo los servicios sujetos a retención se clasifican.
+ *
+ * props:
+ *   valor — el código actual ('' = no sujeto)
+ *   onChange(codigo)
+ */
+export function SelectorConceptoProducto({ valor, onChange, disabled = false }) {
+  const { porCodigo, hayMaestro } = useConceptosISLR()
+  const codigo = (valor || '').trim()
+
+  // Sin maestro no hay nada que ofrecer. Se oculta en vez de mostrar un
+  // desplegable vacío, que parecería un error de la ficha: un catálogo de
+  // mercancía no necesita esto para nada.
+  if (!hayMaestro && !codigo) return null
+
+  // Un código que ya no está en el maestro (se desactivó después de clasificar)
+  // se sigue mostrando: si desapareciera del desplegable, la ficha se vería sin
+  // concepto y el primer guardado lo borraría sin que nadie lo decidiera.
+  const huerfano = codigo && !porCodigo.some((c) => c.codigo === codigo)
+
+  return (
+    <div className="space-y-1.5">
+      <Field label="Concepto de ISLR"
+        hint={codigo ? 'servicio sujeto a retención' : 'solo para servicios'}>
+        <Select value={codigo} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+          <option value="">No sujeto a retención (mercancía)</option>
+          {porCodigo.map((c) => <option key={c.codigo} value={c.codigo}>{c.nombre}</option>)}
+          {huerfano ? <option value={codigo}>{codigo} (fuera del maestro)</option> : null}
+        </Select>
+      </Field>
+      {codigo ? (
+        <div className="text-[11.5px] text-slate-500 dark:text-slate-400">
+          Al comprarlo, la orden retiene por este concepto. La <strong>tarifa</strong> depende
+          además de si el proveedor es persona natural o jurídica, que se declara en su ficha.
+        </div>
+      ) : null}
+    </div>
+  )
+}

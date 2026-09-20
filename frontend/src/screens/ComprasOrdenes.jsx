@@ -213,6 +213,53 @@ export function ComprasOrdenes() {
 
 // Botonera por fila según estado y permiso. `factura` (si existe) marca la OC como
 // ya facturada: se muestra el badge y se oculta la acción de registrar factura.
+
+/* DesgloseISLR — las filas de retención de ISLR, una por CONCEPTO.
+ *
+ * Existe porque el ISLR se retiene por concepto del pago y una orden puede
+ * mezclarlos: honorarios de un técnico y el flete de lo que trajo van a tarifas
+ * distintas. Con un concepto se lee como siempre; con varios, cada uno muestra su
+ * tarifa — un porcentaje único de la mezcla sería un número que nadie podría
+ * declarar.
+ *
+ * Las filas SIN TARIFA se muestran aunque retengan 0: el maestro no tiene ese
+ * concepto para el tipo de sujeto del proveedor, y callarlo haría que una tabla
+ * incompleta se viera igual que «a este proveedor no se le retiene».
+ */
+function DesgloseISLR({ detalle = [], monto = 0, porcentaje = 0, concepto = '', ccy = 'VES' }) {
+  // Órdenes anteriores al desglose solo tienen los escalares: se leen igual.
+  if (detalle.length === 0) {
+    if (!(monto > 0)) return null
+    return (
+      <div className="flex items-center justify-between">
+        <span className="text-slate-500">
+          Retención ISLR <span className="text-slate-400">{fmtNum(porcentaje, 0)}%</span>
+          {concepto ? <span className="block text-[11px] text-slate-400">{concepto}</span> : null}
+        </span>
+        <span className="num private-mask">− {fmtCurrency(monto, ccy)}</span>
+      </div>
+    )
+  }
+  return (
+    <>
+      {detalle.map((d) => (
+        <div key={d.codigo} className="flex items-center justify-between">
+          <span className="text-slate-500">
+            Retención ISLR{d.sinTarifa ? '' : <> <span className="text-slate-400">{fmtNum(d.porcentaje, 0)}%</span></>}
+            <span className="block text-[11px] text-slate-400">{d.concepto}</span>
+            {d.sinTarifa ? (
+              <span className="block text-[11px] text-amber-700 dark:text-amber-400">
+                El maestro no tiene la tarifa de este concepto para el tipo de proveedor: no se retiene.
+              </span>
+            ) : null}
+          </span>
+          <span className="num private-mask">{d.sinTarifa ? '—' : <>− {fmtCurrency(d.monto, ccy)}</>}</span>
+        </div>
+      ))}
+    </>
+  )
+}
+
 function Acciones({ oc, gestiona, busy, factura, onConfirmar, onRecibir, onCancelar, onFacturar, onVer }) {
   const btn = 'h-7 px-2 inline-flex items-center gap-1 rounded-lg text-[12px]'
   const facturarBtn = (
@@ -318,7 +365,9 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
       const i = c.findIndex((l) => l.sku === p.sku)
       if (i >= 0) return c.map((l, j) => (j === i ? { ...l, cantidad: l.cantidad + 1 } : l))
       const costo = Number(p.costo ?? p.costoPromedio ?? 0) || 0
-      return [...c, { sku: p.sku, nombre: p.nombre, cantidad: 1, costoUnitario: costo, exento: !!p.exentoIva }]
+      // El concepto de ISLR viaja con la línea, igual que la exención: es del
+      // producto, y es lo que hace que la retención salga sola.
+      return [...c, { sku: p.sku, nombre: p.nombre, cantidad: 1, costoUnitario: costo, exento: !!p.exentoIva, conceptoIslr: p.conceptoIslr || '' }]
     })
     setQ('')
     searchRef.current?.focus()
@@ -359,9 +408,14 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
   // recalcula con las mismas reglas al guardar y es la autoridad.
   const proyeccion = useMemo(() => proyectarRetenciones({
     empresa: db.EMPRESA, perfil: ret, conceptos,
+    // El ISLR se retiene por concepto del pago, así que la proyección necesita las
+    // líneas: cada una trae el concepto de su producto.
+    lineas: lineas.map((l) => ({ conceptoIslr: l.conceptoIslr, total: netoLinea(l) })),
     subtotal: totales.subtotal, iva: totales.iva, total: totales.total,
-  }), [db.EMPRESA, ret, conceptos, totales])
-  const hayRetenciones = proyeccion.ivaMonto > 0 || proyeccion.islrMonto > 0
+  }), [db.EMPRESA, ret, conceptos, totales, lineas])
+  // Una fila SIN TARIFA retiene 0 pero tiene que verse: es configuración
+  // incompleta, no ausencia de retención.
+  const hayRetenciones = proyeccion.ivaMonto > 0 || proyeccion.islrMonto > 0 || proyeccion.detalle.length > 0
 
   const errProveedor = !proveedorId ? 'Elige un proveedor.' : ''
   const errSede = !sedeId ? 'Elige la sede que recibe la mercancía.' : ''
@@ -599,12 +653,8 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
                     <span className="num private-mask">− {fmtCurrency(proyeccion.ivaMonto, 'VES')}</span>
                   </div>
                 ) : null}
-                {proyeccion.islrMonto > 0 ? (
-                  <div className="flex justify-between text-slate-500">
-                    <span>Retención ISLR <span className="text-slate-400">{fmtNum(proyeccion.islrPorcentaje, 0)}%</span></span>
-                    <span className="num private-mask">− {fmtCurrency(proyeccion.islrMonto, 'VES')}</span>
-                  </div>
-                ) : null}
+                <DesgloseISLR detalle={proyeccion.detalle} monto={proyeccion.islrMonto}
+                  porcentaje={proyeccion.islrPorcentaje} concepto={proyeccion.islrConcepto} ccy="VES" />
                 <div className="border-t border-slate-200 dark:border-slate-700 pt-1.5 flex items-center justify-between font-semibold">
                   <span>Neto a pagar <span className="text-[11px] font-normal text-slate-400">al proveedor</span></span>
                   <span className="num private-mask text-[16px] text-emerald-700 dark:text-emerald-300">{fmtCurrency(proyeccion.neto, 'VES')}</span>
@@ -762,7 +812,7 @@ function DetalleOrden({ oc, gestiona, sedes, factura, onVolver, onConfirmar, onR
             </div>
             {/* Retenciones proyectadas al crear la orden: el neto es lo que
                 efectivamente recibe el proveedor. Lo retenido se entera al SENIAT. */}
-            {(oc.retencionIvaMonto > 0 || oc.retencionIslrMonto > 0) ? (
+            {(oc.retencionIvaMonto > 0 || oc.retencionIslrMonto > 0 || (oc.retencionIslrDetalle || []).length > 0) ? (
               <>
                 {oc.retencionIvaMonto > 0 ? (
                   <div className="flex items-center justify-between pt-1">
@@ -770,21 +820,14 @@ function DetalleOrden({ oc, gestiona, sedes, factura, onVolver, onConfirmar, onR
                     <span className="num private-mask">− {fmtCurrency(oc.retencionIvaMonto, ccy)}</span>
                   </div>
                 ) : null}
-                {oc.retencionIslrMonto > 0 ? (
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">
-                      Retención ISLR <span className="text-slate-400">{fmtNum(oc.retencionIslrPorcentaje, 0)}%</span>
-                      {oc.retencionIslrConcepto ? <span className="block text-[11px] text-slate-400">{oc.retencionIslrConcepto}</span> : null}
-                    </span>
-                    <span className="num private-mask">− {fmtCurrency(oc.retencionIslrMonto, ccy)}</span>
-                  </div>
-                ) : null}
+                <DesgloseISLR detalle={oc.retencionIslrDetalle || []} monto={oc.retencionIslrMonto}
+                  porcentaje={oc.retencionIslrPorcentaje} concepto={oc.retencionIslrConcepto} ccy={ccy} />
                 <div className="border-t border-slate-200 dark:border-slate-700 pt-1.5 flex items-center justify-between">
                   <span className="font-semibold">Neto a pagar <span className="text-[11px] font-normal text-slate-400">al proveedor</span></span>
                   <span className="num font-semibold private-mask text-[16px] text-emerald-700 dark:text-emerald-300">{fmtCurrency(oc.netoAPagar, ccy)}</span>
                 </div>
                 <div className="text-[11px] text-slate-400 leading-snug pt-0.5">
-                  Proyección tomada del perfil del proveedor al crear la orden. El comprobante de retención se emite sobre la factura.
+                  Proyección al crear la orden: el concepto lo trae cada producto y el tipo de proveedor decide la tarifa. El comprobante de retención se emite sobre la factura.
                 </div>
               </>
             ) : null}

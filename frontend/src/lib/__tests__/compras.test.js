@@ -151,3 +151,98 @@ describe('proyectarRetenciones', () => {
     expect(r.neto).toBe(1000)
   })
 })
+
+/* EL CONCEPTO LO DECLARA LA LÍNEA (lo trae el producto).
+ *
+ * Misma tabla de casos que compra_islr_producto_test.go en el servidor. El
+ * maestro de este fixture trae fletes SOLO para jurídica domiciliada, que es lo
+ * que permite probar el concepto sin tarifa para el sujeto del proveedor. */
+const CONCEPTOS_CON_FLETES = [
+  ...CONCEPTOS,
+  { codigo: 'fletes', nombre: 'Fletes y transporte', sujeto: 'juridica_domiciliada', porcentaje: 3, sustraendo: 0, activo: true },
+]
+
+const JURIDICA = { retieneIva: false, ivaPorcentaje: 0, retieneIslr: true, islrConceptoCodigo: 'honorarios', islrSujeto: 'juridica_domiciliada' }
+
+describe('proyectarRetenciones · el concepto sale de las líneas', () => {
+  it('retiene por el concepto del PRODUCTO, no por el del perfil del proveedor', () => {
+    const r = proyectarRetenciones({
+      empresa: AGENTE,
+      // El perfil dice fletes (3 %), pero se compró una consultoría de honorarios.
+      perfil: { ...JURIDICA, islrConceptoCodigo: 'fletes' },
+      conceptos: CONCEPTOS_CON_FLETES,
+      lineas: [{ conceptoIslr: 'honorarios', total: 1000 }],
+      ...ORDEN,
+    })
+    expect(r.detalle).toHaveLength(1)
+    expect(r.detalle[0].codigo).toBe('honorarios')
+    expect(r.islrPorcentaje).toBe(5)
+    expect(r.islrMonto).toBe(50)
+  })
+
+  it('la mercancía no entra en la base: solo el neto de las líneas con concepto', () => {
+    const r = proyectarRetenciones({
+      empresa: AGENTE, perfil: JURIDICA, conceptos: CONCEPTOS_CON_FLETES,
+      lineas: [{ conceptoIslr: 'honorarios', total: 1000 }, { conceptoIslr: '', total: 1000 }],
+      subtotal: 2000, iva: 320, total: 2320,
+    })
+    expect(r.detalle).toHaveLength(1)
+    expect(r.detalle[0].base).toBe(1000)
+    expect(r.islrMonto).toBe(50)
+  })
+
+  it('varios conceptos se desglosan y el porcentaje único deja de existir', () => {
+    const r = proyectarRetenciones({
+      empresa: AGENTE, perfil: JURIDICA, conceptos: CONCEPTOS_CON_FLETES,
+      lineas: [{ conceptoIslr: 'honorarios', total: 1000 }, { conceptoIslr: 'fletes', total: 1000 }],
+      subtotal: 2000, iva: 320, total: 2320,
+    })
+    // Ordenado por código, igual que en el servidor: fletes antes que honorarios.
+    expect(r.detalle.map((d) => d.codigo)).toEqual(['fletes', 'honorarios'])
+    expect(r.islrMonto).toBe(80) // 3% de 1.000 + 5% de 1.000
+    expect(r.islrPorcentaje).toBe(0)
+    expect(r.islrConcepto).toContain('·')
+    expect(r.neto).toBe(2240)
+  })
+
+  it('un concepto sin tarifa para ese sujeto queda visible con monto 0', () => {
+    const r = proyectarRetenciones({
+      empresa: AGENTE,
+      perfil: { ...JURIDICA, islrSujeto: 'natural_residente' },
+      conceptos: CONCEPTOS_CON_FLETES,
+      lineas: [{ conceptoIslr: 'fletes', total: 1000 }],
+      ...ORDEN,
+    })
+    expect(r.detalle).toHaveLength(1)
+    expect(r.detalle[0].sinTarifa).toBe(true)
+    expect(r.detalle[0].concepto).toBe('Fletes y transporte')
+    expect(r.detalle[0].base).toBe(1000)
+    expect(r.islrMonto).toBe(0)
+  })
+
+  it('sin concepto en ninguna línea manda el del proveedor sobre el neto', () => {
+    const r = proyectarRetenciones({
+      empresa: AGENTE, perfil: JURIDICA, conceptos: CONCEPTOS_CON_FLETES,
+      lineas: [{ conceptoIslr: '', total: 1000 }],
+      ...ORDEN,
+    })
+    expect(r.detalle).toHaveLength(1)
+    expect(r.detalle[0].codigo).toBe('honorarios')
+    expect(r.islrMonto).toBe(50)
+  })
+
+  it('la base mínima se evalúa POR CONCEPTO, no sobre el subtotal', () => {
+    // Consultoría tiene mínimo 5.000: con 1.000 de base no retiene, aunque la
+    // orden entera sume más.
+    const r = proyectarRetenciones({
+      empresa: AGENTE,
+      perfil: { ...JURIDICA, islrConceptoCodigo: 'consultoria' },
+      conceptos: CONCEPTOS_CON_FLETES,
+      lineas: [{ conceptoIslr: 'consultoria', total: 1000 }, { conceptoIslr: 'honorarios', total: 6000 }],
+      subtotal: 7000, iva: 1120, total: 8120,
+    })
+    const consultoria = r.detalle.find((d) => d.codigo === 'consultoria')
+    expect(consultoria.monto).toBe(0)
+    expect(r.islrMonto).toBe(300) // solo honorarios: 5% de 6.000
+  })
+})

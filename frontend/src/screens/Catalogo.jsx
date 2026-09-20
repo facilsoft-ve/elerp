@@ -6,6 +6,7 @@ import { useData, useTasa } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
 import { SelectorAlicuota, codigoEfectivo, useAlicuotas, etiquetaAlicuota } from '../components/alicuota.jsx'
+import { SelectorConceptoProducto } from '../components/conceptoIslr.jsx'
 import { PrecioDual, fechaCortaVE } from '../components/tasa.jsx'
 import { ImagenProducto, EtiquetaAlicuota } from '../components/producto.jsx'
 import { monedaDe, precioEnMoneda, precioEnBs } from '../lib/precio.js'
@@ -453,6 +454,7 @@ function NuevoProducto({ rubros, onClose, onSaved, toast, monedaEmpresa = 'VES',
   const [f, setF] = useState({
     sku: '', nombre: '', rubro: rubros[0]?.nombre || '', unidadBase: 'unidad', precio: '',
     moneda: monedaEmpresa, codigoBarras: '', exentoIva: false, alicuotaCodigo: 'general',
+    conceptoIslr: '',
     esCombo: false, componentes: [], esInsumo: false,
   })
   const esPeso = esUnidadDePeso(unidades, f.unidadBase)
@@ -490,6 +492,8 @@ function NuevoProducto({ rubros, onClose, onSaved, toast, monedaEmpresa = 'VES',
             sku: f.sku.trim(), nombre: f.nombre.trim(), rubro: f.rubro,
             unidadBase: f.unidadBase || 'unidad', precio: Number(f.precio) || 0, moneda: f.moneda,
             codigoBarras: f.codigoBarras.trim(), exentoIva: f.exentoIva, alicuotaCodigo: f.alicuotaCodigo,
+            // Un combo es un paquete de productos, nunca un servicio: no se clasifica.
+            conceptoIslr: f.conceptoIslr,
             tipoVenta: esPeso ? 'peso' : 'unidad',
             // Un insumo no se vende: el servidor le fuerza el precio a cero.
             esInsumo: f.esInsumo,
@@ -580,6 +584,14 @@ function NuevoProducto({ rubros, onClose, onSaved, toast, monedaEmpresa = 'VES',
             con la que no toca es un error fiscal, no un redondeo. */}
         <SelectorAlicuota valor={f.alicuotaCodigo} producto={f}
           onChange={(cod) => setF((s) => ({ ...s, alicuotaCodigo: cod, exentoIva: cod === 'exento' }))} />
+
+        {/* Concepto de ISLR: solo para SERVICIOS. Es lo que hace que, al comprarlo,
+            la retención salga sola en vez de teclearse. Un combo es un paquete de
+            productos, no un servicio. */}
+        {!esCombo ? (
+          <SelectorConceptoProducto valor={f.conceptoIslr}
+            onChange={(cod) => setF((s) => ({ ...s, conceptoIslr: cod }))} />
+        ) : null}
       </div>
     </VistaDetalle>
   )
@@ -789,6 +801,7 @@ function EditarProducto({ producto, monedaEmpresa, monedas = ['VES'], unidades =
     moneda: monedaDe(producto, monedaEmpresa),
     codigoBarras: producto.codigoBarras || '',
     exentoIva: !!producto.exentoIva, alicuotaCodigo: codigoEfectivo(producto),
+    conceptoIslr: producto.conceptoIslr || '',
     activo: producto.activo !== false,
     unidadBase: producto.unidadBase || 'unidad',
     esCombo: !!producto.esCombo,
@@ -816,6 +829,7 @@ function EditarProducto({ producto, monedaEmpresa, monedas = ['VES'], unidades =
         : {
             nombre: f.nombre.trim(), precio: Number(f.precio), moneda: f.moneda,
             codigoBarras: f.codigoBarras.trim(), exentoIva: f.exentoIva, alicuotaCodigo: f.alicuotaCodigo, activo: f.activo,
+            conceptoIslr: f.conceptoIslr,
             tipoVenta: esPeso ? 'peso' : 'unidad', unidadBase: f.unidadBase || 'unidad',
           }
       await api.actualizarProducto(producto.sku, payload)
@@ -870,6 +884,14 @@ function EditarProducto({ producto, monedaEmpresa, monedas = ['VES'], unidades =
             alícuota al emitir. */}
         <SelectorAlicuota valor={f.alicuotaCodigo} producto={producto}
           onChange={(cod) => setF((s) => ({ ...s, alicuotaCodigo: cod, exentoIva: cod === 'exento' }))} />
+
+        {/* Concepto de ISLR: solo para SERVICIOS. Es lo que hace que, al comprarlo,
+            la retención salga sola en vez de teclearse. Un combo es un paquete de
+            productos, no un servicio. */}
+        {!esCombo ? (
+          <SelectorConceptoProducto valor={f.conceptoIslr}
+            onChange={(cod) => setF((s) => ({ ...s, conceptoIslr: cod }))} />
+        ) : null}
         <Toggle checked={f.activo} onChange={(v) => setF((s) => ({ ...s, activo: v }))}
           label="Activo" sub="Un producto inactivo conserva su histórico pero no se puede vender." />
         {error ? (
