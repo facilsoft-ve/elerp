@@ -31,6 +31,14 @@ const (
 	MovSalida        = "salida"        // venta/despacho (cantidad < 0)
 	MovAjuste        = "ajuste"        // conteo físico/merma (cantidad +/-, requiere motivo)
 	MovTransferencia = "transferencia" // pata de una transferencia entre sedes
+	// MovRevaluacion sube (o baja) el VALOR del stock sin mover una sola unidad.
+	// Es lo que permite que un flete o un impuesto de importación entre al costo
+	// del producto después de haberlo recibido: el costo en destino.
+	//
+	// Lleva Cantidad 0 y su valor en ValorAgregado. Sin un tipo propio no se podía
+	// expresar: un movimiento de cantidad 0 atraviesa el pliegue sin cambiar nada,
+	// y meterlo como una entrada de cantidad simbólica habría inventado unidades.
+	MovRevaluacion = "revaluacion"
 )
 
 // Estados de una transferencia (máquina de estados).
@@ -167,6 +175,14 @@ type Movimiento struct {
 	Tipo          string  `json:"tipo" bson:"tipo"`
 	Cantidad      float64 `json:"cantidad" bson:"cantidad"`
 	CostoUnitario float64 `json:"costoUnitario" bson:"costounitario"`
+	// ValorAgregado es el valor TOTAL que este movimiento añade al stock sin mover
+	// unidades. Solo lo usa MovRevaluacion; en los demás tipos es 0 y se ignora.
+	//
+	// Va como valor total y no como costo unitario porque el reparto ya se hizo
+	// aguas arriba: lo que se reparte es un flete entre varios productos, y volver
+	// a dividirlo por la cantidad acá daría un número distinto si el stock cambió
+	// entre el reparto y el pliegue.
+	ValorAgregado float64 `json:"valorAgregado,omitempty" bson:"valoragregado,omitempty"`
 	Motivo        string  `json:"motivo" bson:"motivo"`
 	RefTipo       string  `json:"refTipo" bson:"reftipo"` // p. ej. "transferencia"
 	RefID         string  `json:"refId" bson:"refid"`

@@ -451,6 +451,11 @@ export const api = {
   guardarConceptoISLR: (body) => request('/api/config/conceptos-islr', { method: 'POST', body: JSON.stringify(body) }),
   // Acumulado del ejercicio por concepto: decide el TRAMO de la escala (Tarifa 2
   // de los no domiciliados). Sin él la pantalla proyectaría siempre el primero.
+  // COSTOS EN DESTINO: fletes e impuestos que encarecen una compra ya recibida.
+  // Solo anexado — se corrige aplicando otro en negativo.
+  costosEnDestino: (ordenId) => request(`/api/compras/ordenes/${encodeURIComponent(ordenId)}/costos-destino`),
+  aplicarCostoEnDestino: (ordenId, body) =>
+    request(`/api/compras/ordenes/${encodeURIComponent(ordenId)}/costos-destino`, { method: 'POST', body: JSON.stringify(body) }),
   acumuladoISLR: ({ terceroId, fecha = '' }) =>
     request(`/api/config/conceptos-islr/acumulado?terceroId=${encodeURIComponent(terceroId)}&fecha=${encodeURIComponent(fecha)}`),
   // UNIDAD TRIBUTARIA: de ella salen los sustraendos y mínimos de ISLR en

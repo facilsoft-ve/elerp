@@ -49,6 +49,12 @@ func (s *Server) registerCompras(r fiber.Router) {
 	// compra (baja CxP / pasivo IVA por enterar). Acción sensible: Dueña/Desarrollador.
 	g.Post("/facturas/:id/retencion-emitida", escribir, s.handleRetencionEmitida)
 
+	// COSTOS EN DESTINO: el flete o el impuesto que encarece la mercancía DESPUÉS
+	// de recibirla. Solo anexado — no hay PATCH ni DELETE: un costo mal cargado se
+	// corrige aplicando otro con el monto contrario.
+	g.Get("/ordenes/:id/costos-destino", s.handleCostosEnDestino)
+	g.Post("/ordenes/:id/costos-destino", escribir, s.handleAplicarCostoEnDestino)
+
 	// Notas de crédito/débito de PROVEEDOR: ajustan una factura de compra (la NC baja
 	// la CxP, la ND la sube). Consulta para Dueña/Desarrollador/Contadora; emitirlas
 	// —al ser materia fiscal/contable (crédito fiscal, Libro de compras)— también las
@@ -145,6 +151,32 @@ func (s *Server) handleRetencionEmitida(c *fiber.Ctx) error {
 		})
 	if err != nil {
 		return c.Status(estadoDeConfigISLR(err)).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+// handleCostosEnDestino lista los costos ya aplicados a una orden.
+func (s *Server) handleCostosEnDestino(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"costos": s.svc.CostosEnDestinoDe(empresaIDOf(c), c.Params("id"))})
+}
+
+// handleAplicarCostoEnDestino reparte un costo entre lo recibido de la orden.
+func (s *Server) handleAplicarCostoEnDestino(c *fiber.Ctx) error {
+	var in struct {
+		Descripcion string  `json:"descripcion"`
+		Monto       float64 `json:"monto"`
+		Criterio    string  `json:"criterio"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.AplicarCostoEnDestino(empresaIDOf(c), principalOf(c).UserID, origen(c),
+		application.EntradaCostoEnDestino{
+			OrdenCompraID: c.Params("id"), Descripcion: in.Descripcion,
+			Monto: in.Monto, Criterio: in.Criterio,
+		})
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(out)
 }

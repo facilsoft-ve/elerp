@@ -887,6 +887,21 @@ func fold(movs []inventario.Movimiento) (float64, float64) {
 	ordenar(movs)
 	saldo, avg := 0.0, 0.0
 	for _, m := range movs {
+		// REVALUACIÓN: añade valor sin mover unidades (el costo en destino). Se
+		// atiende ANTES del reparto por signo porque lleva cantidad 0 y caería en la
+		// rama de las entradas, donde no cambiaría nada — que es justo el motivo por
+		// el que hizo falta un tipo propio.
+		//
+		// Sin saldo no hay a qué repartirle el valor: se ignora acá y quien lo emite
+		// se encarga de que eso no ocurra (ver CostoEnDestino, que manda al gasto la
+		// parte que el stock no puede absorber). Dividir entre cero o acumularlo para
+		// el próximo ingreso inventaría un costo que nadie podría explicar.
+		if m.Tipo == inventario.MovRevaluacion {
+			if saldo > 0 {
+				avg += m.ValorAgregado / saldo
+			}
+			continue
+		}
 		if m.Cantidad >= 0 {
 			nuevo := saldo + m.Cantidad
 			if saldo < 0 {

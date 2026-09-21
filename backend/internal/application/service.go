@@ -188,6 +188,10 @@ type Service struct {
 	// ConUnidadesTributarias; sin él, los conceptos que la requieren no calculan y
 	// la orden lo dice, en vez de retener de más con la UT en cero.
 	uts fiscal.UnidadTributariaRepo
+	// costosDestino son los fletes e impuestos que encarecen una compra después de
+	// recibirla. Se cablea con ConCostosEnDestino; sin él la función no existe y el
+	// resto del módulo se comporta igual que antes.
+	costosDestino compra.CostoEnDestinoRepo
 	// sedes da acceso a las COORDENADAS del local, para la presencia estricta
 	// (ver presencia.go). Se cablea con ConSedes; sin él la verificación de
 	// presencia no aplica y todo se comporta como antes.

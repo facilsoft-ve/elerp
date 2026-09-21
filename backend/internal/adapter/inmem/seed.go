@@ -93,6 +93,7 @@ type Store struct {
 	EmisionesDigitales  *EmisionDigitalRepo
 	ConceptosISLR       *ConceptoISLRRepo
 	UnidadesTributarias *UnidadTributariaRepo
+	CostosEnDestino     *CostoEnDestinoRepo
 	Horarios            *HorarioRepo
 }
 
@@ -146,6 +147,7 @@ func New() *Store {
 		EmisionesDigitales:  NewEmisionDigitalRepo(),
 		ConceptosISLR:       NewConceptoISLRRepo(),
 		UnidadesTributarias: NewUnidadTributariaRepo(),
+		CostosEnDestino:     NewCostoEnDestinoRepo(),
 		Horarios:            NewHorarioRepo(),
 	}
 	s.seedDemo()

@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { Icon } from '../components/Icon.jsx'
 import { Button, Badge, Input, Select, VistaDetalle, Modal, Empty, TableSkeleton, useToast, Field, Segmented, Toggle } from '../components/primitives.jsx'
 import { TablaDatos } from '../components/TablaDatos.jsx'
@@ -104,7 +104,7 @@ export function ComprasOrdenes() {
   if (detalle) {
     return (
       <div>
-        <DetalleOrden oc={detalle} gestiona={gestiona} sedes={db.SEDES || []} factura={facturaPorOrden.get(detalle.id)} onVolver={() => setDetalle(null)}
+        <DetalleOrden oc={detalle} gestiona={gestiona} sedes={db.SEDES || []} factura={facturaPorOrden.get(detalle.id)} toast={toast} onVolver={() => setDetalle(null)}
           onConfirmar={() => { setDetalle(null); confirmar(detalle) }}
           onRecibir={() => { setDetalle(null); setRecibir(detalle) }}
           onCancelar={() => { setDetalle(null); setCancelar(detalle) }}
@@ -700,7 +700,7 @@ function FormOrdenCompra({ onVolver, onSaved, toast }) {
 
 // Detalle de una OC: líneas (con recibido), totales, proveedor, sede, estado y
 // las acciones disponibles según el estado.
-function DetalleOrden({ oc, gestiona, sedes, factura, onVolver, onConfirmar, onRecibir, onCancelar, onFacturar, onPDF }) {
+function DetalleOrden({ oc, gestiona, sedes, factura, onVolver, onConfirmar, onRecibir, onCancelar, onFacturar, onPDF, toast }) {
   const em = ESTADO_META[oc.estado] || { label: oc.estado, color: 'slate' }
   const ccy = ccyDe(oc)
   const sedeNombre = sedes.find((s) => s.id === oc.sedeId)?.nombre || oc.sedeId || '—'
@@ -856,7 +856,156 @@ function DetalleOrden({ oc, gestiona, sedes, factura, onVolver, onConfirmar, onR
           </div>
         </div>
       </div>
+      {/* Solo sobre mercancía recibida: no se puede encarecer lo que no llegó. */}
+      {recibida ? <CostosEnDestino oc={oc} gestiona={gestiona} ccy={ccy} toast={toast} /> : null}
     </VistaDetalle>
+  )
+}
+
+/* COSTOS EN DESTINO — el flete, el impuesto o el seguro que encarecen la
+ * mercancía DESPUÉS de recibirla.
+ *
+ * Sin esto no entran al costo del producto: el inventario queda valorado por
+ * debajo de lo que costó y cada venta muestra un margen que no existe. No falla
+ * nada; simplemente todos los números de rentabilidad están mal, y hacia arriba.
+ *
+ * Solo aparece sobre mercancía RECIBIDA: no se puede encarecer lo que no llegó.
+ */
+function CostosEnDestino({ oc, gestiona, ccy, toast }) {
+  const [costos, setCostos] = useState(null)
+  const [form, setForm] = useState(false)
+
+  const cargar = useCallback(() => {
+    api.costosEnDestino(oc.id)
+      .then((r) => setCostos(r?.costos || []))
+      .catch(() => setCostos([]))
+  }, [oc.id])
+  useEffect(() => { cargar() }, [cargar])
+
+  const total = (costos || []).reduce((a, c) => a + (Number(c.monto) || 0), 0)
+
+  return (
+    <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div>
+          <div className="text-[13px] font-semibold">Costos en destino</div>
+          <div className="text-[12.5px] text-slate-500 dark:text-slate-400 mt-0.5">
+            Fletes, impuestos de importación, seguros: lo que la mercancía costó <strong>además</strong> de lo
+            que facturó el proveedor. Se reparte entre lo recibido y <strong>sube el costo del producto</strong>.
+          </div>
+        </div>
+        {gestiona ? (
+          <Button size="sm" variant="secondary" icon={<Icon.Plus size={15} />} onClick={() => setForm(true)}>
+            Agregar costo
+          </Button>
+        ) : null}
+      </div>
+
+      {costos === null ? (
+        <div className="text-[12px] text-slate-400 py-1">Cargando…</div>
+      ) : costos.length === 0 ? (
+        <div className="text-[12px] text-slate-500 dark:text-slate-400 py-1">
+          Ninguno aplicado. Si esta compra tuvo flete o aduana, cárgalo acá o el margen de estos productos
+          saldrá más alto de lo que es.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {costos.map((c) => (
+            <div key={c.id} className="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[12.5px] font-medium">{c.descripcion}</span>
+                <span className="num text-[12.5px] private-mask">{fmtCurrency(c.monto, ccy)}</span>
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                Repartido por {c.criterio === 'cantidad' ? 'cantidad' : 'valor'} entre {c.lineas?.length || 0} producto(s)
+                {/* La parte de lo ya vendido NO se capitaliza: no hay existencia
+                    que valorar, así que es gasto del período. Se dice, porque si
+                    no el usuario ve que «faltó» dinero en el inventario. */}
+                {c.alGasto > 0.004 ? (
+                  <span className="block text-amber-700 dark:text-amber-400">
+                    {fmtCurrency(c.absorbido, ccy)} entró al inventario; {fmtCurrency(c.alGasto, ccy)} fue al gasto
+                    porque esa mercancía ya se había vendido.
+                  </span>
+                ) : null}
+              </div>
+              {c.lineas?.length ? (
+                <div className="mt-1.5 space-y-0.5">
+                  {c.lineas.map((l) => (
+                    <div key={l.sku} className="flex items-center justify-between text-[11.5px] text-slate-500 dark:text-slate-400">
+                      <span>{l.nombre} <span className="num text-slate-400">{l.sku}</span></span>
+                      <span className="num private-mask">{fmtCurrency(l.reparto, ccy)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ))}
+          <div className="flex items-center justify-between pt-1.5 border-t border-slate-200 dark:border-slate-700 text-[12.5px] font-semibold">
+            <span>Total en destino</span>
+            <span className="num private-mask">{fmtCurrency(total, ccy)}</span>
+          </div>
+        </div>
+      )}
+
+      {form ? (
+        <CostoEnDestinoModal oc={oc} onClose={() => setForm(false)}
+          onSaved={(msg) => { setForm(false); cargar(); toast({ title: 'Costo aplicado', body: msg }) }} />
+      ) : null}
+    </div>
+  )
+}
+
+function CostoEnDestinoModal({ oc, onClose, onSaved }) {
+  const [f, setF] = useState({ descripcion: '', monto: '', criterio: 'valor' })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const set = (k, v) => { setF((s) => ({ ...s, [k]: v })); setError('') }
+
+  const aplicar = async () => {
+    if (!f.descripcion.trim()) { setError('Di qué costó: flete, impuesto, seguro…'); return }
+    if (!Number(f.monto)) { setError('El monto no puede ser cero.'); return }
+    setBusy(true); setError('')
+    try {
+      await api.aplicarCostoEnDestino(oc.id, {
+        descripcion: f.descripcion.trim(), monto: Number(f.monto), criterio: f.criterio,
+      })
+      onSaved(`${f.descripcion.trim()} · ${fmtCurrency(Number(f.monto), ccyDe(oc))}`)
+    } catch (e) {
+      setError(e?.message || 'No se pudo aplicar.')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <Modal open title="Agregar costo en destino" onClose={onClose}
+      footer={<>
+        <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+        <Button onClick={aplicar} loading={busy}>Aplicar</Button>
+      </>}>
+      <div className="space-y-3">
+        <Field label="¿Qué costó?" required hint="queda en el Kardex: tiene que leerse dentro de seis meses">
+          <Input value={f.descripcion} onChange={(e) => set('descripcion', e.target.value)}
+            placeholder="Flete internacional, impuesto de importación, seguro…" />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Monto" required hint="negativo para corregir uno mal cargado">
+            <Input value={f.monto} inputMode="decimal" className="num"
+              onChange={(e) => set('monto', e.target.value)} placeholder="0,00" />
+          </Field>
+          <Field label="Repartir por" hint={f.criterio === 'cantidad' ? 'por unidades recibidas' : 'por valor recibido'}>
+            <Select value={f.criterio} onChange={(e) => set('criterio', e.target.value)}>
+              <option value="valor">Valor de cada producto</option>
+              <option value="cantidad">Unidades recibidas</option>
+            </Select>
+          </Field>
+        </div>
+        <div className="text-[11.5px] text-slate-500 dark:text-slate-400">
+          Se reparte solo entre lo <strong>recibido</strong>. La parte que corresponda a mercancía ya vendida
+          no entra al inventario —no hay existencia que valorar— y se registra como gasto del período.
+          Un costo aplicado <strong>no se edita ni se borra</strong>: se corrige aplicando otro en negativo.
+        </div>
+        {error ? <div className="text-[12px] text-[#B3362C] dark:text-red-400">{error}</div> : null}
+      </div>
+    </Modal>
   )
 }
 
