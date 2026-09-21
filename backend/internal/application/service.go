@@ -192,6 +192,10 @@ type Service struct {
 	// recibirla. Se cablea con ConCostosEnDestino; sin él la función no existe y el
 	// resto del módulo se comporta igual que antes.
 	costosDestino compra.CostoEnDestinoRepo
+	// ubicaciones es el nivel dentro del almacén (pasillo, estante, muelle). Se
+	// cablea con ConUbicaciones; sin él los movimientos se anexan sin ubicar y todo
+	// se comporta como antes.
+	ubicaciones almacen.UbicacionRepo
 	// sedes da acceso a las COORDENADAS del local, para la presencia estricta
 	// (ver presencia.go). Se cablea con ConSedes; sin él la verificación de
 	// presencia no aplica y todo se comporta como antes.

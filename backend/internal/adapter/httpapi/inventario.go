@@ -25,6 +25,9 @@ func (s *Server) registerInventario(r fiber.Router) {
 	// que casi todo el mundo activa los lotes.
 	g.Get("/productos/:sku/lotes", s.handleSaldosPorLote)
 	g.Get("/lotes/por-vencer", s.handleLotesPorVencer)
+	// DÓNDE está un producto dentro de la sede: por almacén y por ubicación. La
+	// suma de sus cantidades es la existencia de la sede, siempre.
+	g.Get("/productos/:sku/ubicaciones", s.handleExistenciaPorUbicacion)
 	// EL RASTRO de un lote: «¿a quién le vendí el lote X?». Es la consulta que
 	// justifica la trazabilidad; sin ella el dato está guardado pero no sirve.
 	g.Get("/productos/:sku/lotes/historico", s.handleLotesHistoricos)
@@ -324,6 +327,14 @@ func (s *Server) handleRastroDeLote(c *fiber.Ctx) error {
 		lote = c.Params("lote")
 	}
 	return c.JSON(s.svc.RastroDeLote(empresaIDOf(c), c.Params("sku"), lote, c.Query("sedeId")))
+}
+
+func (s *Server) handleExistenciaPorUbicacion(c *fiber.Ctx) error {
+	sede := c.Query("sedeId")
+	if sede == "" {
+		sede = sedeIDOf(c)
+	}
+	return c.JSON(fiber.Map{"ubicaciones": s.svc.ExistenciaPorUbicacion(empresaIDOf(c), sede, c.Params("sku"))})
 }
 
 func (s *Server) handleAjustar(c *fiber.Ctx) error {

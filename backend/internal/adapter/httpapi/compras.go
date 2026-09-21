@@ -300,6 +300,9 @@ func (s *Server) handleRecibirOrdenCompra(c *fiber.Ctx) error {
 			// recibir porque es cuando alguien tiene la caja delante con la etiqueta.
 			Lote        string `json:"lote"`
 			Vencimiento string `json:"vencimiento"`
+			// Ubicación dentro del almacén. Vacío = sin ubicar, que es lo correcto
+			// mientras el almacén no esté dividido.
+			UbicacionID string `json:"ubicacionId"`
 		} `json:"lineas"`
 	}
 	if err := c.BodyParser(&in); err != nil {
@@ -309,6 +312,7 @@ func (s *Server) handleRecibirOrdenCompra(c *fiber.Ctx) error {
 	for _, l := range in.Lineas {
 		lineas = append(lineas, application.LineaRecepcion{
 			SKU: l.SKU, Cantidad: l.Cantidad, Lote: l.Lote, Vencimiento: l.Vencimiento,
+			UbicacionID: l.UbicacionID,
 		})
 	}
 	out, err := s.svc.RecibirOrdenCompra(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c), lineas)

@@ -94,6 +94,7 @@ type Store struct {
 	ConceptosISLR       *ConceptoISLRRepo
 	UnidadesTributarias *UnidadTributariaRepo
 	CostosEnDestino     *CostoEnDestinoRepo
+	Ubicaciones         *UbicacionRepo
 	Horarios            *HorarioRepo
 }
 
@@ -148,6 +149,7 @@ func New() *Store {
 		ConceptosISLR:       NewConceptoISLRRepo(),
 		UnidadesTributarias: NewUnidadTributariaRepo(),
 		CostosEnDestino:     NewCostoEnDestinoRepo(),
+		Ubicaciones:         NewUbicacionRepo(),
 		Horarios:            NewHorarioRepo(),
 	}
 	s.seedDemo()

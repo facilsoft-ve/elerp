@@ -60,19 +60,72 @@ function AvisoVencimientos() {
   )
 }
 
+/* DÓNDE ESTÁ un producto dentro de la sede.
+ *
+ * La suma de las cantidades es la existencia de la sede, siempre — y se muestra,
+ * porque es la comprobación que convierte esta pantalla en algo fiable: si el
+ * desglose no cuadra con el total, la ubicación está mintiendo.
+ */
+function FilaUbicaciones({ sku, sedeId, total }) {
+  const [rows, setRows] = useState(null)
+  useEffect(() => {
+    let vivo = true
+    api.existenciaPorUbicacion(sku, sedeId)
+      .then((r) => { if (vivo) setRows(r?.ubicaciones || []) })
+      .catch(() => { if (vivo) setRows([]) })
+    return () => { vivo = false }
+  }, [sku, sedeId])
+
+  const suma = (rows || []).reduce((a, u) => a + (Number(u.cantidad) || 0), 0)
+  const cuadra = Math.abs(suma - (Number(total) || 0)) < 0.005
+
+  return (
+    <tr className="bg-slate-50/70 dark:bg-slate-800/40">
+      <td colSpan={7} className="px-4 py-3">
+        {rows === null ? (
+          <div className="text-[12px] text-slate-400">Cargando…</div>
+        ) : (
+          <div className="space-y-1">
+            {rows.map((u) => (
+              <div key={u.almacenId + '/' + u.ubicacionId} className="flex items-baseline gap-2 text-[12.5px]">
+                <span className="num text-slate-500 w-32 shrink-0">{u.codigo}</span>
+                <span className="text-slate-600 dark:text-slate-300 flex-1 min-w-0 truncate">
+                  {u.almacenNombre}{u.nombre && u.codigo !== u.nombre ? ` · ${u.nombre}` : ''}
+                </span>
+                <span className="num font-medium">{fmtNum(u.cantidad)}</span>
+              </div>
+            ))}
+            <div className={`flex items-baseline gap-2 text-[12px] pt-1 mt-1 border-t border-slate-200 dark:border-slate-700 ${cuadra ? 'text-slate-400' : 'text-red-600 dark:text-red-400 font-medium'}`}>
+              <span className="flex-1">
+                {cuadra
+                  ? 'La suma por ubicación cuadra con la existencia de la sede.'
+                  : 'El desglose NO cuadra con la existencia: avisa al equipo.'}
+              </span>
+              <span className="num">{fmtNum(suma)}</span>
+            </div>
+          </div>
+        )}
+      </td>
+    </tr>
+  )
+}
+
 const LOW_STOCK = 5
 const puedeAjustar = (rol) => ['dueno', 'desarrollador'].includes(rol)
 
 export function Existencias({ onKardex }) {
   const { db, loading, error, reload } = useData()
   const { ui } = useUI()
-  const { activeSede } = useAuth()
+  const { activeSede, activeSedeId } = useAuth()
   const toast = useToast()
   const almacenes = (db.ALMACENES || []).filter((a) => a.activo && a.sedeId === activeSede?.id)
 
   const [q, setQ] = useState('')
   const [soloBajo, setSoloBajo] = useState('todos')
   const [ajuste, setAjuste] = useState(null)
+  // Qué SKU tiene desplegado su desglose por ubicación. Uno a la vez: la pregunta
+  // «¿dónde está esto?» es de un producto concreto, no de la lista entera.
+  const [dondeEsta, setDondeEsta] = useState('')
   // Almacén seleccionado: '' = TODOS (existencia por sede, suma de almacenes). Con un
   // almacén concreto, la existencia es de ESE almacén (se pide al backend aparte).
   const [almacenSel, setAlmacenSel] = useState('')
@@ -167,6 +220,10 @@ export function Existencias({ onKardex }) {
                       <td className={`${pad} pr-3 text-right num text-slate-500 private-mask`}>{fmtCurrency(e.costoPromedio, ui.ccy)}</td>
                       <td className={`${pad} pr-3 text-right num font-medium private-mask`}>{fmtCurrency(e.valor, ui.ccy)}</td>
                       <td className={`${pad} pr-3 text-right whitespace-nowrap`}>
+                        <button onClick={() => setDondeEsta(dondeEsta === e.sku ? '' : e.sku)} title="¿Dónde está?"
+                          className={`h-7 w-7 inline-flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 ${dondeEsta === e.sku ? 'text-[#D6246E]' : 'text-slate-400'}`}>
+                          <Icon.Home size={15} />
+                        </button>
                         <button onClick={() => onKardex && onKardex(e.sku)} title="Ver Kardex"
                           className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
                           <Icon.History size={15} />
@@ -180,6 +237,10 @@ export function Existencias({ onKardex }) {
                       </td>
                     </tr>
                   )
+                }).flatMap((fila, i) => {
+                  const e = rows[i]
+                  if (!e || dondeEsta !== e.sku) return [fila]
+                  return [fila, <FilaUbicaciones key={e.sku + '-ubi'} sku={e.sku} sedeId={activeSedeId} total={e.cantidad} />]
                 })}
               </tbody>
             </table>

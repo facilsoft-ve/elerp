@@ -589,6 +589,15 @@ export const api = {
   // duro: se desactiva (activo=false). `sede` opcional filtra por sede.
   almacenes: (sedeId) => request(`/api/config/almacenes${sedeId ? `?sede=${encodeURIComponent(sedeId)}` : ''}`),
   crearAlmacen: (body) => request('/api/config/almacenes', { method: 'POST', body: JSON.stringify(body) }),
+  // UBICACIONES dentro del almacén (pasillo, estante, muelle).
+  ubicaciones: (almacenId) => request(`/api/config/almacenes/${encodeURIComponent(almacenId)}/ubicaciones`),
+  crearUbicacion: (almacenId, body) =>
+    request(`/api/config/almacenes/${encodeURIComponent(almacenId)}/ubicaciones`, { method: 'POST', body: JSON.stringify(body) }),
+  actualizarUbicacion: (almacenId, ubicacionId, body) =>
+    request(`/api/config/almacenes/${encodeURIComponent(almacenId)}/ubicaciones/${encodeURIComponent(ubicacionId)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  // Dónde está un producto dentro de la sede. La suma es la existencia de la sede.
+  existenciaPorUbicacion: (sku, sedeId = '') =>
+    request(`/api/inventario/productos/${encodeURIComponent(sku)}/ubicaciones?sedeId=${encodeURIComponent(sedeId)}`),
   actualizarAlmacen: (id, body) => request(`/api/config/almacenes/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   desactivarAlmacen: (id) => request(`/api/config/almacenes/${encodeURIComponent(id)}/desactivar`, { method: 'POST' }),
 

@@ -254,6 +254,9 @@ type LineaRecepcion struct {
 	// delante con la etiqueta: preguntarlo después es pedir que lo inventen.
 	Lote        string
 	Vencimiento string
+	// UbicacionID ubica lo recibido dentro del almacén. Vacío = el almacén sin más
+	// detalle, que es lo correcto mientras nadie lo haya dividido.
+	UbicacionID string
 }
 
 // OrdenesCompra lista las órdenes de compra de la empresa.
@@ -468,6 +471,7 @@ func (s *Service) RecibirOrdenCompra(empresaID, id, actor, origen string, lineas
 	recibir := map[string]float64{}         // total por SKU, para validar contra lo pendiente
 	porLote := map[claveRecepcion]float64{} // lo que entra a cada lote
 	vencs := map[claveRecepcion]string{}
+	ubis := map[claveRecepcion]string{}
 	orden := []claveRecepcion{}
 	for _, l := range lineas {
 		if l.Cantidad <= 0 {
@@ -481,6 +485,9 @@ func (s *Service) RecibirOrdenCompra(empresaID, id, actor, origen string, lineas
 		porLote[k] += l.Cantidad
 		if v := strings.TrimSpace(l.Vencimiento); v != "" {
 			vencs[k] = v
+		}
+		if u := strings.TrimSpace(l.UbicacionID); u != "" {
+			ubis[k] = u
 		}
 	}
 	if len(recibir) == 0 {
@@ -530,8 +537,9 @@ func (s *Service) RecibirOrdenCompra(empresaID, id, actor, origen string, lineas
 			EmpresaID: empresaID, SedeID: o.SedeID, AlmacenID: almacenID, ProductoID: l.ProductoID, SKU: l.SKU,
 			Tipo: inventario.MovEntrada, Cantidad: cant, CostoUnitario: l.CostoUnitario,
 			Lote: lote, Vencimiento: venc,
-			Motivo:  "recepción OC " + o.NumeroCompleto,
-			RefTipo: "compra", RefID: o.ID, Actor: actor, Fecha: ahora(),
+			UbicacionID: s.ubicacionParaEscritura(empresaID, almacenID, ubis[k]),
+			Motivo:      "recepción OC " + o.NumeroCompleto,
+			RefTipo:     "compra", RefID: o.ID, Actor: actor, Fecha: ahora(),
 		})
 		o.Lineas[i].CantidadRecibida = round2(o.Lineas[i].CantidadRecibida + cant)
 		costoRecepcion += cant * l.CostoUnitario

@@ -24,6 +24,51 @@ func (s *Server) registerAlmacenes(r fiber.Router) {
 	g.Post("/", edit, s.handleCrearAlmacen)
 	g.Patch("/:id", edit, s.handleActualizarAlmacen)
 	g.Post("/:id/desactivar", edit, s.handleDesactivarAlmacen)
+
+	// UBICACIONES dentro del almacén (pasillo, estante, muelle). Editables como el
+	// almacén: sin borrado duro, se desactivan.
+	g.Get("/:id/ubicaciones", s.handleUbicaciones)
+	g.Post("/:id/ubicaciones", edit, s.handleCrearUbicacion)
+	g.Patch("/:id/ubicaciones/:ubicacionId", edit, s.handleActualizarUbicacion)
+}
+
+func (s *Server) handleUbicaciones(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"ubicaciones": s.svc.UbicacionesDe(empresaIDOf(c), c.Params("id"))})
+}
+
+func (s *Server) handleCrearUbicacion(c *fiber.Ctx) error {
+	var in struct {
+		Codigo string `json:"codigo"`
+		Nombre string `json:"nombre"`
+		Tipo   string `json:"tipo"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.CrearUbicacion(empresaIDOf(c), principalOf(c).UserID, origen(c), almacen.Ubicacion{
+		AlmacenID: c.Params("id"), Codigo: in.Codigo, Nombre: in.Nombre, Tipo: in.Tipo,
+	})
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+func (s *Server) handleActualizarUbicacion(c *fiber.Ctx) error {
+	var in struct {
+		Nombre string `json:"nombre"`
+		Tipo   string `json:"tipo"`
+		Activa bool   `json:"activa"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.ActualizarUbicacion(empresaIDOf(c), c.Params("ubicacionId"), principalOf(c).UserID, origen(c),
+		almacen.Ubicacion{Nombre: in.Nombre, Tipo: in.Tipo, Activa: in.Activa})
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
 }
 
 func (s *Server) handleAlmacenes(c *fiber.Ctx) error {

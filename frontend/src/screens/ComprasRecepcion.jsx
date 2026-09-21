@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Icon } from '../components/Icon.jsx'
-import { Button, Badge, Modal, Empty, TableSkeleton, useToast } from '../components/primitives.jsx'
+import { Button, Badge, Modal, Empty, TableSkeleton, useToast, Field, Select } from '../components/primitives.jsx'
 import { fmtNum, fmtDate } from '../lib/format.js'
 import { useData } from '../context/DataContext.jsx'
 import { useUI } from '../context/UIContext.jsx'
@@ -134,6 +134,21 @@ export function ModalRecepcion({ orden, onClose, onSaved, toast }) {
   // directamente daba undefined y la columna se pintaba vacía SIN fallar — el
   // producto parecía no llevar lotes.
   const { db } = useData()
+  // Ubicaciones del almacén al que entra la mercancía. Si el almacén no está
+  // dividido, la lista viene vacía y la columna no aparece: no se pide un dato que
+  // no existe.
+  const [ubis, setUbis] = useState([])
+  const [ubiSel, setUbiSel] = useState('')
+  useEffect(() => {
+    let vivo = true
+    const alm = (db?.ALMACENES || []).find((a) => a.sedeId === orden.sedeId && a.principal && a.activo)
+    if (!alm) { setUbis([]); return undefined }
+    api.ubicaciones(alm.id)
+      .then((r) => { if (vivo) setUbis((r?.ubicaciones || []).filter((u) => u.activa)) })
+      .catch(() => { if (vivo) setUbis([]) })
+    return () => { vivo = false }
+  }, [db, orden.sedeId])
+
   const trazaDe = (sku) => {
     const p = (db?.PRODUCTOS || []).find((x) => x.sku === sku)
     return { lote: !!p?.requiereLote, venc: !!p?.controlaVencimiento }
@@ -172,12 +187,12 @@ export function ModalRecepcion({ orden, onClose, onSaved, toast }) {
       if (n <= 0) return
       const lt = String(lote[i] || '').trim()
       const k = l.sku + '\u0000' + lt
-      const prev = porClave[k] || { sku: l.sku, cantidad: 0, lote: lt, vencimiento: venc[i] || '' }
+      const prev = porClave[k] || { sku: l.sku, cantidad: 0, lote: lt, vencimiento: venc[i] || '', ubicacionId: ubiSel }
       prev.cantidad += n
       porClave[k] = prev
     })
     return Object.values(porClave)
-  }, [lineasPend, cant, lote, venc])
+  }, [lineasPend, cant, lote, venc, ubiSel])
 
   const hayError = lineasPend.some((l, i) => errorDe(l, i))
   const hayErrorLote = lineasPend.some((l, i) => errorLoteDe(l, i))
@@ -215,6 +230,19 @@ export function ModalRecepcion({ orden, onClose, onSaved, toast }) {
           <Icon.CircleAlert size={15} className="mt-0.5 shrink-0" />
           <span>Al confirmar, las cantidades recibidas se suman como <strong>entradas</strong> al inventario de la sede de la orden. Puedes recibir en varias entregas: lo que no recibas ahora queda pendiente.</span>
         </div>
+
+        {/* La ubicación es de TODA la entrega, no por línea: quien descarga un
+            camión lo pone en un sitio, y pedirlo renglón a renglón haría que nadie
+            lo rellenara. Repartir una entrega entre dos ubicaciones se hace en dos
+            recepciones, igual que con los lotes. */}
+        {ubis.length ? (
+          <Field label="¿Dónde se ubica?" hint="opcional · si no lo indicas queda «sin ubicar» en el almacén">
+            <Select value={ubiSel} onChange={(e) => setUbiSel(e.target.value)}>
+              <option value="">Sin ubicar (el almacén, sin más detalle)</option>
+              {ubis.map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>)}
+            </Select>
+          </Field>
+        ) : null}
 
         <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
           <table className="w-full text-sm min-w-[520px]">

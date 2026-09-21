@@ -136,11 +136,98 @@ func ordenarPorVencimiento(ls []SaldoLote) {
 	})
 }
 
-// TramoSalida es un pedazo de una salida asignado a un lote concreto.
+// TramoSalida es un pedazo de una salida asignado a un lote y una ubicación
+// concretos. Las dos dimensiones viajan juntas porque el ledger las guarda juntas:
+// repartir primero por lote y después por ubicación daría tramos que no existen.
 type TramoSalida struct {
 	Lote        string
 	Vencimiento string
+	// AlmacenID y UbicacionID dicen DE DÓNDE sale. El almacén va aquí y no lo pone
+	// el llamante porque la mercancía sale de donde está: escribir la salida en un
+	// almacén distinto del que la tenía deja ese almacén en negativo y al otro con
+	// stock que ya no existe, con el total cuadrando en ambos casos.
+	AlmacenID   string
+	UbicacionID string
 	Cantidad    float64
+	// Descubierto marca el tramo que NO salió de una casilla real: es lo que los
+	// saldos no cubrían. Se distingue porque su almacén no es «donde estaba la
+	// mercancía» sino «donde el operador creía tenerla», y es ahí donde hay que ir
+	// a cuadrarlo.
+	Descubierto bool
+}
+
+// bucket es una casilla real del ledger: lo que hay de un producto en una
+// ubicación concreta y de un lote concreto.
+type bucket struct {
+	Lote        string
+	AlmacenID   string
+	UbicacionID string
+	Vencimiento string
+	Cantidad    float64
+	Vencido     bool
+	Codigo      string // de la ubicación, para ordenar de forma estable
+}
+
+// bucketsDe proyecta las casillas con existencia de un producto en una sede,
+// ordenadas por el orden en que se deben consumir:
+//
+//  1. Lo que vence antes (FEFO). Un lote sin fecha va al final: no se puede
+//     afirmar que caduque antes que uno con fecha.
+//  2. A igualdad, lo que está SIN UBICAR primero. Es el saldo que el sistema no
+//     sabe dónde está; gastarlo primero hace que el inventario ubicado sea cada
+//     vez más fiel, en vez de dejar un resto indefinido creciendo para siempre.
+//
+// `almacenID` acota la búsqueda a un almacén; vacío mira toda la sede.
+func (s *Service) bucketsDe(empresaID, sedeID, almacenID, productoID string) []bucket {
+	movs := s.movimientos.List(empresaID, inventario.FiltroMovimiento{
+		SedeID: sedeID, AlmacenID: almacenID, ProductoID: productoID,
+	})
+	hoy := time.Now().UTC().Format("2006-01-02")
+
+	type clave struct{ Lote, Almacen, Ubicacion string }
+	suma := map[clave]float64{}
+	for _, m := range movs {
+		if m.Tipo == inventario.MovRevaluacion {
+			continue // no mueve unidades: no ocupa casilla
+		}
+		suma[clave{m.Lote, m.AlmacenID, m.UbicacionID}] += m.Cantidad
+	}
+
+	out := []bucket{}
+	for k, cant := range suma {
+		if cant <= 0.0001 {
+			continue // agotada o en negativo: no puede surtir nada
+		}
+		b := bucket{Lote: k.Lote, AlmacenID: k.Almacen, UbicacionID: k.Ubicacion, Cantidad: round2(cant)}
+		b.Vencimiento = vencimientoDeLote(movs, k.Lote)
+		if b.Vencimiento != "" {
+			b.Vencido = b.Vencimiento < hoy
+		}
+		if k.Ubicacion != "" && s.ubicaciones != nil {
+			if u, ok := s.ubicaciones.ByID(empresaID, k.Ubicacion); ok {
+				b.Codigo = u.Codigo
+			}
+		}
+		out = append(out, b)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, c := out[i].Vencimiento, out[j].Vencimiento
+		if (a == "") != (c == "") {
+			return c == ""
+		}
+		if a != c {
+			return a < c
+		}
+		if out[i].Lote != out[j].Lote {
+			return out[i].Lote < out[j].Lote
+		}
+		// Sin ubicar primero, después por código.
+		if (out[i].UbicacionID == "") != (out[j].UbicacionID == "") {
+			return out[i].UbicacionID == ""
+		}
+		return out[i].Codigo < out[j].Codigo
+	})
+	return out
 }
 
 // RepartirSalidaFEFO decide de qué lotes sale una cantidad: primero lo que vence
@@ -154,15 +241,22 @@ type TramoSalida struct {
 //
 // Un producto SIN control de lotes devuelve un único tramo sin lote, que es el
 // comportamiento de siempre.
-func (s *Service) RepartirSalidaFEFO(empresaID, sedeID, productoID string, cantidad float64) ([]TramoSalida, error) {
+func (s *Service) RepartirSalidaFEFO(empresaID, sedeID, almacenID, productoID string, cantidad float64) ([]TramoSalida, error) {
 	p, ok := s.productos.ByID(empresaID, productoID)
-	if !ok || !p.RequiereLote {
+	if !ok {
 		return []TramoSalida{{Cantidad: cantidad}}, nil
 	}
+	// OJO: esto NO se salta para los productos sin lote. También ellos ocupan una
+	// ubicación, y si sus salidas no consumieran de una, el saldo «sin ubicar» se
+	// iría a negativo mientras las ubicaciones quedan en positivo: la suma cuadra
+	// pero el sitio donde está la mercancía deja de ser cierto.
+	//
+	// Para un producto sin lotes y sin ubicaciones, bucketsDe devuelve una sola
+	// casilla vacía y el reparto sale igual que siempre: un tramo sin nada.
 	if cantidad <= 0.0001 {
 		return []TramoSalida{}, nil
 	}
-	disponibles := s.SaldosPorLote(empresaID, sedeID, productoID)
+	disponibles := s.bucketsDe(empresaID, sedeID, almacenID, productoID)
 
 	tramos := []TramoSalida{}
 	restante := cantidad
@@ -170,9 +264,6 @@ func (s *Service) RepartirSalidaFEFO(empresaID, sedeID, productoID string, canti
 	for _, l := range disponibles {
 		if restante <= 0.0001 {
 			break
-		}
-		if l.Cantidad <= 0.0001 {
-			continue // un lote en negativo no puede surtir nada
 		}
 		// UN LOTE VENCIDO NO SALE. FEFO lo pondría el primero —es el que caduca
 		// antes— y sin esta guarda el consumo automático despacharía justo lo que no
@@ -188,7 +279,10 @@ func (s *Service) RepartirSalidaFEFO(empresaID, sedeID, productoID string, canti
 		if toma > restante {
 			toma = restante
 		}
-		tramos = append(tramos, TramoSalida{Lote: l.Lote, Vencimiento: l.Vencimiento, Cantidad: round2(toma)})
+		tramos = append(tramos, TramoSalida{
+			Lote: l.Lote, Vencimiento: l.Vencimiento,
+			AlmacenID: l.AlmacenID, UbicacionID: l.UbicacionID, Cantidad: round2(toma),
+		})
 		restante = round2(restante - toma)
 	}
 	if restante > 0.0001 {
@@ -214,27 +308,32 @@ func (s *Service) RepartirSalidaFEFO(empresaID, sedeID, productoID string, canti
 // convertiría una discrepancia que YA existía en una caja parada. El faltante no
 // se esconde: sale como saldo NEGATIVO del lote vacío, visible en la existencia
 // por lote, que es donde alguien puede arreglarlo.
-func (s *Service) repartirSalidaFEFOTolerante(empresaID, sedeID, productoID string, cantidad float64) []TramoSalida {
-	tramos, err := s.RepartirSalidaFEFO(empresaID, sedeID, productoID, cantidad)
+func (s *Service) repartirSalidaFEFOTolerante(empresaID, sedeID, almacenID, productoID string, cantidad float64) []TramoSalida {
+	tramos, err := s.RepartirSalidaFEFO(empresaID, sedeID, almacenID, productoID, cantidad)
 	if err == nil {
 		return tramos
 	}
 	// Se rehace cubriendo lo que haya y dejando el descubierto sin lote.
 	cubierto := 0.0
 	tramos = []TramoSalida{}
-	for _, l := range s.SaldosPorLote(empresaID, sedeID, productoID) {
-		if cubierto >= cantidad-0.0001 || l.Cantidad <= 0.0001 {
+	for _, l := range s.bucketsDe(empresaID, sedeID, almacenID, productoID) {
+		if cubierto >= cantidad-0.0001 {
 			continue
 		}
 		toma := l.Cantidad
 		if toma > cantidad-cubierto {
 			toma = cantidad - cubierto
 		}
-		tramos = append(tramos, TramoSalida{Lote: l.Lote, Vencimiento: l.Vencimiento, Cantidad: round2(toma)})
+		tramos = append(tramos, TramoSalida{
+			Lote: l.Lote, Vencimiento: l.Vencimiento,
+			AlmacenID: l.AlmacenID, UbicacionID: l.UbicacionID, Cantidad: round2(toma),
+		})
 		cubierto = round2(cubierto + toma)
 	}
 	if falta := round2(cantidad - cubierto); falta > 0.0001 {
-		tramos = append(tramos, TramoSalida{Cantidad: falta})
+		// El descubierto se anota en el almacén que pidió la salida: es donde el
+		// operador creía tener la mercancía, y es donde hay que ir a cuadrarlo.
+		tramos = append(tramos, TramoSalida{AlmacenID: almacenID, Cantidad: falta, Descubierto: true})
 	}
 	return tramos
 }
@@ -249,10 +348,17 @@ func (s *Service) repartirSalidaFEFOTolerante(empresaID, sedeID, productoID stri
 // se olvidara dejaría el saldo por lote apartado del real, y esa diferencia no
 // falla — solo hace que la trazabilidad mienta.
 func (s *Service) anexarSalidaPorLotes(base inventario.Movimiento) {
-	for _, t := range s.repartirSalidaFEFOTolerante(base.EmpresaID, base.SedeID, base.ProductoID, -base.Cantidad) {
+	for _, t := range s.repartirSalidaFEFOTolerante(base.EmpresaID, base.SedeID, base.AlmacenID, base.ProductoID, -base.Cantidad) {
 		m := base
 		m.Cantidad = -t.Cantidad
 		m.Lote, m.Vencimiento = t.Lote, t.Vencimiento
+		m.UbicacionID = t.UbicacionID
+		// La salida se escribe DONDE ESTABA la mercancía, incluso si ese almacén es
+		// el vacío de los movimientos antiguos. Solo el descubierto se queda en el
+		// almacén que pidió la salida.
+		if !t.Descubierto {
+			m.AlmacenID = t.AlmacenID
+		}
 		s.movimientos.Append(m)
 	}
 }
@@ -281,7 +387,7 @@ func (s *Service) validarLotesVendibles(empresaID, sedeID string, lineas []fisca
 		if !ok || !p.RequiereLote || !p.ControlaVencimiento {
 			continue
 		}
-		if _, err := s.RepartirSalidaFEFO(empresaID, sedeID, prodID, cant); err != nil {
+		if _, err := s.RepartirSalidaFEFO(empresaID, sedeID, "", prodID, cant); err != nil {
 			return err
 		}
 	}
@@ -300,7 +406,9 @@ func (s *Service) lotesQueSalieron(empresaID, sku, transfID string) []TramoSalid
 		if m.RefID != transfID || m.Cantidad >= 0 {
 			continue
 		}
-		out = append(out, TramoSalida{Lote: m.Lote, Vencimiento: m.Vencimiento, Cantidad: -m.Cantidad})
+		out = append(out, TramoSalida{
+			Lote: m.Lote, Vencimiento: m.Vencimiento, UbicacionID: m.UbicacionID, Cantidad: -m.Cantidad,
+		})
 	}
 	return out
 }

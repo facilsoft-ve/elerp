@@ -187,7 +187,14 @@ type Movimiento struct {
 	// un movimiento con AlmacenID vacío (los previos a los almacenes) se interpreta
 	// como del almacén PRINCIPAL de su sede en la capa de proyección. La existencia
 	// por sede sigue siendo la suma de todos los almacenes de esa sede.
-	AlmacenID     string  `json:"almacenId" bson:"almacenid"`
+	AlmacenID string `json:"almacenId" bson:"almacenid"`
+	// UbicacionID ubica el movimiento DENTRO del almacén (pasillo, estante, muelle).
+	// Vacío = «el almacén, sin más detalle», que es todo el histórico y todo almacén
+	// que no se haya dividido: sin migración, igual que se hizo con el lote.
+	//
+	// La valoración NO lo usa: el costo promedio sigue siendo por producto y sede.
+	// La ubicación dice dónde está la unidad, no cuánto vale.
+	UbicacionID   string  `json:"ubicacionId,omitempty" bson:"ubicacionid,omitempty"`
 	ProductoID    string  `json:"productoId" bson:"productoid"`
 	SKU           string  `json:"sku" bson:"sku"`
 	Tipo          string  `json:"tipo" bson:"tipo"`
@@ -261,10 +268,11 @@ type Rubro struct {
 // FiltroMovimiento acota una consulta al ledger. EmpresaID es obligatorio en
 // el adaptador de persistencia (aislamiento de tenant).
 type FiltroMovimiento struct {
-	SedeID     string
-	AlmacenID  string
-	ProductoID string
-	SKU        string
+	SedeID      string
+	AlmacenID   string
+	UbicacionID string
+	ProductoID  string
+	SKU         string
 }
 
 // --- Puertos de persistencia ---

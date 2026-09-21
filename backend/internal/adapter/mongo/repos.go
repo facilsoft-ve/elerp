@@ -69,6 +69,7 @@ type Store struct {
 	ConceptosISLR       *ConceptoISLRRepo
 	UnidadesTributarias *UnidadTributariaRepo
 	CostosEnDestino     *CostoEnDestinoRepo
+	Ubicaciones         *UbicacionRepo
 	Horarios            *HorarioRepo
 }
 
@@ -109,8 +110,10 @@ func New(db *gomongo.Database) *Store {
 	st.attachFacturacionDigital(db)
 	st.attachConceptosISLR(db)
 	st.attachUnidadesTributarias(db)
-	st.attachCostosEnDestino(db) // definido en costodestino.go // definido en ut.go (histórico de la UT) // definido en concepto.go (conceptos ISLR)    // definido en impuesto.go (maestro de impuestos)
-	st.attachMesoneros(db)       // definido en mesonero.go (credenciales + turnos)
+	st.attachCostosEnDestino(db)
+	st.attachUbicaciones(db) // definido en ubicacion.go
+	st.attachUbicaciones(db) // definido en ubicacion.go // definido en costodestino.go // definido en ut.go (histórico de la UT) // definido en concepto.go (conceptos ISLR)    // definido en impuesto.go (maestro de impuestos)
+	st.attachMesoneros(db)   // definido en mesonero.go (credenciales + turnos)
 	return st
 }
 
@@ -160,6 +163,9 @@ func (r *MovimientoRepo) List(empresaID string, f inventario.FiltroMovimiento) [
 	}
 	if f.AlmacenID != "" {
 		filter["almacenid"] = f.AlmacenID
+	}
+	if f.UbicacionID != "" {
+		filter["ubicacionid"] = f.UbicacionID
 	}
 	if f.ProductoID != "" {
 		filter["productoid"] = f.ProductoID

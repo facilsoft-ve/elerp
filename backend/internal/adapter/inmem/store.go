@@ -110,6 +110,9 @@ func (r *MovimientoRepo) List(empresaID string, f inventario.FiltroMovimiento) [
 		if f.SedeID != "" && m.SedeID != f.SedeID {
 			continue
 		}
+		if f.UbicacionID != "" && m.UbicacionID != f.UbicacionID {
+			continue
+		}
 		if f.AlmacenID != "" && m.AlmacenID != f.AlmacenID {
 			continue
 		}

@@ -128,7 +128,7 @@ func TestLotes_FEFO_SaleAntesLoQueVenceAntes(t *testing.T) {
 		t.Fatalf("recibir A: %v", err)
 	}
 
-	tramos, err := svc.RepartirSalidaFEFO(empDemo, sede1, prodID, 15)
+	tramos, err := svc.RepartirSalidaFEFO(empDemo, sede1, "", prodID, 15)
 	if err != nil {
 		t.Fatalf("repartir: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestLotes_UnVencidoNoSeVende(t *testing.T) {
 	}
 
 	// Pese a vencer antes, el vencido se salta: salen las 4 del lote bueno.
-	tramos, err := svc.RepartirSalidaFEFO(empDemo, sede1, prodID, 4)
+	tramos, err := svc.RepartirSalidaFEFO(empDemo, sede1, "", prodID, 4)
 	if err != nil {
 		t.Fatalf("repartir: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestLotes_UnVencidoNoSeVende(t *testing.T) {
 
 	// Y si lo único que alcanza está vencido, se dice POR QUÉ: «no hay» mandaría a
 	// comprar más cuando lo que hay que hacer es dar de baja el lote.
-	if _, err := svc.RepartirSalidaFEFO(empDemo, sede1, prodID, 12); !errors.Is(err, application.ErrSoloQuedaVencido) {
+	if _, err := svc.RepartirSalidaFEFO(empDemo, sede1, "", prodID, 12); !errors.Is(err, application.ErrSoloQuedaVencido) {
 		t.Fatalf("debía distinguir que lo que queda está vencido: %v", err)
 	}
 }

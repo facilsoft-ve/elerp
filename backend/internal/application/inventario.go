@@ -736,9 +736,19 @@ func (s *Service) Ajustar(empresaID, sedeID, almacenID, sku, motivo string, cant
 	return s.AjustarConLote(empresaID, sedeID, almacenID, sku, motivo, cantidad, "", "", actor, origen)
 }
 
+// AjustarEnUbicacion corrige la existencia de una ubicación concreta. Un conteo
+// físico se hace estante por estante, no «del almacén».
+func (s *Service) AjustarEnUbicacion(empresaID, sedeID, almacenID, ubicacionID, sku, motivo string, cantidad float64, lote, vencimiento, actor, origen string) (ExistenciaView, error) {
+	return s.ajustar(empresaID, sedeID, almacenID, ubicacionID, sku, motivo, cantidad, lote, vencimiento, actor, origen)
+}
+
 // AjustarConLote corrige la existencia de un LOTE concreto. Es el camino cuando
 // se sabe cuál es: una caja rota es de un lote, no «del producto».
 func (s *Service) AjustarConLote(empresaID, sedeID, almacenID, sku, motivo string, cantidad float64, lote, vencimiento string, actor, origen string) (ExistenciaView, error) {
+	return s.ajustar(empresaID, sedeID, almacenID, "", sku, motivo, cantidad, lote, vencimiento, actor, origen)
+}
+
+func (s *Service) ajustar(empresaID, sedeID, almacenID, ubicacionID, sku, motivo string, cantidad float64, lote, vencimiento, actor, origen string) (ExistenciaView, error) {
 	if motivo == "" {
 		return ExistenciaView{}, ErrMotivoRequerido
 	}
@@ -751,6 +761,12 @@ func (s *Service) AjustarConLote(empresaID, sedeID, almacenID, sku, motivo strin
 		return ExistenciaView{}, ErrComboNoStockeable
 	}
 	// Almacén de destino del ajuste: el indicado o el principal de la sede.
+	//
+	// Se conserva el PEDIDO por separado: si nadie indicó almacén, una salida se
+	// surte de toda la sede —de donde esté la mercancía— y no solo del principal.
+	// Acotarla al principal dejaría ese almacén en negativo mientras otro conserva
+	// stock que sí existe, con el total cuadrando en los dos casos.
+	almacenPedido := almacenID
 	almacenID = s.almacenParaEscritura(empresaID, sedeID, almacenID)
 	// Restricción por rubro: solo al INGRESAR stock (cantidad>0); retirar siempre se
 	// permite (para poder vaciar un producto que ya no admite el almacén).
@@ -773,19 +789,43 @@ func (s *Service) AjustarConLote(empresaID, sedeID, almacenID, sku, motivo strin
 	// datos se le imputa a lo que vence antes, que es lo más probable y además lo
 	// que conviene sacar. Al SUMAR no hay reparto posible —no se puede meter stock
 	// en un lote sin nombre— y se exige declararlo.
-	tramos := []TramoSalida{{Lote: lote, Vencimiento: vencimiento, Cantidad: cantidad}}
-	if p.RequiereLote && lote == "" {
-		if cantidad > 0 {
-			return ExistenciaView{}, fmt.Errorf("%w: %s", ErrLoteRequerido, p.SKU)
-		}
+	if p.RequiereLote && lote == "" && cantidad > 0 {
+		// Al SUMAR no hay reparto posible: no se puede meter stock en un lote sin
+		// nombre. Se exige declararlo.
+		return ExistenciaView{}, fmt.Errorf("%w: %s", ErrLoteRequerido, p.SKU)
+	}
+	tramos := []TramoSalida{{
+		Lote: lote, Vencimiento: vencimiento,
+		// El almacén RESUELTO viaja en el tramo: quien anexa toma el almacén de aquí,
+		// y dejarlo vacío lo borraría del movimiento.
+		AlmacenID:   almacenID,
+		UbicacionID: s.ubicacionParaEscritura(empresaID, almacenID, ubicacionID),
+		Cantidad:    cantidad,
+	}}
+	// Al RESTAR sin decir de dónde, se reparte por FEFO entre las casillas reales
+	// (lote y ubicación): una merma sin más datos se imputa a lo que vence antes y,
+	// a igualdad, a lo que el sistema no sabe dónde está.
+	//
+	// OJO: esto vale para TODO producto, no solo los que llevan lote. Si un ajuste
+	// negativo saliera siempre «sin ubicar», esa casilla se iría a negativo mientras
+	// las ubicaciones quedan intactas: la suma cuadraría y el sitio sería mentira.
+	if cantidad < 0 && lote == "" && ubicacionID == "" {
 		tramos = tramos[:0]
-		for _, t := range s.repartirSalidaFEFOTolerante(empresaID, sedeID, p.ID, -cantidad) {
-			tramos = append(tramos, TramoSalida{Lote: t.Lote, Vencimiento: t.Vencimiento, Cantidad: -t.Cantidad})
+		for _, t := range s.repartirSalidaFEFOTolerante(empresaID, sedeID, almacenPedido, p.ID, -cantidad) {
+			tramos = append(tramos, TramoSalida{
+				Lote: t.Lote, Vencimiento: t.Vencimiento,
+				AlmacenID: t.AlmacenID, UbicacionID: t.UbicacionID, Cantidad: -t.Cantidad,
+				Descubierto: t.Descubierto,
+			})
 		}
 	}
 	for _, t := range tramos {
 		m := base
 		m.Cantidad, m.Lote, m.Vencimiento = t.Cantidad, t.Lote, t.Vencimiento
+		m.UbicacionID = t.UbicacionID
+		if !t.Descubierto {
+			m.AlmacenID = t.AlmacenID
+		}
 		guardado := s.movimientos.Append(m)
 		// Asiento derivado del ajuste: una merma es costo del período; un sobrante
 		// entra al inventario. Sin esto el inventario contable se separaría del real.
@@ -896,7 +936,11 @@ func (s *Service) CambiarEstadoTransferencia(empresaID, id, nuevo, actor, origen
 					EmpresaID: empresaID, SedeID: t.DestinoSedeID, AlmacenID: t.DestinoAlmacenID, ProductoID: l.ProductoID, SKU: l.SKU,
 					Tipo: inventario.MovTransferencia, Cantidad: tr.Cantidad, CostoUnitario: costo,
 					Lote: tr.Lote, Vencimiento: tr.Vencimiento,
-					Motivo: "recepción transferencia", RefTipo: "transferencia", RefID: t.ID, Actor: actor, Fecha: ahora(),
+					// La ubicación NO viaja: es del almacén de origen y en el destino no
+					// significa nada. Entra sin ubicar, y ubicarla es una decisión de
+					// quien recibe — que es justo para lo que sirve el muelle.
+					UbicacionID: "",
+					Motivo:      "recepción transferencia", RefTipo: "transferencia", RefID: t.ID, Actor: actor, Fecha: ahora(),
 				})
 			}
 		}
@@ -934,7 +978,10 @@ func (s *Service) CancelarTransferencia(empresaID, id, actor, origen, motivo str
 					EmpresaID: empresaID, SedeID: t.OrigenSedeID, AlmacenID: t.OrigenAlmacenID, ProductoID: l.ProductoID, SKU: l.SKU,
 					Tipo: inventario.MovTransferencia, Cantidad: tr.Cantidad, CostoUnitario: costo,
 					Lote: tr.Lote, Vencimiento: tr.Vencimiento,
-					Motivo: "cancelación transferencia", RefTipo: "transferencia", RefID: t.ID, Actor: actor, Fecha: ahora(),
+					// Vuelve a la MISMA ubicación de la que salió: una cancelación deshace,
+					// no recoloca. Dejarla sin ubicar obligaría a buscarla otra vez.
+					UbicacionID: tr.UbicacionID,
+					Motivo:      "cancelación transferencia", RefTipo: "transferencia", RefID: t.ID, Actor: actor, Fecha: ahora(),
 				})
 			}
 		}

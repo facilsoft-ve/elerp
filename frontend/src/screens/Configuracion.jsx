@@ -4104,6 +4104,7 @@ function Almacenes() {
 }
 
 function AlmacenForm({ almacen, sedes, sedeNombre, unidades, rubros, onVolver, onSaved }) {
+  const toast = useToast()
   const edicion = !!almacen
   const [f, setF] = useState(() => ({
     sedeId: almacen?.sedeId || (sedes[0]?.id || ''),
@@ -4241,9 +4242,124 @@ function AlmacenForm({ almacen, sedes, sedeNombre, unidades, rubros, onVolver, o
         </div>
 
         {error ? <div className="text-[12.5px] text-red-600 dark:text-red-400">{error}</div> : null}
+
+        {/* Solo al EDITAR: una ubicación cuelga de un almacén que ya existe. */}
+        {edicion ? <UbicacionesDeAlmacen almacenId={almacen.id} toast={toast} /> : null}
       </div>
     </div>
   )
+}
+
+/* UBICACIONES dentro de un almacén — pasillo, estante, muelle.
+ *
+ * Solo aparece EDITANDO: una ubicación cuelga de un almacén que todavía no existe
+ * no se puede crear, y ofrecerlo en el alta invita a perder lo tecleado.
+ *
+ * Dividir un almacén es opcional. Sin ubicaciones, todo su stock figura como «sin
+ * ubicar», que es la verdad: un almacén de una sola zona.
+ */
+function UbicacionesDeAlmacen({ almacenId, toast }) {
+  const [rows, setRows] = useState(null)
+  const [f, setF] = useState({ codigo: '', nombre: '', tipo: 'almacenamiento' })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const cargar = useCallback(() => {
+    api.ubicaciones(almacenId)
+      .then((r) => setRows(r?.ubicaciones || []))
+      .catch(() => setRows([]))
+  }, [almacenId])
+  useEffect(() => { cargar() }, [cargar])
+
+  const agregar = async () => {
+    if (!f.codigo.trim()) { setError('El código es lo que se lee en el anaquel.'); return }
+    setBusy(true); setError('')
+    try {
+      await api.crearUbicacion(almacenId, { codigo: f.codigo.trim(), nombre: f.nombre.trim(), tipo: f.tipo })
+      setF({ codigo: '', nombre: '', tipo: 'almacenamiento' })
+      cargar()
+      toast?.({ title: 'Ubicación creada', body: f.codigo.trim().toUpperCase() })
+    } catch (e) {
+      setError(e?.message || 'No se pudo crear.')
+    } finally { setBusy(false) }
+  }
+
+  const alternar = async (u) => {
+    try {
+      await api.actualizarUbicacion(almacenId, u.id, { nombre: u.nombre, tipo: u.tipo, activa: !u.activa })
+      cargar()
+    } catch (e) {
+      toast?.({ title: 'No se pudo cambiar', body: e?.message || 'Error', kind: 'error' })
+    }
+  }
+
+  return (
+    <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+      <div className="text-[13px] font-semibold mb-1">Ubicaciones</div>
+      <div className="text-[12.5px] text-slate-500 dark:text-slate-400 mb-3">
+        Dividir el almacén en pasillos y estantes. Es <strong>opcional</strong>: sin ubicaciones su stock figura
+        como «sin ubicar», que es lo correcto para un depósito de una sola zona. El <strong>muelle</strong> y la
+        <strong> zona de preparación</strong> también son ubicaciones.
+      </div>
+
+      {rows === null ? (
+        <div className="text-[12px] text-slate-400">Cargando…</div>
+      ) : rows.length === 0 ? (
+        <div className="text-[12px] text-slate-500 dark:text-slate-400 mb-3">Este almacén no está dividido.</div>
+      ) : (
+        <div className="overflow-x-auto mb-3">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                <th className="py-2 pr-3 font-medium">Código</th>
+                <th className="py-2 pr-3 font-medium">Nombre</th>
+                <th className="py-2 pr-3 font-medium">Tipo</th>
+                <th className="py-2 pr-3 font-medium text-right">Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((u) => (
+                <tr key={u.id} className={`border-b border-slate-100 dark:border-slate-800/70 ${u.activa ? '' : 'opacity-55'}`}>
+                  <td className="py-2 pr-3 num text-[12.5px] font-medium">{u.codigo}</td>
+                  <td className="py-2 pr-3 text-[12.5px]">{u.nombre}</td>
+                  <td className="py-2 pr-3 text-[12px] text-slate-500">{TIPO_UBICACION[u.tipo] || TIPO_UBICACION.almacenamiento}</td>
+                  <td className="py-2 pr-3 text-right">
+                    <Button size="sm" variant="ghost" onClick={() => alternar(u)}>
+                      {u.activa ? 'Desactivar' : 'Reactivar'}
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
+        <Field label="Código" hint="lo que se lee en el anaquel">
+          <Input value={f.codigo} className="num" placeholder="A-03-B"
+            onChange={(e) => { setF((s) => ({ ...s, codigo: e.target.value })); setError('') }} />
+        </Field>
+        <Field label="Nombre">
+          <Input value={f.nombre} placeholder="Pasillo 3, estante B"
+            onChange={(e) => setF((s) => ({ ...s, nombre: e.target.value }))} />
+        </Field>
+        <Field label="Tipo">
+          <Select value={f.tipo} onChange={(e) => setF((s) => ({ ...s, tipo: e.target.value }))}>
+            {Object.entries(TIPO_UBICACION).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </Select>
+        </Field>
+        <Button variant="secondary" onClick={agregar} loading={busy} icon={<Icon.Plus size={15} />}>Agregar</Button>
+      </div>
+      {error ? <div className="mt-2 text-[12px] text-red-600 dark:text-red-400">{error}</div> : null}
+    </div>
+  )
+}
+
+const TIPO_UBICACION = {
+  almacenamiento: 'Almacenamiento',
+  muelle: 'Muelle de recepción',
+  preparacion: 'Zona de preparación',
 }
 
 /* --- Dispositivos fiscales ---------------------------------------------- */
