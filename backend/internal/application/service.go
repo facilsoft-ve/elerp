@@ -209,6 +209,10 @@ type Service struct {
 	// cablea con ConUbicaciones; sin él los movimientos se anexan sin ubicar y todo
 	// se comporta como antes.
 	ubicaciones almacen.UbicacionRepo
+	// tiposOperacion configura CÓMO entra y sale la mercancía (en uno o dos pasos,
+	// por qué ubicación). Se cablea con ConTiposOperacion; sin él cada proceso se
+	// comporta como siempre: un paso, almacén principal.
+	tiposOperacion almacen.TipoOperacionRepo
 	// sedes da acceso a las COORDENADAS del local, para la presencia estricta
 	// (ver presencia.go). Se cablea con ConSedes; sin él la verificación de
 	// presencia no aplica y todo se comporta como antes.
