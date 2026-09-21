@@ -455,6 +455,7 @@ function NuevoProducto({ rubros, onClose, onSaved, toast, monedaEmpresa = 'VES',
     sku: '', nombre: '', rubro: rubros[0]?.nombre || '', unidadBase: 'unidad', precio: '',
     moneda: monedaEmpresa, codigoBarras: '', exentoIva: false, alicuotaCodigo: 'general',
     conceptoIslr: '',
+    requiereLote: false, controlaVencimiento: false,
     esCombo: false, componentes: [], esInsumo: false,
   })
   const esPeso = esUnidadDePeso(unidades, f.unidadBase)
@@ -494,6 +495,7 @@ function NuevoProducto({ rubros, onClose, onSaved, toast, monedaEmpresa = 'VES',
             codigoBarras: f.codigoBarras.trim(), exentoIva: f.exentoIva, alicuotaCodigo: f.alicuotaCodigo,
             // Un combo es un paquete de productos, nunca un servicio: no se clasifica.
             conceptoIslr: f.conceptoIslr,
+            requiereLote: f.requiereLote, controlaVencimiento: f.controlaVencimiento,
             tipoVenta: esPeso ? 'peso' : 'unidad',
             // Un insumo no se vende: el servidor le fuerza el precio a cero.
             esInsumo: f.esInsumo,
@@ -591,6 +593,22 @@ function NuevoProducto({ rubros, onClose, onSaved, toast, monedaEmpresa = 'VES',
         {!esCombo ? (
           <SelectorConceptoProducto valor={f.conceptoIslr}
             onChange={(cod) => setF((s) => ({ ...s, conceptoIslr: cod }))} />
+        ) : null}
+        {/* TRAZABILIDAD. Sin lote, una alerta sanitaria se atiende sacando TODO el
+            producto del anaquel. Un combo no se stockea, así que no lleva lotes. */}
+        {!esCombo ? (
+          <div className="space-y-2">
+            <Toggle checked={f.requiereLote}
+              onChange={(v) => setF((s) => ({ ...s, requiereLote: v, controlaVencimiento: v ? s.controlaVencimiento : false }))}
+              label="Se lleva por lotes"
+              hint="al recibirlo habrá que indicar el lote; el stock se cuenta lote por lote" />
+            {f.requiereLote ? (
+              <Toggle checked={f.controlaVencimiento}
+                onChange={(v) => setF((s) => ({ ...s, controlaVencimiento: v }))}
+                label="Controla vencimiento"
+                hint="además del lote se pide la fecha de caducidad, y se avisa antes de que venza" />
+            ) : null}
+          </div>
         ) : null}
       </div>
     </VistaDetalle>
@@ -802,6 +820,7 @@ function EditarProducto({ producto, monedaEmpresa, monedas = ['VES'], unidades =
     codigoBarras: producto.codigoBarras || '',
     exentoIva: !!producto.exentoIva, alicuotaCodigo: codigoEfectivo(producto),
     conceptoIslr: producto.conceptoIslr || '',
+    requiereLote: !!producto.requiereLote, controlaVencimiento: !!producto.controlaVencimiento,
     activo: producto.activo !== false,
     unidadBase: producto.unidadBase || 'unidad',
     esCombo: !!producto.esCombo,
@@ -830,6 +849,7 @@ function EditarProducto({ producto, monedaEmpresa, monedas = ['VES'], unidades =
             nombre: f.nombre.trim(), precio: Number(f.precio), moneda: f.moneda,
             codigoBarras: f.codigoBarras.trim(), exentoIva: f.exentoIva, alicuotaCodigo: f.alicuotaCodigo, activo: f.activo,
             conceptoIslr: f.conceptoIslr,
+            requiereLote: f.requiereLote, controlaVencimiento: f.controlaVencimiento,
             tipoVenta: esPeso ? 'peso' : 'unidad', unidadBase: f.unidadBase || 'unidad',
           }
       await api.actualizarProducto(producto.sku, payload)
@@ -891,6 +911,22 @@ function EditarProducto({ producto, monedaEmpresa, monedas = ['VES'], unidades =
         {!esCombo ? (
           <SelectorConceptoProducto valor={f.conceptoIslr}
             onChange={(cod) => setF((s) => ({ ...s, conceptoIslr: cod }))} />
+        ) : null}
+        {/* TRAZABILIDAD. Sin lote, una alerta sanitaria se atiende sacando TODO el
+            producto del anaquel. Un combo no se stockea, así que no lleva lotes. */}
+        {!esCombo ? (
+          <div className="space-y-2">
+            <Toggle checked={f.requiereLote}
+              onChange={(v) => setF((s) => ({ ...s, requiereLote: v, controlaVencimiento: v ? s.controlaVencimiento : false }))}
+              label="Se lleva por lotes"
+              hint="al recibirlo habrá que indicar el lote; el stock se cuenta lote por lote" />
+            {f.requiereLote ? (
+              <Toggle checked={f.controlaVencimiento}
+                onChange={(v) => setF((s) => ({ ...s, controlaVencimiento: v }))}
+                label="Controla vencimiento"
+                hint="además del lote se pide la fecha de caducidad, y se avisa antes de que venza" />
+            ) : null}
+          </div>
         ) : null}
         <Toggle checked={f.activo} onChange={(v) => setF((s) => ({ ...s, activo: v }))}
           label="Activo" sub="Un producto inactivo conserva su histórico pero no se puede vender." />

@@ -7,6 +7,59 @@ import { useUI } from '../context/UIContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { api } from '../lib/api.js'
 
+/* AVISO DE VENCIMIENTOS.
+ *
+ * Es la razón por la que casi todo el mundo activa los lotes: la mercancía caduca
+ * en el almacén sin que nadie se entere hasta que un cliente lo ve en la etiqueta.
+ * El total de existencia no lo delata —las unidades están ahí—, así que tiene que
+ * avisarlo alguien.
+ *
+ * No aparece si no hay nada por vencer, para no ocupar sitio en un catálogo que no
+ * lleva vencimientos.
+ */
+function AvisoVencimientos() {
+  const [lotes, setLotes] = useState([])
+  useEffect(() => {
+    let vivo = true
+    api.lotesPorVencer({ dias: 30 })
+      .then((r) => { if (vivo) setLotes(r?.lotes || []) })
+      .catch(() => { if (vivo) setLotes([]) })
+    return () => { vivo = false }
+  }, [])
+  if (lotes.length === 0) return null
+
+  const vencidos = lotes.filter((l) => l.vencido)
+  return (
+    <div className="mb-3 rounded-xl bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-900/40 px-3 py-2.5">
+      <div className="flex items-start gap-2.5">
+        <Icon.CircleAlert size={15} className="mt-0.5 shrink-0 text-amber-700 dark:text-amber-400" />
+        <div className="text-[12.5px] text-amber-900 dark:text-amber-200 min-w-0">
+          <strong>
+            {vencidos.length > 0
+              ? `${vencidos.length} lote(s) VENCIDO(S) con existencia`
+              : `${lotes.length} lote(s) vencen en los próximos 30 días`}
+          </strong>
+          {vencidos.length > 0 && lotes.length > vencidos.length
+            ? ` y ${lotes.length - vencidos.length} más por vencer` : null}
+          <div className="mt-1 space-y-0.5">
+            {lotes.slice(0, 5).map((l) => (
+              <div key={l.sku + l.lote} className="flex items-baseline gap-2 flex-wrap">
+                <span className="num text-[11.5px]">{l.lote}</span>
+                <span className="text-[11.5px]">{l.nombre}</span>
+                <span className="num text-[11.5px]">{fmtNum(l.cantidad)} u.</span>
+                <span className={`text-[11.5px] ${l.vencido ? 'font-semibold' : ''}`}>
+                  {l.vencido ? `venció hace ${Math.abs(l.diasParaVencer)} día(s)` : `vence en ${l.diasParaVencer} día(s)`}
+                </span>
+              </div>
+            ))}
+            {lotes.length > 5 ? <div className="text-[11.5px] opacity-80">…y {lotes.length - 5} más.</div> : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const LOW_STOCK = 5
 const puedeAjustar = (rol) => ['dueno', 'desarrollador'].includes(rol)
 
@@ -62,6 +115,7 @@ export function Existencias({ onKardex }) {
 
   return (
     <div>
+      <AvisoVencimientos />
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <Input className="w-64" icon={<Icon.Search size={15} />} placeholder="Buscar por nombre o SKU…"
           value={q} onChange={(e) => setQ(e.target.value)} />

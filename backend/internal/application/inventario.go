@@ -199,6 +199,11 @@ type KardexView struct {
 
 // --- Catálogo ---
 
+// ProductoPorSKU busca un producto del catálogo por su SKU.
+func (s *Service) ProductoPorSKU(empresaID, sku string) (inventario.Producto, bool) {
+	return s.productos.BySKU(empresaID, sku)
+}
+
 // Productos devuelve el catálogo de la empresa.
 func (s *Service) Productos(empresaID string) []inventario.Producto {
 	return s.productos.List(empresaID)
@@ -221,6 +226,12 @@ func (s *Service) CrearProducto(empresaID, actor, origen string, p inventario.Pr
 		return inventario.Producto{}, err
 	}
 	p.ConceptoISLR = conc
+	// La fecha de caducidad vive en el lote: controlar vencimiento implica llevar
+	// lotes. Guardar la combinación imposible dejaría un producto que pide fecha y
+	// no tiene dónde ponerla.
+	if p.ControlaVencimiento {
+		p.RequiereLote = true
+	}
 	if _, ok := s.productos.BySKU(empresaID, p.SKU); ok {
 		return inventario.Producto{}, ErrSKUDuplicado
 	}
@@ -343,12 +354,17 @@ type CambiosProducto struct {
 	// ConceptoISLR es *string: nil = no se toca; "" deja de clasificar el producto
 	// como servicio sujeto a retención.
 	ConceptoISLR *string
-	Activo       *bool
-	EsCombo      *bool
-	Componentes  []inventario.ComboComponente
-	EsPlato      *bool
-	Receta       []inventario.ComboComponente
-	EsInsumo     *bool
+	// RequiereLote y ControlaVencimiento son *bool: nil = no se tocan. Activarlos
+	// NO pierde la existencia anterior — esas unidades quedan como «sin lote», que
+	// es la verdad: nadie sabe de qué lote son y nadie puede inventarlo.
+	RequiereLote        *bool
+	ControlaVencimiento *bool
+	Activo              *bool
+	EsCombo             *bool
+	Componentes         []inventario.ComboComponente
+	EsPlato             *bool
+	Receta              []inventario.ComboComponente
+	EsInsumo            *bool
 	// ComanderaID es *string: nil = no enviado = no se toca; "" vacía la elección y
 	// devuelve el producto al ruteo por rubro.
 	ComanderaID *string
@@ -491,6 +507,18 @@ func (s *Service) ActualizarProducto(empresaID, actor, origen, sku string, cambi
 			return inventario.Producto{}, err
 		}
 		p.ConceptoISLR = conc
+	}
+	if cambios.RequiereLote != nil {
+		p.RequiereLote = *cambios.RequiereLote
+	}
+	if cambios.ControlaVencimiento != nil {
+		p.ControlaVencimiento = *cambios.ControlaVencimiento
+		// Controlar vencimiento sin llevar lotes no significa nada: la fecha vive en
+		// el lote. Activar uno implica el otro, en vez de guardar una combinación que
+		// no se puede cumplir.
+		if p.ControlaVencimiento {
+			p.RequiereLote = true
+		}
 	}
 	if cambios.Activo != nil {
 		p.Activo = *cambios.Activo
@@ -702,7 +730,15 @@ func (s *Service) Movimientos(empresaID string, f inventario.FiltroMovimiento, d
 
 // Ajustar registra un ajuste de existencias (merma/conteo) como un movimiento
 // nuevo — nunca sobrescribe el saldo. Requiere motivo (auditado).
+// Ajustar corrige la existencia sin declarar lote. En productos con trazabilidad
+// una merma se reparte por FEFO y un sobrante se rechaza: ver AjustarConLote.
 func (s *Service) Ajustar(empresaID, sedeID, almacenID, sku, motivo string, cantidad float64, actor, origen string) (ExistenciaView, error) {
+	return s.AjustarConLote(empresaID, sedeID, almacenID, sku, motivo, cantidad, "", "", actor, origen)
+}
+
+// AjustarConLote corrige la existencia de un LOTE concreto. Es el camino cuando
+// se sabe cuál es: una caja rota es de un lote, no «del producto».
+func (s *Service) AjustarConLote(empresaID, sedeID, almacenID, sku, motivo string, cantidad float64, lote, vencimiento string, actor, origen string) (ExistenciaView, error) {
 	if motivo == "" {
 		return ExistenciaView{}, ErrMotivoRequerido
 	}
@@ -725,15 +761,36 @@ func (s *Service) Ajustar(empresaID, sedeID, almacenID, sku, motivo string, cant
 	}
 	// Para ajustes positivos usamos el costo promedio vigente como costo del ingreso.
 	_, avg := fold(s.movimientos.List(empresaID, inventario.FiltroMovimiento{SedeID: sedeID, ProductoID: p.ID}))
-	m := inventario.Movimiento{
+	base := inventario.Movimiento{
 		EmpresaID: empresaID, SedeID: sedeID, AlmacenID: almacenID, ProductoID: p.ID, SKU: p.SKU,
 		Tipo: inventario.MovAjuste, Cantidad: cantidad, CostoUnitario: avg,
 		Motivo: motivo, Actor: actor, Fecha: ahora(),
 	}
-	guardado := s.movimientos.Append(m)
-	// Asiento derivado del ajuste: una merma es costo del período; un sobrante
-	// entra al inventario. Sin esto el inventario contable se separaría del real.
-	s.asentarMovimientoInventario(empresaID, actor, guardado)
+	// Un ajuste sobre un producto con trazabilidad tiene que decir de qué lote sale
+	// o entra; si no, el saldo del producto cuadra y el de los lotes no.
+	//
+	// Al RESTAR se reparte por FEFO cuando no se declaró lote: una merma sin más
+	// datos se le imputa a lo que vence antes, que es lo más probable y además lo
+	// que conviene sacar. Al SUMAR no hay reparto posible —no se puede meter stock
+	// en un lote sin nombre— y se exige declararlo.
+	tramos := []TramoSalida{{Lote: lote, Vencimiento: vencimiento, Cantidad: cantidad}}
+	if p.RequiereLote && lote == "" {
+		if cantidad > 0 {
+			return ExistenciaView{}, fmt.Errorf("%w: %s", ErrLoteRequerido, p.SKU)
+		}
+		tramos = tramos[:0]
+		for _, t := range s.repartirSalidaFEFOTolerante(empresaID, sedeID, p.ID, -cantidad) {
+			tramos = append(tramos, TramoSalida{Lote: t.Lote, Vencimiento: t.Vencimiento, Cantidad: -t.Cantidad})
+		}
+	}
+	for _, t := range tramos {
+		m := base
+		m.Cantidad, m.Lote, m.Vencimiento = t.Cantidad, t.Lote, t.Vencimiento
+		guardado := s.movimientos.Append(m)
+		// Asiento derivado del ajuste: una merma es costo del período; un sobrante
+		// entra al inventario. Sin esto el inventario contable se separaría del real.
+		s.asentarMovimientoInventario(empresaID, actor, guardado)
+	}
 	s.audit.Append(evento(empresaID, actor, origen, "inventario.ajuste", p.SKU, motivo))
 	cant, navg := fold(s.movimientos.List(empresaID, inventario.FiltroMovimiento{SedeID: sedeID, ProductoID: p.ID}))
 	return ExistenciaView{ProductoID: p.ID, SKU: p.SKU, Nombre: p.Nombre, SedeID: sedeID, Cantidad: cant, CostoPromedio: navg, Valor: cant * navg}, nil
@@ -820,7 +877,7 @@ func (s *Service) CambiarEstadoTransferencia(empresaID, id, nuevo, actor, origen
 		}
 		for _, l := range t.Lineas {
 			_, avg := fold(s.movimientos.List(empresaID, inventario.FiltroMovimiento{SedeID: t.OrigenSedeID, SKU: l.SKU}))
-			s.movimientos.Append(inventario.Movimiento{
+			s.anexarSalidaPorLotes(inventario.Movimiento{
 				EmpresaID: empresaID, SedeID: t.OrigenSedeID, AlmacenID: t.OrigenAlmacenID, ProductoID: l.ProductoID, SKU: l.SKU,
 				Tipo: inventario.MovTransferencia, Cantidad: -l.Cantidad, CostoUnitario: avg,
 				Motivo: "despacho transferencia", RefTipo: "transferencia", RefID: t.ID, Actor: actor, Fecha: ahora(),
@@ -830,11 +887,18 @@ func (s *Service) CambiarEstadoTransferencia(empresaID, id, nuevo, actor, origen
 		for _, l := range t.Lineas {
 			// El costo entra al destino al mismo costo con que salió del origen.
 			costo := costoSalidaTransfer(s.movimientos.List(empresaID, inventario.FiltroMovimiento{SKU: l.SKU}), t.ID)
-			s.movimientos.Append(inventario.Movimiento{
-				EmpresaID: empresaID, SedeID: t.DestinoSedeID, AlmacenID: t.DestinoAlmacenID, ProductoID: l.ProductoID, SKU: l.SKU,
-				Tipo: inventario.MovTransferencia, Cantidad: l.Cantidad, CostoUnitario: costo,
-				Motivo: "recepción transferencia", RefTipo: "transferencia", RefID: t.ID, Actor: actor, Fecha: ahora(),
-			})
+			// Y con los MISMOS LOTES: se reflejan uno a uno los que salieron. Entrar
+			// sin lote perdería la trazabilidad justo al cruzar de sede, que es cuando
+			// más falta hace — el lote seguiría en el anaquel y el sistema no sabría
+			// cuál es.
+			for _, tr := range s.lotesQueSalieron(empresaID, l.SKU, t.ID) {
+				s.movimientos.Append(inventario.Movimiento{
+					EmpresaID: empresaID, SedeID: t.DestinoSedeID, AlmacenID: t.DestinoAlmacenID, ProductoID: l.ProductoID, SKU: l.SKU,
+					Tipo: inventario.MovTransferencia, Cantidad: tr.Cantidad, CostoUnitario: costo,
+					Lote: tr.Lote, Vencimiento: tr.Vencimiento,
+					Motivo: "recepción transferencia", RefTipo: "transferencia", RefID: t.ID, Actor: actor, Fecha: ahora(),
+				})
+			}
 		}
 	}
 	t.Estado = nuevo
@@ -863,11 +927,16 @@ func (s *Service) CancelarTransferencia(empresaID, id, actor, origen, motivo str
 		// devolvemos el stock en tránsito al origen con movimientos positivos.
 		for _, l := range t.Lineas {
 			costo := costoSalidaTransfer(s.movimientos.List(empresaID, inventario.FiltroMovimiento{SKU: l.SKU}), t.ID)
-			s.movimientos.Append(inventario.Movimiento{
-				EmpresaID: empresaID, SedeID: t.OrigenSedeID, AlmacenID: t.OrigenAlmacenID, ProductoID: l.ProductoID, SKU: l.SKU,
-				Tipo: inventario.MovTransferencia, Cantidad: l.Cantidad, CostoUnitario: costo,
-				Motivo: "cancelación transferencia", RefTipo: "transferencia", RefID: t.ID, Actor: actor, Fecha: ahora(),
-			})
+			// Vuelven al origen los MISMOS lotes que salieron, por lo mismo que en la
+			// recepción: devolverlos sin lote los haría desaparecer del rastro.
+			for _, tr := range s.lotesQueSalieron(empresaID, l.SKU, t.ID) {
+				s.movimientos.Append(inventario.Movimiento{
+					EmpresaID: empresaID, SedeID: t.OrigenSedeID, AlmacenID: t.OrigenAlmacenID, ProductoID: l.ProductoID, SKU: l.SKU,
+					Tipo: inventario.MovTransferencia, Cantidad: tr.Cantidad, CostoUnitario: costo,
+					Lote: tr.Lote, Vencimiento: tr.Vencimiento,
+					Motivo: "cancelación transferencia", RefTipo: "transferencia", RefID: t.ID, Actor: actor, Fecha: ahora(),
+				})
+			}
 		}
 	default:
 		// recibida / cerrada / cancelada.

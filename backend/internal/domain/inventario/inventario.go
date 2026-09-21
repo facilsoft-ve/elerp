@@ -150,6 +150,24 @@ type Producto struct {
 	// el kilo de pasta cruda. Por eso los insumos quedan fuera de las pantallas de
 	// venta (POS, comandera, ventas y cotizaciones) y no necesitan precio de venta.
 	EsInsumo bool `json:"esInsumo" bson:"esinsumo"`
+
+	// --- Trazabilidad por lote ------------------------------------------------
+	//
+	// RequiereLote obliga a declarar el LOTE al recibir y hace que el stock se lleve
+	// lote por lote. Es lo que permite responder «¿a quién le vendí el lote X?»
+	// cuando el fabricante manda a retirarlo, y sin eso una alerta sanitaria se
+	// atiende sacando TODO el producto del anaquel.
+	//
+	// ControlaVencimiento añade la fecha de caducidad al lote. Se separa de
+	// RequiereLote porque hay lotes sin vencimiento (un lote de fabricación de
+	// tornillos) y no tiene sentido pedir una fecha que nadie va a mirar.
+	// ControlaVencimiento sin RequiereLote no significa nada: la fecha vive en el
+	// lote, así que activarlo implica el otro.
+	//
+	// Las dos son FALSAS por defecto: los catálogos ya cargados siguen funcionando
+	// exactamente igual, sin lote y sin migración.
+	RequiereLote        bool `json:"requiereLote" bson:"requierelote"`
+	ControlaVencimiento bool `json:"controlaVencimiento" bson:"controlavencimiento"`
 	// ComanderaID fija POR QUÉ COMANDERA sale este producto cuando la comanda se
 	// manda a preparación, sin depender de su rubro. Un postre con receta y un plato
 	// de cocina son los dos "platos", pero se preparan en puestos distintos; y dos
@@ -183,11 +201,26 @@ type Movimiento struct {
 	// a dividirlo por la cantidad acá daría un número distinto si el stock cambió
 	// entre el reparto y el pliegue.
 	ValorAgregado float64 `json:"valorAgregado,omitempty" bson:"valoragregado,omitempty"`
-	Motivo        string  `json:"motivo" bson:"motivo"`
-	RefTipo       string  `json:"refTipo" bson:"reftipo"` // p. ej. "transferencia"
-	RefID         string  `json:"refId" bson:"refid"`
-	Actor         string  `json:"actor" bson:"actor"`
-	Fecha         string  `json:"fecha" bson:"fecha"` // UTC RFC3339, ordenable
+	// Lote identifica el lote de fabricación al que pertenece esta cantidad, y
+	// Vencimiento su caducidad (AAAA-MM-DD). Vacíos en todo producto que no la
+	// exige, que son casi todos.
+	//
+	// Van en el MOVIMIENTO y no en una tabla de lotes aparte por la misma razón que
+	// el resto del inventario: el saldo de un lote es una proyección del ledger, no
+	// un contador que alguien mantiene. Un contador se desincroniza del Kardex y
+	// entonces hay dos verdades.
+	//
+	// El COSTO no se lleva por lote: la valoración sigue siendo el promedio
+	// ponderado del producto. Separarla por lote sería otro sistema de valoración
+	// (FIFO por capas), no un añadido — y mezclarlos daría dos cifras distintas
+	// para el mismo inventario.
+	Lote        string `json:"lote,omitempty" bson:"lote,omitempty"`
+	Vencimiento string `json:"vencimiento,omitempty" bson:"vencimiento,omitempty"`
+	Motivo      string `json:"motivo" bson:"motivo"`
+	RefTipo     string `json:"refTipo" bson:"reftipo"` // p. ej. "transferencia"
+	RefID       string `json:"refId" bson:"refid"`
+	Actor       string `json:"actor" bson:"actor"`
+	Fecha       string `json:"fecha" bson:"fecha"` // UTC RFC3339, ordenable
 }
 
 // LineaTransferencia es un renglón de una transferencia.

@@ -515,7 +515,10 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 		for _, cs := range consumosDeLinea(l, l.Cantidad) {
 			_, avg := fold(s.movimientos.List(empresaID, inventario.FiltroMovimiento{SedeID: sedeInventario, SKU: cs.SKU}))
 			costoVendido += avg * cs.Cantidad
-			s.movimientos.Append(inventario.Movimiento{
+			// Por LOTES (FEFO): sale antes lo que vence antes. El mostrador no elige
+			// lote — si lo eligiera cada pantalla, la primera que se olvidara dejaría
+			// la trazabilidad mintiendo sin que nada fallara.
+			s.anexarSalidaPorLotes(inventario.Movimiento{
 				EmpresaID: empresaID, SedeID: sedeInventario, AlmacenID: almacenInventario, ProductoID: cs.ProductoID, SKU: cs.SKU,
 				Tipo: inventario.MovSalida, Cantidad: -cs.Cantidad, CostoUnitario: avg,
 				Motivo: "venta " + out.NumeroCompleto, RefTipo: "documento", RefID: out.ID, Actor: actor, Fecha: ahora(),

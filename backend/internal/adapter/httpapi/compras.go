@@ -296,6 +296,10 @@ func (s *Server) handleRecibirOrdenCompra(c *fiber.Ctx) error {
 		Lineas []struct {
 			SKU      string  `json:"sku"`
 			Cantidad float64 `json:"cantidad"`
+			// Trazabilidad: solo los exigen los productos que la llevan. Se piden al
+			// recibir porque es cuando alguien tiene la caja delante con la etiqueta.
+			Lote        string `json:"lote"`
+			Vencimiento string `json:"vencimiento"`
 		} `json:"lineas"`
 	}
 	if err := c.BodyParser(&in); err != nil {
@@ -303,7 +307,9 @@ func (s *Server) handleRecibirOrdenCompra(c *fiber.Ctx) error {
 	}
 	lineas := make([]application.LineaRecepcion, 0, len(in.Lineas))
 	for _, l := range in.Lineas {
-		lineas = append(lineas, application.LineaRecepcion{SKU: l.SKU, Cantidad: l.Cantidad})
+		lineas = append(lineas, application.LineaRecepcion{
+			SKU: l.SKU, Cantidad: l.Cantidad, Lote: l.Lote, Vencimiento: l.Vencimiento,
+		})
 	}
 	out, err := s.svc.RecibirOrdenCompra(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c), lineas)
 	if err != nil {

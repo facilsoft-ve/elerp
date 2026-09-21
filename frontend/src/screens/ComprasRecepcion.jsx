@@ -123,8 +123,21 @@ export function ModalRecepcion({ orden, onClose, onSaved, toast }) {
   // mismo producto en dos líneas y cada una se edita por separado (antes compartían
   // estado al indexar por SKU: editar una cambiaba la otra y la recepción chocaba).
   const [cant, setCant] = useState(() => lineasPend.map((l) => String(pendienteDe(l))))
+  // Lote y vencimiento por línea. Solo los piden los productos con trazabilidad,
+  // y se piden ACÁ porque es el único momento en que alguien tiene la caja
+  // delante con la etiqueta: preguntarlo después es pedir que lo inventen.
+  const [lote, setLote] = useState(() => lineasPend.map(() => ''))
+  const [venc, setVenc] = useState(() => lineasPend.map(() => ''))
   const [touched, setTouched] = useState(false)
   const [busy, setBusy] = useState(false)
+  // El catálogo vive en `db`, no en la raíz de useData(): destructurar PRODUCTOS
+  // directamente daba undefined y la columna se pintaba vacía SIN fallar — el
+  // producto parecía no llevar lotes.
+  const { db } = useData()
+  const trazaDe = (sku) => {
+    const p = (db?.PRODUCTOS || []).find((x) => x.sku === sku)
+    return { lote: !!p?.requiereLote, venc: !!p?.controlaVencimiento }
+  }
 
   const errorDe = (l, i) => {
     const pend = pendienteDe(l)
@@ -136,19 +149,37 @@ export function ModalRecepcion({ orden, onClose, onSaved, toast }) {
     return ''
   }
 
+  // El lote se valida aparte de la cantidad: son dos errores distintos y
+  // mezclarlos dejaría al usuario buscando cuál de los dos campos está mal.
+  const errorLoteDe = (l, i) => {
+    if (!(Number(cant[i]) > 0)) return ''
+    const t = trazaDe(l.sku)
+    if (t.lote && !String(lote[i] || '').trim()) return 'Este producto se lleva por lotes.'
+    if (t.venc && !venc[i]) return 'Indica la fecha de vencimiento.'
+    return ''
+  }
+
   // Al enviar se AGREGA por SKU (el backend imputa la recepción por SKU): dos
   // líneas del mismo producto suman su cantidad a recibir en una sola entrada.
   const lineasEnvio = useMemo(() => {
     const porSku = {}
     lineasPend.forEach((l, i) => {
       const n = Number(cant[i]) || 0
-      if (n > 0) porSku[l.sku] = (porSku[l.sku] || 0) + n
+      if (n <= 0) return
+      const prev = porSku[l.sku] || { sku: l.sku, cantidad: 0, lote: '', vencimiento: '' }
+      prev.cantidad += n
+      // Dos líneas del mismo SKU comparten recepción, así que comparten lote: gana
+      // el primero declarado. Partir un SKU en dos lotes se hace en dos recepciones.
+      if (!prev.lote && lote[i]) { prev.lote = String(lote[i]).trim(); prev.vencimiento = venc[i] || '' }
+      porSku[l.sku] = prev
     })
-    return Object.entries(porSku).map(([sku, cantidad]) => ({ sku, cantidad }))
-  }, [lineasPend, cant])
+    return Object.values(porSku)
+  }, [lineasPend, cant, lote, venc])
 
   const hayError = lineasPend.some((l, i) => errorDe(l, i))
+  const hayErrorLote = lineasPend.some((l, i) => errorLoteDe(l, i))
   const errGlobal = hayError ? 'Corrige las cantidades marcadas.'
+    : hayErrorLote ? 'Falta el lote o el vencimiento de algún producto.'
     : lineasEnvio.length === 0 ? 'Indica al menos una cantidad a recibir.' : ''
 
   const setLinea = (i, v) => setCant((c) => c.map((x, j) => (j === i ? v : x)))
@@ -189,6 +220,7 @@ export function ModalRecepcion({ orden, onClose, onSaved, toast }) {
                 <th className="py-2 px-3 font-medium">Producto</th>
                 <th className="py-2 pr-3 font-medium text-right w-24">Pendiente</th>
                 <th className="py-2 pr-3 font-medium text-right w-40">A recibir</th>
+                <th className="py-2 pr-3 font-medium w-56">Lote / vencimiento</th>
               </tr>
             </thead>
             <tbody>
@@ -208,6 +240,32 @@ export function ModalRecepcion({ orden, onClose, onSaved, toast }) {
                         className={`w-32 h-8 text-right px-2 rounded-lg border bg-white dark:bg-slate-900 text-sm num ring-focus ml-auto block
                           ${touched && err ? 'border-red-400 focus:ring-red-300' : 'border-slate-200 dark:border-slate-700'}`} />
                       {touched && err ? <div className="mt-1 text-right text-[11px] text-red-600 dark:text-red-400">{err}</div> : null}
+                    </td>
+                    {/* Solo aparece para los productos que lo exigen: un catálogo de
+                        mercancía corriente no tiene por qué ver estos campos. */}
+                    <td className="py-2 pr-3 align-top">
+                      {(() => {
+                        const t = trazaDe(l.sku)
+                        if (!t.lote) return <span className="text-[11.5px] text-slate-400">—</span>
+                        const errL = errorLoteDe(l, i)
+                        return (
+                          <div className="space-y-1">
+                            <input type="text" value={lote[i] ?? ''} placeholder="Lote"
+                              onChange={(e) => setLote((c) => c.map((x, j) => (j === i ? e.target.value : x)))}
+                              onBlur={() => setTouched(true)}
+                              className={`w-full h-8 px-2 rounded-lg border bg-white dark:bg-slate-900 text-sm num ring-focus
+                                ${touched && errL ? 'border-red-400 focus:ring-red-300' : 'border-slate-200 dark:border-slate-700'}`} />
+                            {t.venc ? (
+                              <input type="date" value={venc[i] ?? ''}
+                                onChange={(e) => setVenc((c) => c.map((x, j) => (j === i ? e.target.value : x)))}
+                                onBlur={() => setTouched(true)}
+                                className={`w-full h-8 px-2 rounded-lg border bg-white dark:bg-slate-900 text-sm num ring-focus
+                                  ${touched && errL ? 'border-red-400 focus:ring-red-300' : 'border-slate-200 dark:border-slate-700'}`} />
+                            ) : null}
+                            {touched && errL ? <div className="text-[11px] text-red-600 dark:text-red-400">{errL}</div> : null}
+                          </div>
+                        )
+                      })()}
                     </td>
                   </tr>
                 )

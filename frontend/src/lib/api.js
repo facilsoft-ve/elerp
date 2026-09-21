@@ -453,6 +453,12 @@ export const api = {
   // de los no domiciliados). Sin él la pantalla proyectaría siempre el primero.
   // COSTOS EN DESTINO: fletes e impuestos que encarecen una compra ya recibida.
   // Solo anexado — se corrige aplicando otro en negativo.
+  // TRAZABILIDAD POR LOTE. La existencia por lote es una proyección del ledger;
+  // "por-vencer" alimenta el aviso de caducidad.
+  lotesDeProducto: (sku, sedeId = '') =>
+    request(`/api/inventario/productos/${encodeURIComponent(sku)}/lotes?sedeId=${encodeURIComponent(sedeId)}`),
+  lotesPorVencer: ({ dias = 30, sedeId = '' } = {}) =>
+    request(`/api/inventario/lotes/por-vencer?dias=${dias}&sedeId=${encodeURIComponent(sedeId)}`),
   costosEnDestino: (ordenId) => request(`/api/compras/ordenes/${encodeURIComponent(ordenId)}/costos-destino`),
   aplicarCostoEnDestino: (ordenId, body) =>
     request(`/api/compras/ordenes/${encodeURIComponent(ordenId)}/costos-destino`, { method: 'POST', body: JSON.stringify(body) }),

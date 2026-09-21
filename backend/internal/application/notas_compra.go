@@ -257,7 +257,11 @@ func (s *Service) emitirNotaCompra(empresaID, actor, origen, facturaCompraID, ti
 	// que nadie tenga que ajustar a mano: sin esto, la contabilidad rebaja el
 	// inventario y el almacén sigue contando las unidades.
 	for _, l := range out.Lineas {
-		s.movimientos.Append(inventario.Movimiento{
+		// Por lotes (FEFO). Una devolución suele ser de un lote concreto —el
+		// defectuoso—, pero la nota no lo pide hoy; sacar lo que vence antes es el
+		// supuesto menos malo y deja el rastro cuadrado. Declararlo es material de la
+		// siguiente vuelta.
+		s.anexarSalidaPorLotes(inventario.Movimiento{
 			EmpresaID: empresaID, SedeID: sede, AlmacenID: almacenID,
 			ProductoID: l.ProductoID, SKU: l.SKU,
 			Tipo: inventario.MovSalida, Cantidad: -l.Cantidad, CostoUnitario: l.CostoSalida,

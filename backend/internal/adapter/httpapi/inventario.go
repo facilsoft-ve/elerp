@@ -18,6 +18,12 @@ func (s *Server) registerInventario(r fiber.Router) {
 	g.Post("/productos/:id/presentaciones", s.escribirInventario, s.handleAgregarPresentacion)
 	g.Get("/existencias", s.handleExistencias)
 	g.Post("/existencias/:sku/ajustar", s.escribirInventario, s.handleAjustar)
+
+	// TRAZABILIDAD POR LOTE. La existencia por lote es una proyección del mismo
+	// ledger; "/por-vencer" alimenta el aviso de caducidad, que es el motivo por el
+	// que casi todo el mundo activa los lotes.
+	g.Get("/productos/:sku/lotes", s.handleSaldosPorLote)
+	g.Get("/lotes/por-vencer", s.handleLotesPorVencer)
 	g.Get("/kardex/:sku", s.handleKardex)
 	g.Get("/movimientos", s.handleMovimientos)
 	// Imagen del producto: subir (multipart) y quitar. Escribir el catálogo es de
@@ -105,6 +111,9 @@ func (s *Server) handleCrearProducto(c *fiber.Ctx) error {
 		// ConceptoISLR apunta al maestro de conceptos ("honorarios", "fletes"…) cuando
 		// el producto es un SERVICIO sujeto a retención. Vacío = no sujeto.
 		ConceptoISLR string `json:"conceptoIslr"`
+		// Trazabilidad: lote obligatorio al recibir y, opcionalmente, vencimiento.
+		RequiereLote        bool `json:"requiereLote"`
+		ControlaVencimiento bool `json:"controlaVencimiento"`
 		// Combo (paquete de otros productos): esCombo marca el paquete y componentes
 		// lleva su receta (SKU + cantidad). El servicio valida y, si es combo, fuerza
 		// unidad/no-stock y sugiere el precio por defecto (suma de componentes).
@@ -127,7 +136,8 @@ func (s *Server) handleCrearProducto(c *fiber.Ctx) error {
 		TipoVenta: in.TipoVenta, Precio: in.Precio, Moneda: in.Moneda,
 		CodigoBarras: in.CodigoBarras, ExentoIVA: in.ExentoIVA, AlicuotaCodigo: in.AlicuotaCodigo,
 		ConceptoISLR: in.ConceptoISLR,
-		EsCombo:      in.EsCombo, Componentes: in.Componentes,
+		RequiereLote: in.RequiereLote, ControlaVencimiento: in.ControlaVencimiento,
+		EsCombo: in.EsCombo, Componentes: in.Componentes,
 		EsPlato: in.EsPlato, Receta: in.Receta, EsInsumo: in.EsInsumo,
 		ComanderaID: in.ComanderaID,
 	}
@@ -198,7 +208,11 @@ func (s *Server) handleActualizarProducto(c *fiber.Ctx) error {
 		// ConceptoISLR es *string: nil = no enviado = no se toca; "" deja de tratar el
 		// producto como servicio sujeto a retención.
 		ConceptoISLR *string `json:"conceptoIslr"`
-		Activo       *bool   `json:"activo"`
+		// *bool: nil = no se toca. Activar la trazabilidad no pierde la existencia
+		// anterior; queda visible como «sin lote».
+		RequiereLote        *bool `json:"requiereLote"`
+		ControlaVencimiento *bool `json:"controlaVencimiento"`
+		Activo              *bool `json:"activo"`
 		// Combo: esCombo (nil = no cambiar) convierte/mantiene el paquete; componentes
 		// (nil = no se toca la receta) lleva la receta cuando se edita.
 		EsCombo     *bool                        `json:"esCombo"`
@@ -216,8 +230,9 @@ func (s *Server) handleActualizarProducto(c *fiber.Ctx) error {
 		Precio: in.Precio, Moneda: in.Moneda,
 		CodigoBarras: in.CodigoBarras, ExentoIVA: in.ExentoIVA, AlicuotaCodigo: in.AlicuotaCodigo,
 		ConceptoISLR: in.ConceptoISLR,
-		Activo:       in.Activo,
-		EsCombo:      in.EsCombo, Componentes: in.Componentes,
+		RequiereLote: in.RequiereLote, ControlaVencimiento: in.ControlaVencimiento,
+		Activo:  in.Activo,
+		EsCombo: in.EsCombo, Componentes: in.Componentes,
 		EsPlato: in.EsPlato, Receta: in.Receta, EsInsumo: in.EsInsumo,
 		ComanderaID: in.ComanderaID,
 	})
@@ -264,6 +279,28 @@ func (s *Server) handleExistencias(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "seleccione una sede"})
 	}
 	return c.JSON(s.svc.Existencias(empresaIDOf(c), sede))
+}
+
+// handleSaldosPorLote proyecta la existencia por lote de un producto en la sede.
+func (s *Server) handleSaldosPorLote(c *fiber.Ctx) error {
+	emp := empresaIDOf(c)
+	p, ok := s.svc.ProductoPorSKU(emp, c.Params("sku"))
+	if !ok {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "producto no existe"})
+	}
+	sede := c.Query("sedeId")
+	if sede == "" {
+		sede = sedeIDOf(c)
+	}
+	return c.JSON(fiber.Map{"lotes": s.svc.SaldosPorLote(emp, sede, p.ID)})
+}
+
+// handleLotesPorVencer lista lo que caduca pronto (o ya caducó). "dias" acota la
+// ventana; sin él, 30.
+func (s *Server) handleLotesPorVencer(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
+		"lotes": s.svc.LotesPorVencer(empresaIDOf(c), c.Query("sedeId"), c.QueryInt("dias", 30)),
+	})
 }
 
 func (s *Server) handleAjustar(c *fiber.Ctx) error {
