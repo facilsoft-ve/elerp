@@ -173,8 +173,11 @@ func TestUbicacion_SeGastaPrimeroLoQueNoEstaUbicado(t *testing.T) {
 		t.Fatalf("cargar en B-02: %v", err)
 	}
 
-	// Una salida de 4: tiene que salir de lo SIN UBICAR, no de B-02.
-	if _, err := svc.Ajustar(empDemo, sede1, "", sku, "salida", -4, actorA, origenTst); err != nil {
+	// Una salida de 4 ACOTADA AL ALMACÉN: tiene que salir de lo SIN UBICAR, no de
+	// B-02. Se acota a propósito — el seed trae saldo sin almacén, que se consume
+	// antes que nada (ver TestUbicacion_LoSinAlmacenSeGastaAntesQueLoDelAlmacen) y
+	// taparía el orden que esta prueba vigila.
+	if _, err := svc.Ajustar(empDemo, sede1, alm, sku, "salida", -4, actorA, origenTst); err != nil {
 		t.Fatalf("ajuste: %v", err)
 	}
 	enB02, sinUbicarEnAlm := 0.0, 0.0
@@ -193,6 +196,60 @@ func TestUbicacion_SeGastaPrimeroLoQueNoEstaUbicado(t *testing.T) {
 	}
 	if !casi(sinUbicarEnAlm, 2) {
 		t.Errorf("lo sin ubicar tenía que bajar de 6 a 2, quedó en %v", sinUbicarEnAlm)
+	}
+
+	suma, total := sumaYTotal(t, svc, sku)
+	if !casi(suma, total) {
+		t.Fatalf("la suma por ubicación se apartó: %v vs %v", suma, total)
+	}
+}
+
+// TestUbicacion_LoSinAlmacenSeGastaAntesQueLoDelAlmacen cierra el orden completo.
+//
+// Nació de un fallo intermitente: dos casillas «sin ubicar» —una histórica, sin
+// almacén, y otra dentro de un almacén— empataban en todos los criterios, y el
+// orden entre ellas lo decidía el recorrido de un mapa. La misma salida consumía
+// una u otra según la corrida. No fallaba nada: solo cambiaba solo el sitio del
+// que salía la mercancía, que es la clase de error que nadie persigue porque el
+// total siempre cuadra.
+func TestUbicacion_LoSinAlmacenSeGastaAntesQueLoDelAlmacen(t *testing.T) {
+	svc := servicioConUbicaciones(t)
+	alm := almacenPrincipalID(t, svc)
+	sku := primerSKU(t, svc)
+
+	// Lo que el seed dejó sin almacén, que es el histórico anterior a los almacenes.
+	previo := 0.0
+	for _, u := range svc.ExistenciaPorUbicacion(empDemo, sede1, sku) {
+		if u.AlmacenID == "" {
+			previo = u.Cantidad
+		}
+	}
+	if previo <= 0 {
+		t.Skip("el seed no dejó saldo sin almacén: nada que ordenar")
+	}
+	if _, err := svc.AjustarEnUbicacion(empDemo, sede1, alm, "", sku, "carga en el almacén", 10, "", "", actorA, origenTst); err != nil {
+		t.Fatalf("cargar: %v", err)
+	}
+
+	// Una salida de toda la sede, más pequeña que el saldo histórico: no puede
+	// tocar el almacén mientras quede saldo sin localizar.
+	salida := previo / 2
+	if _, err := svc.Ajustar(empDemo, sede1, "", sku, "salida", -salida, actorA, origenTst); err != nil {
+		t.Fatalf("ajuste: %v", err)
+	}
+	enAlmacen, sinAlmacen := 0.0, 0.0
+	for _, u := range svc.ExistenciaPorUbicacion(empDemo, sede1, sku) {
+		if u.AlmacenID == "" {
+			sinAlmacen = u.Cantidad
+		} else if u.AlmacenID == alm && u.UbicacionID == "" {
+			enAlmacen = u.Cantidad
+		}
+	}
+	if !casi(enAlmacen, 10) {
+		t.Errorf("el almacén no tenía que tocarse todavía, quedó en %v", enAlmacen)
+	}
+	if !casi(sinAlmacen, previo-salida) {
+		t.Errorf("lo sin almacén tenía que bajar a %v, quedó en %v", previo-salida, sinAlmacen)
 	}
 
 	suma, total := sumaYTotal(t, svc, sku)
