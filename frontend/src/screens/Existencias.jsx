@@ -60,21 +60,94 @@ function AvisoVencimientos() {
   )
 }
 
+// MoverDesde traslada mercancía de una ubicación a otra del MISMO almacén.
+//
+// Vive pegado a la fila de la ubicación de origen y no en un modal aparte porque
+// la pregunta que responde es «esto que está aquí, ¿a dónde lo llevo?»: el origen
+// ya está elegido por el sitio desde el que se abre.
+function MoverDesde({ sku, fila, onHecho, onCancelar, toast }) {
+  const [destinos, setDestinos] = useState(null)
+  const [destino, setDestino] = useState('')
+  const [cantidad, setCantidad] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  useEffect(() => {
+    let vivo = true
+    if (!fila.almacenId) { setDestinos([]); return }
+    api.ubicaciones(fila.almacenId)
+      .then((r) => { if (vivo) setDestinos((r?.ubicaciones || []).filter((u) => u.activa && u.id !== fila.ubicacionId)) })
+      .catch(() => { if (vivo) setDestinos([]) })
+    return () => { vivo = false }
+  }, [fila.almacenId, fila.ubicacionId])
+
+  const mover = async () => {
+    const cant = Number(cantidad)
+    if (!(cant > 0)) return toast({ title: 'Indica cuánto vas a mover', kind: 'error' })
+    if (cant > fila.cantidad + 0.005) {
+      return toast({ title: 'No hay tanto aquí', body: `En ${fila.codigo} solo hay ${fmtNum(fila.cantidad)}.`, kind: 'error' })
+    }
+    setGuardando(true)
+    try {
+      await api.trasladarUbicacion(sku, {
+        almacenId: fila.almacenId, origen: fila.ubicacionId, destino, cantidad: cant,
+      })
+      toast({ title: 'Mercancía movida', body: `${fmtNum(cant)} desde ${fila.codigo}. La existencia no cambia: solo el sitio.` })
+      onHecho()
+    } catch (e) {
+      toast({ title: 'No se pudo mover', body: e?.message || 'Error', kind: 'error' })
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  // Sin almacén no hay ubicaciones a las que mover: es saldo histórico, anterior a
+  // los almacenes, y se coloca dando entrada en el almacén que corresponda.
+  if (!fila.almacenId) {
+    return (
+      <div className="pl-32 py-1 text-[12px] text-slate-500">
+        Este saldo no está asignado a ningún almacén, así que no hay a dónde moverlo dentro de uno.
+        <button onClick={onCancelar} className="ml-2 underline">cerrar</button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="pl-32 py-2 flex flex-wrap items-center gap-2 text-[12.5px]">
+      <input type="number" min="0" step="any" value={cantidad} onChange={(e) => setCantidad(e.target.value)}
+        placeholder={`máx ${fmtNum(fila.cantidad)}`} autoFocus
+        className="num w-28 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1" />
+      <span className="text-slate-400">a</span>
+      <select value={destino} onChange={(e) => setDestino(e.target.value)}
+        className="rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1 max-w-[16rem]">
+        <option value="">Sin ubicar (el almacén, sin más detalle)</option>
+        {(destinos || []).map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>)}
+      </select>
+      <button onClick={mover} disabled={guardando}
+        className="rounded bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-3 py-1 disabled:opacity-50">
+        {guardando ? 'Moviendo…' : 'Mover'}
+      </button>
+      <button onClick={onCancelar} className="text-slate-500 underline">cancelar</button>
+    </div>
+  )
+}
+
 /* DÓNDE ESTÁ un producto dentro de la sede.
  *
  * La suma de las cantidades es la existencia de la sede, siempre — y se muestra,
  * porque es la comprobación que convierte esta pantalla en algo fiable: si el
  * desglose no cuadra con el total, la ubicación está mintiendo.
  */
-function FilaUbicaciones({ sku, sedeId, total }) {
+function FilaUbicaciones({ sku, sedeId, total, puedeMover, toast }) {
   const [rows, setRows] = useState(null)
+  const [moviendo, setMoviendo] = useState('')
+  const [refresco, setRefresco] = useState(0)
   useEffect(() => {
     let vivo = true
     api.existenciaPorUbicacion(sku, sedeId)
       .then((r) => { if (vivo) setRows(r?.ubicaciones || []) })
       .catch(() => { if (vivo) setRows([]) })
     return () => { vivo = false }
-  }, [sku, sedeId])
+  }, [sku, sedeId, refresco])
 
   const suma = (rows || []).reduce((a, u) => a + (Number(u.cantidad) || 0), 0)
   const cuadra = Math.abs(suma - (Number(total) || 0)) < 0.005
@@ -86,15 +159,30 @@ function FilaUbicaciones({ sku, sedeId, total }) {
           <div className="text-[12px] text-slate-400">Cargando…</div>
         ) : (
           <div className="space-y-1">
-            {rows.map((u) => (
-              <div key={u.almacenId + '/' + u.ubicacionId} className="flex items-baseline gap-2 text-[12.5px]">
-                <span className="num text-slate-500 w-32 shrink-0">{u.codigo}</span>
-                <span className="text-slate-600 dark:text-slate-300 flex-1 min-w-0 truncate">
-                  {u.almacenNombre}{u.nombre && u.codigo !== u.nombre ? ` · ${u.nombre}` : ''}
-                </span>
-                <span className="num font-medium">{fmtNum(u.cantidad)}</span>
+            {rows.map((u) => {
+              const clave = u.almacenId + '/' + u.ubicacionId
+              return (
+              <div key={clave}>
+                <div className="flex items-baseline gap-2 text-[12.5px]">
+                  <span className="num text-slate-500 w-32 shrink-0">{u.codigo}</span>
+                  <span className="text-slate-600 dark:text-slate-300 flex-1 min-w-0 truncate">
+                    {u.almacenNombre}{u.nombre && u.codigo !== u.nombre ? ` · ${u.nombre}` : ''}
+                  </span>
+                  <span className="num font-medium">{fmtNum(u.cantidad)}</span>
+                  {puedeMover && u.cantidad > 0 ? (
+                    <button onClick={() => setMoviendo(moviendo === clave ? '' : clave)}
+                      className="text-[11.5px] text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 underline shrink-0">
+                      {moviendo === clave ? 'cerrar' : 'mover'}
+                    </button>
+                  ) : null}
+                </div>
+                {moviendo === clave ? (
+                  <MoverDesde sku={sku} fila={u} toast={toast}
+                    onCancelar={() => setMoviendo('')}
+                    onHecho={() => { setMoviendo(''); setRefresco((n) => n + 1) }} />
+                ) : null}
               </div>
-            ))}
+            )})}
             <div className={`flex items-baseline gap-2 text-[12px] pt-1 mt-1 border-t border-slate-200 dark:border-slate-700 ${cuadra ? 'text-slate-400' : 'text-red-600 dark:text-red-400 font-medium'}`}>
               <span className="flex-1">
                 {cuadra
@@ -240,7 +328,7 @@ export function Existencias({ onKardex }) {
                 }).flatMap((fila, i) => {
                   const e = rows[i]
                   if (!e || dondeEsta !== e.sku) return [fila]
-                  return [fila, <FilaUbicaciones key={e.sku + '-ubi'} sku={e.sku} sedeId={activeSedeId} total={e.cantidad} />]
+                  return [fila, <FilaUbicaciones key={e.sku + '-ubi'} sku={e.sku} sedeId={activeSedeId} total={e.cantidad} puedeMover={puedeAjustar(ui.rol)} toast={toast} />]
                 })}
               </tbody>
             </table>

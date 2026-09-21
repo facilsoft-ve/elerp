@@ -28,6 +28,7 @@ func (s *Server) registerInventario(r fiber.Router) {
 	// DÓNDE está un producto dentro de la sede: por almacén y por ubicación. La
 	// suma de sus cantidades es la existencia de la sede, siempre.
 	g.Get("/productos/:sku/ubicaciones", s.handleExistenciaPorUbicacion)
+	g.Post("/productos/:sku/trasladar", s.escribirInventario, s.handleTrasladar)
 	// EL RASTRO de un lote: «¿a quién le vendí el lote X?». Es la consulta que
 	// justifica la trazabilidad; sin ella el dato está guardado pero no sirve.
 	g.Get("/productos/:sku/lotes/historico", s.handleLotesHistoricos)
@@ -335,6 +336,36 @@ func (s *Server) handleExistenciaPorUbicacion(c *fiber.Ctx) error {
 		sede = sedeIDOf(c)
 	}
 	return c.JSON(fiber.Map{"ubicaciones": s.svc.ExistenciaPorUbicacion(empresaIDOf(c), sede, c.Params("sku"))})
+}
+
+// handleTrasladar mueve mercancía entre ubicaciones del mismo almacén. Es una
+// operación NEUTRA —ni cambia la existencia ni asienta—, así que devuelve el mapa
+// de ubicaciones para que la pantalla muestre el resultado sin volver a pedirlo.
+func (s *Server) handleTrasladar(c *fiber.Ctx) error {
+	var in struct {
+		Origen    string  `json:"origen"`
+		Destino   string  `json:"destino"`
+		Lote      string  `json:"lote"`
+		Cantidad  float64 `json:"cantidad"`
+		Motivo    string  `json:"motivo"`
+		AlmacenID string  `json:"almacenId"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	alm := in.AlmacenID
+	if alm == "" {
+		alm = s.almacenParam(c)
+	}
+	out, err := s.svc.TrasladarEntreUbicaciones(empresaIDOf(c), principalOf(c).UserID, origen(c), application.TrasladoPeticion{
+		SedeID: s.sedeParam(c), AlmacenID: alm,
+		Origen: in.Origen, Destino: in.Destino, SKU: c.Params("sku"),
+		Lote: in.Lote, Cantidad: in.Cantidad, Motivo: in.Motivo,
+	})
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"ubicaciones": out})
 }
 
 func (s *Server) handleAjustar(c *fiber.Ctx) error {

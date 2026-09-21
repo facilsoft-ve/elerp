@@ -225,7 +225,23 @@ func (s *Service) bucketsDe(empresaID, sedeID, almacenID, productoID string) []b
 		if (out[i].UbicacionID == "") != (out[j].UbicacionID == "") {
 			return out[i].UbicacionID == ""
 		}
-		return out[i].Codigo < out[j].Codigo
+		if out[i].Codigo != out[j].Codigo {
+			return out[i].Codigo < out[j].Codigo
+		}
+		// Último desempate, por ALMACÉN, y no es cosmético: dos casillas «sin ubicar»
+		// —una histórica sin almacén y otra dentro de un almacén— empataban en todo lo
+		// anterior, y el orden entre ellas lo decidía el recorrido de un mapa. El mismo
+		// ajuste consumía una u otra según la corrida: nada fallaba, pero el sitio del
+		// que salía la mercancía cambiaba solo.
+		//
+		// Se gasta primero lo que NO tiene almacén, por el mismo motivo por el que se
+		// gasta antes lo que no está ubicado: es el saldo menos localizado que hay —el
+		// histórico anterior a los almacenes— y consumirlo hace que lo que queda sea
+		// cada vez más fiel.
+		if (out[i].AlmacenID == "") != (out[j].AlmacenID == "") {
+			return out[i].AlmacenID == ""
+		}
+		return out[i].AlmacenID < out[j].AlmacenID
 	})
 	return out
 }

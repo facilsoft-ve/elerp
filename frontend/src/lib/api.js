@@ -624,6 +624,10 @@ export const api = {
   // Dónde está un producto dentro de la sede. La suma es la existencia de la sede.
   existenciaPorUbicacion: (sku, sedeId = '') =>
     request(`/api/inventario/productos/${encodeURIComponent(sku)}/ubicaciones?sedeId=${encodeURIComponent(sedeId)}`),
+  // Mover mercancía entre ubicaciones del mismo almacén. No cambia la existencia
+  // ni genera asiento: solo cambia el sitio. Devuelve el mapa ya actualizado.
+  trasladarUbicacion: (sku, body) =>
+    request(`/api/inventario/productos/${encodeURIComponent(sku)}/trasladar`, { method: 'POST', body: JSON.stringify(body) }),
   actualizarAlmacen: (id, body) => request(`/api/config/almacenes/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   desactivarAlmacen: (id) => request(`/api/config/almacenes/${encodeURIComponent(id)}/desactivar`, { method: 'POST' }),
 
