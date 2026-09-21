@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mornix/elerp/internal/domain/almacen"
 	"github.com/mornix/elerp/internal/domain/compra"
 	"github.com/mornix/elerp/internal/domain/contabilidad"
 	"github.com/mornix/elerp/internal/domain/empresa"
@@ -515,9 +516,27 @@ func (s *Service) RecibirOrdenCompra(empresaID, id, actor, origen string, lineas
 		}
 	}
 
-	// Ya validado: se anexan los movimientos de entrada y se suma lo recibido. La
-	// mercancía entra al almacén principal de la sede de la orden.
+	// Ya validado: se anexan los movimientos de entrada y se suma lo recibido.
+	//
+	// A DÓNDE ENTRA lo decide el tipo de operación de recepción, si hay uno
+	// configurado. Sin él —que es el caso de toda empresa que no haya tocado esa
+	// pantalla— entra al almacén principal de la sede, exactamente como antes.
+	//
+	// Con DOS PASOS, todo lo que llega aterriza en la ubicación intermedia (el
+	// muelle) sin importar la que pidiera la línea: el sentido de los dos pasos es
+	// precisamente que nadie decide dónde va la mercancía hasta haberla revisado.
+	// Colocarla ya en su sitio y llamarlo «dos pasos» sería un paso con un rodeo.
 	almacenID := s.almacenParaEscritura(empresaID, o.SedeID, "")
+	enDosPasos := false
+	muelle := ""
+	if op, hay := s.OperacionPara(empresaID, o.SedeID, almacen.ClaseRecepcion); hay {
+		if op.AlmacenID != "" {
+			almacenID = s.almacenParaEscritura(empresaID, o.SedeID, op.AlmacenID)
+		}
+		if op.Pasos == 2 {
+			enDosPasos, muelle = true, op.UbicacionIntermediaID
+		}
+	}
 	costoRecepcion := 0.0
 	// Se valida TODO antes de anexar el primer movimiento: el ledger es de solo
 	// anexado, y fallar a medias dejaría media recepción registrada sin vuelta atrás.
@@ -537,7 +556,7 @@ func (s *Service) RecibirOrdenCompra(empresaID, id, actor, origen string, lineas
 			EmpresaID: empresaID, SedeID: o.SedeID, AlmacenID: almacenID, ProductoID: l.ProductoID, SKU: l.SKU,
 			Tipo: inventario.MovEntrada, Cantidad: cant, CostoUnitario: l.CostoUnitario,
 			Lote: lote, Vencimiento: venc,
-			UbicacionID: s.ubicacionParaEscritura(empresaID, almacenID, ubis[k]),
+			UbicacionID: s.ubicacionDeRecepcion(empresaID, almacenID, ubis[k], enDosPasos, muelle),
 			Motivo:      "recepción OC " + o.NumeroCompleto,
 			RefTipo:     "compra", RefID: o.ID, Actor: actor, Fecha: ahora(),
 		})

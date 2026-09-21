@@ -74,6 +74,7 @@ type Store struct {
 	UnidadesTributarias *UnidadTributariaRepo
 	CostosEnDestino     *CostoEnDestinoRepo
 	Ubicaciones         *UbicacionRepo
+	TiposOperacion      *TipoOperacionRepo
 	Horarios            *HorarioRepo
 }
 
@@ -112,13 +113,13 @@ func New(db *gomongo.Database) *Store {
 	st.attachAlicuotas(db)
 	st.attachSeries(db)
 	st.attachFacturacionDigital(db)
-	st.attachPedidos(db)
-	st.attachConceptosISLR(db)
-	st.attachUnidadesTributarias(db)
-	st.attachCostosEnDestino(db)
-	st.attachUbicaciones(db) // definido en ubicacion.go
-	st.attachUbicaciones(db) // definido en ubicacion.go // definido en costodestino.go // definido en ut.go (histórico de la UT) // definido en concepto.go (conceptos ISLR)    // definido en impuesto.go (maestro de impuestos)
-	st.attachMesoneros(db)   // definido en mesonero.go (credenciales + turnos)
+	st.attachPedidos(db)             // definido en pedido.go
+	st.attachConceptosISLR(db)       // definido en concepto.go (conceptos ISLR)
+	st.attachUnidadesTributarias(db) // definido en ut.go (histórico de la UT)
+	st.attachCostosEnDestino(db)     // definido en costodestino.go
+	st.attachUbicaciones(db)         // definido en ubicacion.go
+	st.attachTiposOperacion(db)      // definido en operacion.go
+	st.attachMesoneros(db)           // definido en mesonero.go (credenciales + turnos)
 	return st
 }
 

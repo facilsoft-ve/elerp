@@ -628,6 +628,14 @@ export const api = {
   // ni genera asiento: solo cambia el sitio. Devuelve el mapa ya actualizado.
   trasladarUbicacion: (sku, body) =>
     request(`/api/inventario/productos/${encodeURIComponent(sku)}/trasladar`, { method: 'POST', body: JSON.stringify(body) }),
+  // TIPOS DE OPERACIÓN: en cuántos pasos entra y sale la mercancía.
+  tiposOperacion: () => request('/api/config/operaciones'),
+  crearTipoOperacion: (body) => request('/api/config/operaciones', { method: 'POST', body: JSON.stringify(body) }),
+  actualizarTipoOperacion: (id, body) =>
+    request(`/api/config/operaciones/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  sembrarTiposOperacion: () => request('/api/config/operaciones/sembrar', { method: 'POST' }),
+  // Lo que espera en el muelle el segundo paso de una recepción.
+  pendienteDeUbicar: () => request('/api/inventario/pendiente-de-ubicar'),
   actualizarAlmacen: (id, body) => request(`/api/config/almacenes/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   desactivarAlmacen: (id) => request(`/api/config/almacenes/${encodeURIComponent(id)}/desactivar`, { method: 'POST' }),
 

@@ -153,6 +153,10 @@ type SaldoUbicacion struct {
 	Codigo        string  `json:"codigo"`
 	Nombre        string  `json:"nombre"`
 	Cantidad      float64 `json:"cantidad"`
+	// SKU y NombreProducto solo los llena quien lista VARIOS productos (lo pendiente
+	// de ubicar). En el desglose de un producto concreto sobran: ya se sabe cuál es.
+	SKU            string `json:"sku,omitempty"`
+	NombreProducto string `json:"nombreProducto,omitempty"`
 }
 
 // ExistenciaPorUbicacion proyecta dónde está un producto dentro de una sede.

@@ -60,6 +60,50 @@ function AvisoVencimientos() {
   )
 }
 
+/* PENDIENTE DE UBICAR: el segundo paso de una recepción en dos pasos.
+ *
+ * Existe porque si no se viera, la mercancía se quedaría en el muelle sin que nadie
+ * se entere: el total de existencia no lo delata —las unidades están ahí— y el
+ * proceso en dos pasos se convertiría en un proceso en uno con la mercancía mal
+ * colocada. No aparece si no hay dos pasos configurados.
+ */
+function PendienteDeUbicar({ recarga }) {
+  const [rows, setRows] = useState([])
+  useEffect(() => {
+    let vivo = true
+    api.pendienteDeUbicar()
+      .then((r) => { if (vivo) setRows(r?.pendientes || []) })
+      .catch(() => { if (vivo) setRows([]) })
+    return () => { vivo = false }
+  }, [recarga])
+  if (rows.length === 0) return null
+
+  const total = rows.reduce((a, r) => a + (Number(r.cantidad) || 0), 0)
+  return (
+    <div className="mb-3 rounded-xl bg-sky-50 dark:bg-sky-900/25 border border-sky-200 dark:border-sky-900/40 px-3 py-2.5">
+      <div className="flex items-start gap-2.5">
+        <Icon.Package size={15} className="mt-0.5 shrink-0 text-sky-700 dark:text-sky-400" />
+        <div className="text-[12.5px] text-sky-900 dark:text-sky-200 min-w-0">
+          <strong>{fmtNum(total)} unidad(es) esperando en {rows[0].codigo}</strong> — recibidas pero todavía sin ubicar.
+          <div className="mt-1 space-y-0.5">
+            {rows.slice(0, 6).map((r) => (
+              <div key={r.sku} className="flex items-baseline gap-2 flex-wrap">
+                <span className="num text-[11.5px]">{r.sku}</span>
+                <span className="text-[11.5px]">{r.nombreProducto}</span>
+                <span className="num text-[11.5px]">{fmtNum(r.cantidad)} u.</span>
+              </div>
+            ))}
+            {rows.length > 6 ? <div className="text-[11.5px] opacity-80">…y {rows.length - 6} más.</div> : null}
+          </div>
+          <div className="mt-1.5 text-[11.5px] opacity-90">
+            Busca el producto abajo, abre <strong>¿Dónde está?</strong> y usa <strong>mover</strong> para colocarlo.
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // MoverDesde traslada mercancía de una ubicación a otra del MISMO almacén.
 //
 // Vive pegado a la fila de la ubicación de origen y no en un modal aparte porque
@@ -137,7 +181,7 @@ function MoverDesde({ sku, fila, onHecho, onCancelar, toast }) {
  * porque es la comprobación que convierte esta pantalla en algo fiable: si el
  * desglose no cuadra con el total, la ubicación está mintiendo.
  */
-function FilaUbicaciones({ sku, sedeId, total, puedeMover, toast }) {
+function FilaUbicaciones({ sku, sedeId, total, puedeMover, toast, onMovido }) {
   const [rows, setRows] = useState(null)
   const [moviendo, setMoviendo] = useState('')
   const [refresco, setRefresco] = useState(0)
@@ -179,7 +223,7 @@ function FilaUbicaciones({ sku, sedeId, total, puedeMover, toast }) {
                 {moviendo === clave ? (
                   <MoverDesde sku={sku} fila={u} toast={toast}
                     onCancelar={() => setMoviendo('')}
-                    onHecho={() => { setMoviendo(''); setRefresco((n) => n + 1) }} />
+                    onHecho={() => { setMoviendo(''); setRefresco((n) => n + 1); onMovido?.() }} />
                 ) : null}
               </div>
             )})}
@@ -187,7 +231,7 @@ function FilaUbicaciones({ sku, sedeId, total, puedeMover, toast }) {
               <span className="flex-1">
                 {cuadra
                   ? 'La suma por ubicación cuadra con la existencia de la sede.'
-                  : 'El desglose NO cuadra con la existencia: avisa al equipo.'}
+                  : `El desglose suma ${fmtNum(suma)} y arriba figura ${fmtNum(total)}. Recarga la pantalla; si sigue distinto, avisa al equipo.`}
               </span>
               <span className="num">{fmtNum(suma)}</span>
             </div>
@@ -214,6 +258,9 @@ export function Existencias({ onKardex }) {
   // Qué SKU tiene desplegado su desglose por ubicación. Uno a la vez: la pregunta
   // «¿dónde está esto?» es de un producto concreto, no de la lista entera.
   const [dondeEsta, setDondeEsta] = useState('')
+  // Cada traslado vacía un poco el muelle: el aviso de pendientes se recarga con
+  // él, o seguiría anunciando mercancía que ya está colocada.
+  const [pendRecarga, setPendRecarga] = useState(0)
   // Almacén seleccionado: '' = TODOS (existencia por sede, suma de almacenes). Con un
   // almacén concreto, la existencia es de ESE almacén (se pide al backend aparte).
   const [almacenSel, setAlmacenSel] = useState('')
@@ -257,6 +304,7 @@ export function Existencias({ onKardex }) {
   return (
     <div>
       <AvisoVencimientos />
+      <PendienteDeUbicar recarga={pendRecarga} />
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <Input className="w-64" icon={<Icon.Search size={15} />} placeholder="Buscar por nombre o SKU…"
           value={q} onChange={(e) => setQ(e.target.value)} />
@@ -328,7 +376,7 @@ export function Existencias({ onKardex }) {
                 }).flatMap((fila, i) => {
                   const e = rows[i]
                   if (!e || dondeEsta !== e.sku) return [fila]
-                  return [fila, <FilaUbicaciones key={e.sku + '-ubi'} sku={e.sku} sedeId={activeSedeId} total={e.cantidad} puedeMover={puedeAjustar(ui.rol)} toast={toast} />]
+                  return [fila, <FilaUbicaciones key={e.sku + '-ubi'} sku={e.sku} sedeId={activeSedeId} total={e.cantidad} puedeMover={puedeAjustar(ui.rol)} toast={toast} onMovido={() => { setPendRecarga((n) => n + 1); recargar() }} />]
                 })}
               </tbody>
             </table>

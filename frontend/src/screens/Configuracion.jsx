@@ -4099,6 +4099,166 @@ function Almacenes() {
         </div>
       ) : null}
 
+      <TiposDeOperacion puedeEditar={puedeEditar} almacenes={lista} sedeNombre={sedeNombre} toast={toast} />
+    </div>
+  )
+}
+
+/* TIPOS DE OPERACIÓN: en cuántos pasos entra y sale la mercancía.
+ *
+ * Vive debajo de los almacenes porque es su continuación natural: el almacén dice
+ * DÓNDE, la ubicación dice EN QUÉ PARTE, y el tipo de operación dice CÓMO llega
+ * hasta ahí. Una empresa que no toque este panel recibe y despacha como siempre.
+ */
+function TiposDeOperacion({ puedeEditar, almacenes, sedeNombre, toast }) {
+  const [rows, setRows] = useState(null)
+  const [editando, setEditando] = useState(null)
+  const [ubicaciones, setUbicaciones] = useState([])
+
+  const cargar = async () => {
+    try { setRows((await api.tiposOperacion())?.operaciones || []) } catch { setRows([]) }
+  }
+  useEffect(() => { cargar() }, [])
+
+  // Las ubicaciones candidatas a muelle o preparación: las del almacén elegido, o
+  // las de todos si no se fijó uno.
+  useEffect(() => {
+    if (!editando) return
+    const objetivo = editando.almacenId ? almacenes.filter((a) => a.id === editando.almacenId) : almacenes
+    Promise.all(objetivo.map((a) => api.ubicaciones(a.id).then((r) => (r?.ubicaciones || []).map((u) => ({ ...u, almacenNombre: a.nombre }))).catch(() => [])))
+      .then((ls) => setUbicaciones(ls.flat().filter((u) => u.activa)))
+  }, [editando?.almacenId, editando?.id, almacenes.length])
+
+  const sembrar = async () => {
+    try {
+      const r = await api.sembrarTiposOperacion()
+      toast({ title: r.creados ? `${r.creados} tipos creados` : 'Ya estaban creados', body: 'Todos de un paso: nada cambia hasta que edites uno.' })
+      cargar()
+    } catch (e) { toast({ title: 'No se pudo', body: e?.message || 'Error', kind: 'error' }) }
+  }
+
+  const guardar = async () => {
+    const t = editando
+    if (t.pasos === 2 && !t.ubicacionIntermediaId) {
+      return toast({ title: 'Falta la ubicación intermedia', body: 'Un proceso en dos pasos necesita su muelle o zona de preparación.', kind: 'error' })
+    }
+    try {
+      await api.actualizarTipoOperacion(t.id, {
+        nombre: t.nombre, pasos: Number(t.pasos) || 1, almacenId: t.almacenId || '',
+        ubicacionIntermediaId: t.ubicacionIntermediaId || '', porDefecto: !!t.porDefecto, activo: !!t.activo,
+      })
+      toast({ title: 'Tipo de operación actualizado', body: `${t.codigo} · ${Number(t.pasos) === 2 ? 'dos pasos' : 'un paso'}` })
+      setEditando(null); cargar()
+    } catch (e) { toast({ title: 'No se pudo guardar', body: e?.message || 'Error', kind: 'error' }) }
+  }
+
+  const NOMBRE_CLASE = { recepcion: 'Recepción', entrega: 'Entrega', ajuste: 'Ajuste', transferencia: 'Transferencia' }
+
+  return (
+    <div className="mt-6">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="text-[12.5px] text-slate-500 dark:text-slate-400 max-w-2xl">
+          <strong>Cómo entra y sale la mercancía.</strong> Con <strong>un paso</strong>, lo que llega se
+          coloca directamente donde indique quien recibe. Con <strong>dos</strong>, aterriza primero en un
+          muelle y alguien la ubica después de revisarla. Mientras no cambies nada, todo funciona como hasta ahora.
+        </div>
+        {puedeEditar && rows && rows.length === 0 ? (
+          <Button size="sm" icon={<Icon.Plus size={15} />} onClick={sembrar}>Crear los tipos por defecto</Button>
+        ) : null}
+      </div>
+
+      {rows === null ? (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4"><TableSkeleton rows={3} cols={4} /></div>
+      ) : rows.length === 0 ? (
+        <Empty icon={<Icon.Package size={22} />} title="Sin tipos de operación configurados"
+          body="Sin ellos, cada proceso funciona como siempre: un paso, almacén principal. Créalos solo si quieres recibir en dos pasos." />
+      ) : (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
+          <table className="w-full text-[13px]">
+            <thead className="bg-slate-50 dark:bg-slate-800/60 text-[11.5px] uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="text-left px-4 py-2">Código</th>
+                <th className="text-left px-4 py-2">Proceso</th>
+                <th className="text-left px-4 py-2">Pasos</th>
+                <th className="text-left px-4 py-2">Ubicación intermedia</th>
+                {puedeEditar ? <th className="px-4 py-2" /> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((t) => {
+                const ubi = ubicaciones.find((u) => u.id === t.ubicacionIntermediaId)
+                return (
+                  <tr key={t.id} className="border-t border-slate-100 dark:border-slate-800">
+                    <td className="px-4 py-2 num">{t.codigo}{t.porDefecto ? <span className="ml-1.5 text-amber-500" title="Se aplica por defecto">★</span> : null}</td>
+                    <td className="px-4 py-2">
+                      {t.nombre}
+                      <div className="text-[11.5px] text-slate-400">{NOMBRE_CLASE[t.clase] || t.clase}{t.activo ? '' : ' · inactivo'}</div>
+                    </td>
+                    <td className="px-4 py-2">{t.pasos === 2 ? 'Dos' : 'Uno'}</td>
+                    <td className="px-4 py-2 text-slate-500">{t.pasos === 2 ? (ubi ? `${ubi.codigo} · ${ubi.nombre}` : t.ubicacionIntermediaId || '—') : '—'}</td>
+                    {puedeEditar ? (
+                      <td className="px-4 py-2 text-right">
+                        <Button size="sm" variant="ghost" icon={<Icon.Pencil size={14} />} onClick={() => setEditando({ ...t })}>Editar</Button>
+                      </td>
+                    ) : null}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editando ? (
+        <Modal open onClose={() => setEditando(null)} title={`${editando.codigo} · ${editando.nombre}`}>
+          <div className="space-y-3">
+            <Field label="Nombre">
+              <Input value={editando.nombre || ''} onChange={(e) => setEditando({ ...editando, nombre: e.target.value })} />
+            </Field>
+            <Field label="Pasos" hint="Con dos pasos, lo recibido queda en el muelle hasta que alguien lo ubique.">
+              <Select value={String(editando.pasos || 1)} onChange={(e) => setEditando({ ...editando, pasos: Number(e.target.value) })}>
+                <option value="1">Un paso — directo a su sitio</option>
+                <option value="2">Dos pasos — pasa por un muelle</option>
+              </Select>
+            </Field>
+            <Field label="Almacén" hint="Vacío = el principal de la sede.">
+              <Select value={editando.almacenId || ''} onChange={(e) => setEditando({ ...editando, almacenId: e.target.value, ubicacionIntermediaId: '' })}>
+                <option value="">El principal de la sede</option>
+                {almacenes.map((a) => (
+                  <option key={a.id} value={a.id}>{a.nombre} — {sedeNombre?.(a.sedeId) || 'sin sede'}</option>
+                ))}
+              </Select>
+            </Field>
+            {Number(editando.pasos) === 2 ? (
+              <Field label="Ubicación intermedia" hint="El muelle donde espera lo recibido, o la zona de preparación de lo vendido.">
+                <Select value={editando.ubicacionIntermediaId || ''} onChange={(e) => setEditando({ ...editando, ubicacionIntermediaId: e.target.value })}>
+                  <option value="">Elige una…</option>
+                  {ubicaciones.map((u) => (
+                    <option key={u.id} value={u.id}>{u.codigo} · {u.nombre} ({u.almacenNombre}{u.sedeNombre ? ` — ${u.sedeNombre}` : ''})</option>
+                  ))}
+                </Select>
+                {ubicaciones.length === 0 ? (
+                  <div className="mt-1 text-[11.5px] text-amber-600 dark:text-amber-400">
+                    Ese almacén no tiene ubicaciones. Créalas primero en la ficha del almacén.
+                  </div>
+                ) : null}
+              </Field>
+            ) : null}
+            <label className="flex items-center gap-2 text-[13px]">
+              <input type="checkbox" checked={!!editando.porDefecto} onChange={(e) => setEditando({ ...editando, porDefecto: e.target.checked })} />
+              Aplicar por defecto a este proceso
+            </label>
+            <label className="flex items-center gap-2 text-[13px]">
+              <input type="checkbox" checked={!!editando.activo} onChange={(e) => setEditando({ ...editando, activo: e.target.checked })} />
+              Activo
+            </label>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="ghost" onClick={() => setEditando(null)}>Cancelar</Button>
+              <Button onClick={guardar}>Guardar</Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
     </div>
   )
 }

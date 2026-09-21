@@ -29,6 +29,7 @@ func (s *Server) registerInventario(r fiber.Router) {
 	// suma de sus cantidades es la existencia de la sede, siempre.
 	g.Get("/productos/:sku/ubicaciones", s.handleExistenciaPorUbicacion)
 	g.Post("/productos/:sku/trasladar", s.escribirInventario, s.handleTrasladar)
+	g.Get("/pendiente-de-ubicar", s.handlePendienteDeUbicar)
 	// EL RASTRO de un lote: «¿a quién le vendí el lote X?». Es la consulta que
 	// justifica la trazabilidad; sin ella el dato está guardado pero no sirve.
 	g.Get("/productos/:sku/lotes/historico", s.handleLotesHistoricos)
@@ -341,6 +342,13 @@ func (s *Server) handleExistenciaPorUbicacion(c *fiber.Ctx) error {
 // handleTrasladar mueve mercancía entre ubicaciones del mismo almacén. Es una
 // operación NEUTRA —ni cambia la existencia ni asienta—, así que devuelve el mapa
 // de ubicaciones para que la pantalla muestre el resultado sin volver a pedirlo.
+// handlePendienteDeUbicar lista lo que espera en el muelle el segundo paso de una
+// recepción. Vacío cuando no hay recepción en dos pasos configurada, que es lo
+// normal y no es un error.
+func (s *Server) handlePendienteDeUbicar(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"pendientes": s.svc.PendienteDeUbicar(empresaIDOf(c), s.sedeParam(c))})
+}
+
 func (s *Server) handleTrasladar(c *fiber.Ctx) error {
 	var in struct {
 		Origen    string  `json:"origen"`
