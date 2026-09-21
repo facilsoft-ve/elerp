@@ -457,6 +457,12 @@ export const api = {
   // "por-vencer" alimenta el aviso de caducidad.
   lotesDeProducto: (sku, sedeId = '') =>
     request(`/api/inventario/productos/${encodeURIComponent(sku)}/lotes?sedeId=${encodeURIComponent(sedeId)}`),
+  // El RASTRO de un lote: «¿a quién le vendí el lote X?». Sin sede por defecto —
+  // en una alerta el lote no respeta los límites de una sucursal.
+  lotesHistoricos: (sku, sedeId = '') =>
+    request(`/api/inventario/productos/${encodeURIComponent(sku)}/lotes/historico?sedeId=${encodeURIComponent(sedeId)}`),
+  rastroDeLote: (sku, lote, sedeId = '') =>
+    request(`/api/inventario/productos/${encodeURIComponent(sku)}/lotes/${encodeURIComponent(lote)}/rastro?sedeId=${encodeURIComponent(sedeId)}`),
   lotesPorVencer: ({ dias = 30, sedeId = '' } = {}) =>
     request(`/api/inventario/lotes/por-vencer?dias=${dias}&sedeId=${encodeURIComponent(sedeId)}`),
   costosEnDestino: (ordenId) => request(`/api/compras/ordenes/${encodeURIComponent(ordenId)}/costos-destino`),

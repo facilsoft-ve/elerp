@@ -460,20 +460,27 @@ func (s *Service) RecibirOrdenCompra(empresaID, id, actor, origen string, lineas
 		}
 	}
 	// Se piden cantidades > 0; una recepción sin nada que recibir no avanza nada.
-	recibir := map[string]float64{}
-	// Lote y vencimiento declarados por SKU. Una recepción que parta el mismo SKU
-	// en dos lotes distintos se hace en DOS recepciones: mezclarlos en una sola
-	// obligaría a partir también la cantidad, y la última línea ganaría en silencio.
-	lotes, vencs := map[string]string{}, map[string]string{}
+	// Se agrega por (SKU, LOTE): un mismo producto puede llegar repartido en varios
+	// lotes en la MISMA entrega, que es lo normal cuando el proveedor completa un
+	// pedido con lo que tiene. Agregar solo por SKU obligaría a partir la recepción
+	// en dos, o —peor— haría que un lote pisara al otro sin decirlo.
+	type claveRecepcion struct{ SKU, Lote string }
+	recibir := map[string]float64{}         // total por SKU, para validar contra lo pendiente
+	porLote := map[claveRecepcion]float64{} // lo que entra a cada lote
+	vencs := map[claveRecepcion]string{}
+	orden := []claveRecepcion{}
 	for _, l := range lineas {
-		if l.Cantidad > 0 {
-			recibir[l.SKU] += l.Cantidad
-			if strings.TrimSpace(l.Lote) != "" {
-				lotes[l.SKU] = l.Lote
-			}
-			if strings.TrimSpace(l.Vencimiento) != "" {
-				vencs[l.SKU] = l.Vencimiento
-			}
+		if l.Cantidad <= 0 {
+			continue
+		}
+		k := claveRecepcion{SKU: l.SKU, Lote: strings.TrimSpace(l.Lote)}
+		if _, visto := porLote[k]; !visto {
+			orden = append(orden, k)
+		}
+		recibir[l.SKU] += l.Cantidad
+		porLote[k] += l.Cantidad
+		if v := strings.TrimSpace(l.Vencimiento); v != "" {
+			vencs[k] = v
 		}
 	}
 	if len(recibir) == 0 {
@@ -505,17 +512,20 @@ func (s *Service) RecibirOrdenCompra(empresaID, id, actor, origen string, lineas
 	// mercancía entra al almacén principal de la sede de la orden.
 	almacenID := s.almacenParaEscritura(empresaID, o.SedeID, "")
 	costoRecepcion := 0.0
-	for sku, cant := range recibir {
-		i := idx[sku]
-		l := o.Lineas[i]
-		// Lote y vencimiento: se validan ANTES de anexar nada. Un producto que exige
-		// lote y entra sin él rompería la trazabilidad justo en el sitio donde se
-		// construye, y el ledger es de solo anexado: no habría vuelta atrás.
-		prod, _ := s.productos.BySKU(empresaID, sku)
-		lote, venc, err := validarLoteDeEntrada(prod, lotes[sku], vencs[sku])
-		if err != nil {
+	// Se valida TODO antes de anexar el primer movimiento: el ledger es de solo
+	// anexado, y fallar a medias dejaría media recepción registrada sin vuelta atrás.
+	for _, k := range orden {
+		prod, _ := s.productos.BySKU(empresaID, k.SKU)
+		if _, _, err := validarLoteDeEntrada(prod, k.Lote, vencs[k]); err != nil {
 			return compra.OrdenCompra{}, err
 		}
+	}
+	for _, k := range orden {
+		i := idx[k.SKU]
+		l := o.Lineas[i]
+		prod, _ := s.productos.BySKU(empresaID, k.SKU)
+		lote, venc, _ := validarLoteDeEntrada(prod, k.Lote, vencs[k])
+		cant := porLote[k]
 		s.movimientos.Append(inventario.Movimiento{
 			EmpresaID: empresaID, SedeID: o.SedeID, AlmacenID: almacenID, ProductoID: l.ProductoID, SKU: l.SKU,
 			Tipo: inventario.MovEntrada, Cantidad: cant, CostoUnitario: l.CostoUnitario,
@@ -523,7 +533,7 @@ func (s *Service) RecibirOrdenCompra(empresaID, id, actor, origen string, lineas
 			Motivo:  "recepción OC " + o.NumeroCompleto,
 			RefTipo: "compra", RefID: o.ID, Actor: actor, Fecha: ahora(),
 		})
-		o.Lineas[i].CantidadRecibida = round2(l.CantidadRecibida + cant)
+		o.Lineas[i].CantidadRecibida = round2(o.Lineas[i].CantidadRecibida + cant)
 		costoRecepcion += cant * l.CostoUnitario
 	}
 	costoRecepcion = round2(costoRecepcion)

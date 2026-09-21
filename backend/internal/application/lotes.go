@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/inventario"
 )
 
@@ -36,6 +37,9 @@ var (
 	// ErrStockPorLoteInsuficiente: hay saldo del producto pero no repartido en
 	// lotes que lo cubran. Se avisa en vez de sacar de un lote inventado.
 	ErrStockPorLoteInsuficiente = errors.New("no hay lotes con existencia suficiente para esa salida")
+	// ErrSoloQuedaVencido: hay existencia, pero está vencida. Es un motivo distinto
+	// de «no hay»: se arregla dando de baja el lote, no comprando más.
+	ErrSoloQuedaVencido = errors.New("la existencia disponible está VENCIDA: dale de baja antes de vender")
 )
 
 // SaldoLote es la existencia de un lote concreto de un producto en una sede.
@@ -162,12 +166,23 @@ func (s *Service) RepartirSalidaFEFO(empresaID, sedeID, productoID string, canti
 
 	tramos := []TramoSalida{}
 	restante := cantidad
+	vencidoDisponible := false
 	for _, l := range disponibles {
 		if restante <= 0.0001 {
 			break
 		}
 		if l.Cantidad <= 0.0001 {
 			continue // un lote en negativo no puede surtir nada
+		}
+		// UN LOTE VENCIDO NO SALE. FEFO lo pondría el primero —es el que caduca
+		// antes— y sin esta guarda el consumo automático despacharía justo lo que no
+		// se puede vender, de forma silenciosa y en cada venta.
+		//
+		// La mercancía vencida se saca del ledger con una merma, que es una decisión
+		// de alguien y deja rastro; no desapareciendo por la puerta del mostrador.
+		if l.Vencido {
+			vencidoDisponible = true
+			continue
 		}
 		toma := l.Cantidad
 		if toma > restante {
@@ -177,9 +192,15 @@ func (s *Service) RepartirSalidaFEFO(empresaID, sedeID, productoID string, canti
 		restante = round2(restante - toma)
 	}
 	if restante > 0.0001 {
-		// Hay que decirlo. Sacar el resto de un lote vacío —o sin lote— dejaría el
-		// saldo del producto cuadrado y el de los lotes roto, que es la forma de
-		// fallar que este módulo existe para evitar.
+		// Se distingue el motivo: no es lo mismo «no hay» que «lo que hay está
+		// vencido». El segundo se arregla dando de baja el lote, y decir solo que
+		// falta stock mandaría a buscar donde no está el problema.
+		if vencidoDisponible {
+			return nil, fmt.Errorf("%w: %s (faltan %.2f)", ErrSoloQuedaVencido, p.SKU, restante)
+		}
+		// Sacar el resto de un lote vacío —o sin lote— dejaría el saldo del producto
+		// cuadrado y el de los lotes roto, que es la forma de fallar que este módulo
+		// existe para evitar.
 		return nil, fmt.Errorf("%w: faltan %.2f de %s", ErrStockPorLoteInsuficiente, restante, p.SKU)
 	}
 	return tramos, nil
@@ -234,6 +255,37 @@ func (s *Service) anexarSalidaPorLotes(base inventario.Movimiento) {
 		m.Lote, m.Vencimiento = t.Lote, t.Vencimiento
 		s.movimientos.Append(m)
 	}
+}
+
+// validarLotesVendibles comprueba que una venta se pueda surtir SIN tocar lotes
+// vencidos, antes de emitir nada.
+//
+// Solo mira los productos que controlan vencimiento: para el resto no hay nada
+// que comprobar y el mostrador se comporta igual que siempre.
+//
+// Se llama ANTES de numerar y anexar el documento a propósito. La factura es de
+// solo anexado: fallar después dejaría el folio quemado y media venta registrada,
+// que es peor que no dejar vender.
+func (s *Service) validarLotesVendibles(empresaID, sedeID string, lineas []fiscal.Linea) error {
+	// Se agregan los consumos por producto antes de comprobar: dos líneas del mismo
+	// SKU —o dos platos que comparten insumo— tienen que mirarse juntas, o cada una
+	// pasaría por su cuenta y entre las dos no habría existencia.
+	porProducto := map[string]float64{}
+	for _, l := range lineas {
+		for _, cs := range consumosDeLinea(l, l.Cantidad) {
+			porProducto[cs.ProductoID] += cs.Cantidad
+		}
+	}
+	for prodID, cant := range porProducto {
+		p, ok := s.productos.ByID(empresaID, prodID)
+		if !ok || !p.RequiereLote || !p.ControlaVencimiento {
+			continue
+		}
+		if _, err := s.RepartirSalidaFEFO(empresaID, sedeID, prodID, cant); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // lotesQueSalieron recupera, de una transferencia, con qué lotes y en qué

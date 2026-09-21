@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"net/url"
 
 	"github.com/mornix/elerp/internal/application"
 
@@ -24,6 +25,10 @@ func (s *Server) registerInventario(r fiber.Router) {
 	// que casi todo el mundo activa los lotes.
 	g.Get("/productos/:sku/lotes", s.handleSaldosPorLote)
 	g.Get("/lotes/por-vencer", s.handleLotesPorVencer)
+	// EL RASTRO de un lote: «¿a quién le vendí el lote X?». Es la consulta que
+	// justifica la trazabilidad; sin ella el dato está guardado pero no sirve.
+	g.Get("/productos/:sku/lotes/historico", s.handleLotesHistoricos)
+	g.Get("/productos/:sku/lotes/:lote/rastro", s.handleRastroDeLote)
 	g.Get("/kardex/:sku", s.handleKardex)
 	g.Get("/movimientos", s.handleMovimientos)
 	// Imagen del producto: subir (multipart) y quitar. Escribir el catálogo es de
@@ -301,6 +306,24 @@ func (s *Server) handleLotesPorVencer(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"lotes": s.svc.LotesPorVencer(empresaIDOf(c), c.Query("sedeId"), c.QueryInt("dias", 30)),
 	})
+}
+
+// handleLotesHistoricos lista los lotes que alguna vez existieron del producto,
+// con saldo o sin él: tras una alerta, el agotado es justo el que hay que mirar.
+func (s *Server) handleLotesHistoricos(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
+		"lotes": s.svc.LotesDeProducto(empresaIDOf(c), c.Params("sku"), c.Query("sedeId")),
+	})
+}
+
+// handleRastroDeLote devuelve la historia del lote. SIN sede por defecto: en una
+// alerta sanitaria el lote no respeta los límites de una sucursal.
+func (s *Server) handleRastroDeLote(c *fiber.Ctx) error {
+	lote, err := url.PathUnescape(c.Params("lote"))
+	if err != nil {
+		lote = c.Params("lote")
+	}
+	return c.JSON(s.svc.RastroDeLote(empresaIDOf(c), c.Params("sku"), lote, c.Query("sedeId")))
 }
 
 func (s *Server) handleAjustar(c *fiber.Ctx) error {

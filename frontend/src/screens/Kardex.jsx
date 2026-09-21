@@ -76,6 +76,7 @@ export function Kardex({ sku, setSku }) {
         <Empty icon={<Icon.CircleAlert size={22} />} title="No se pudo cargar el Kardex" body={String(error.message || error)} />
       ) : (
         <>
+          <PanelLotes sku={sku} producto={productos.find((p) => p.sku === sku)} />
           {data?.producto ? (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
               <Card className="!p-4">
@@ -143,5 +144,132 @@ export function Kardex({ sku, setSku }) {
         </>
       )}
     </div>
+  )
+}
+
+/* TRAZABILIDAD POR LOTE — «¿a quién le vendí el lote X?».
+ *
+ * Es la consulta que justifica llevar lotes: guardar el dato y no poder
+ * preguntarlo es tener el archivo y no la función. En una alerta sanitaria hay
+ * horas para avisar a quien compró, y revisar el ledger a mano no es una
+ * respuesta.
+ *
+ * Vive dentro del Kardex porque es donde alguien va a buscar la historia de un
+ * producto; no aparece si el producto no lleva lotes.
+ */
+function PanelLotes({ sku, producto }) {
+  const [lotes, setLotes] = useState([])
+  const [sel, setSel] = useState('')
+  const [rastro, setRastro] = useState(null)
+  const [cargando, setCargando] = useState(false)
+
+  useEffect(() => {
+    let vivo = true
+    setSel(''); setRastro(null)
+    if (!sku) return undefined
+    // SIN sede: un lote no respeta los límites de una sucursal, y en una alerta
+    // hay que verlo entero.
+    api.lotesHistoricos(sku)
+      .then((r) => { if (vivo) setLotes(r?.lotes || []) })
+      .catch(() => { if (vivo) setLotes([]) })
+    return () => { vivo = false }
+  }, [sku])
+
+  const verRastro = (lote) => {
+    setSel(lote)
+    setRastro(null)
+    if (!lote) return
+    setCargando(true)
+    api.rastroDeLote(sku, lote)
+      .then(setRastro)
+      .catch(() => setRastro(null))
+      .finally(() => setCargando(false))
+  }
+
+  if (!producto?.requiereLote) return null
+
+  return (
+    <Card className="mb-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
+        <div>
+          <div className="text-[13px] font-semibold">Trazabilidad por lote</div>
+          <div className="text-[12.5px] text-slate-500 dark:text-slate-400 mt-0.5">
+            Elige un lote para ver su historia completa: de quién se compró, a quién se vendió y qué queda.
+            Se listan también los <strong>agotados</strong>: tras una alerta, ese es justo el que hay que mirar.
+          </div>
+        </div>
+        <Select className="!w-64" value={sel} onChange={(e) => verRastro(e.target.value)}>
+          <option value="">Elige un lote…</option>
+          {lotes.map((l) => <option key={l} value={l}>{l}</option>)}
+        </Select>
+      </div>
+
+      {lotes.length === 0 ? (
+        <div className="text-[12.5px] text-slate-500 dark:text-slate-400">
+          Este producto lleva lotes pero todavía no se ha recibido ninguno.
+        </div>
+      ) : cargando ? (
+        <TableSkeleton rows={3} cols={4} />
+      ) : rastro ? (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[12.5px]">
+            <div><span className="text-slate-500">Recibido</span><div className="num font-medium">{fmtNum(rastro.recibido)}</div></div>
+            <div><span className="text-slate-500">Salido</span><div className="num font-medium">{fmtNum(rastro.salido)}</div></div>
+            <div><span className="text-slate-500">En stock</span><div className="num font-medium">{fmtNum(rastro.enStock)}</div></div>
+            <div>
+              <span className="text-slate-500">Vence</span>
+              <div className={`num font-medium ${rastro.vencido ? 'text-amber-700 dark:text-amber-400' : ''}`}>
+                {rastro.vencimiento || '—'}{rastro.vencido ? ' (vencido)' : ''}
+              </div>
+            </div>
+          </div>
+
+          {/* LA RESPUESTA CORTA: a quién avisar. Va primero porque es lo que se
+              necesita en los primeros cinco minutos de una alerta. */}
+          {rastro.clientes?.length ? (
+            <div className="rounded-lg bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-900/40 px-3 py-2 text-[12.5px] text-amber-900 dark:text-amber-200">
+              <strong>Salió a {rastro.clientes.length} destinatario(s):</strong> {rastro.clientes.join(' · ')}
+            </div>
+          ) : (
+            <div className="text-[12px] text-slate-500 dark:text-slate-400">
+              De este lote no ha salido nada todavía.
+            </div>
+          )}
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200 dark:border-slate-800">
+                  <th className="py-2 pr-3 font-medium">Fecha</th>
+                  <th className="py-2 pr-3 font-medium">Movimiento</th>
+                  <th className="py-2 pr-3 font-medium">Documento</th>
+                  <th className="py-2 pr-3 font-medium">Tercero</th>
+                  <th className="py-2 pr-3 font-medium text-right">Cantidad</th>
+                  <th className="py-2 pr-3 font-medium text-right">Saldo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rastro.pasos.map((p, i) => (
+                  <tr key={i} className="border-b border-slate-100 dark:border-slate-800/70">
+                    <td className="py-2 pr-3 text-[12px] text-slate-500 whitespace-nowrap">{fmtDate(p.fecha)}</td>
+                    <td className="py-2 pr-3 text-[12.5px]">{p.tipo}</td>
+                    <td className="py-2 pr-3 num text-[12px]">{p.documento || <span className="text-slate-400">—</span>}</td>
+                    <td className="py-2 pr-3 text-[12.5px]">{p.tercero || <span className="text-slate-400">—</span>}</td>
+                    <td className={`py-2 pr-3 text-right num text-[12.5px] ${p.cantidad < 0 ? 'text-slate-600 dark:text-slate-300' : ''}`}>
+                      {fmtNum(p.cantidad)}
+                    </td>
+                    <td className="py-2 pr-3 text-right num text-[12.5px]">{fmtNum(p.saldo)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="text-[12.5px] text-slate-500 dark:text-slate-400">
+          {lotes.length} lote(s) registrados. Elige uno para ver su rastro.
+        </div>
+      )}
+    </Card>
   )
 }

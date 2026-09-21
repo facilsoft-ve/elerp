@@ -275,3 +275,141 @@ func TestLotes_LaExistenciaAnteriorNoSePierde(t *testing.T) {
 		t.Fatal("tenía que quedar existencia")
 	}
 }
+
+/* --- Los huecos que se cerraron antes de desplegar ----------------------- */
+
+// facturarACliente emite una venta de contado del SKU, para que el rastro tenga
+// documentos y terceros de verdad detrás. Se usa el camino real de emisión: es
+// justo lo que el rastro tiene que saber reconstruir.
+func facturarACliente(t *testing.T, svc *application.Service, sku string, cant float64) {
+	t.Helper()
+	abrirTurno(t, svc, actorA)
+	cl := svc.Clientes(empDemo)
+	if len(cl) == 0 {
+		t.Fatal("el seed debería traer clientes")
+	}
+	if _, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		ClienteID: cl[0].ID,
+		Lineas:    []application.LineaEntrada{{SKU: sku, Cantidad: cant, PrecioUnitario: 100}},
+		Credito:   true, DiasCredito: 30,
+	}); err != nil {
+		t.Fatalf("emitir factura de %v %s: %v", cant, sku, err)
+	}
+}
+
+// TestLotes_UnVencidoNoSeVende: FEFO lo pondría PRIMERO —es el que caduca antes—
+// así que sin guarda el consumo automático despacharía justo lo que no se puede
+// vender, en silencio y en cada venta.
+func TestLotes_UnVencidoNoSeVende(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	prodID := productoConLote(t, svc, skuLote, true)
+	if err := recibirLote(t, svc, skuLote, 5, "L-VENCIDO", fechaEnDias(-3)); err != nil {
+		t.Fatalf("recibir vencido: %v", err)
+	}
+	if err := recibirLote(t, svc, skuLote, 10, "L-BUENO", fechaEnDias(120)); err != nil {
+		t.Fatalf("recibir bueno: %v", err)
+	}
+
+	// Pese a vencer antes, el vencido se salta: salen las 4 del lote bueno.
+	tramos, err := svc.RepartirSalidaFEFO(empDemo, sede1, prodID, 4)
+	if err != nil {
+		t.Fatalf("repartir: %v", err)
+	}
+	if len(tramos) != 1 || tramos[0].Lote != "L-BUENO" {
+		t.Fatalf("el vencido no puede salir: %+v", tramos)
+	}
+
+	// Y si lo único que alcanza está vencido, se dice POR QUÉ: «no hay» mandaría a
+	// comprar más cuando lo que hay que hacer es dar de baja el lote.
+	if _, err := svc.RepartirSalidaFEFO(empDemo, sede1, prodID, 12); !errors.Is(err, application.ErrSoloQuedaVencido) {
+		t.Fatalf("debía distinguir que lo que queda está vencido: %v", err)
+	}
+}
+
+// TestLotes_VariosLotesEnUnaSolaRecepcion: el proveedor completa un pedido con lo
+// que tiene, y eso llega en dos lotes el mismo día. Antes había que partir la
+// recepción en dos.
+func TestLotes_VariosLotesEnUnaSolaRecepcion(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	prodID := productoConLote(t, svc, skuLote, true)
+
+	oc, err := svc.CrearOrdenCompra(empDemo, sede1, actorA, origenTst, application.EntradaOC{
+		ProveedorID: provDemo1, SedeID: sede1,
+		Lineas: []application.LineaOCEntrada{{SKU: skuLote, Cantidad: 30, CostoUnitario: 10}},
+	})
+	if err != nil {
+		t.Fatalf("crear OC: %v", err)
+	}
+	if _, err := svc.ConfirmarOrdenCompra(empDemo, oc.ID, actorA, origenTst); err != nil {
+		t.Fatalf("confirmar: %v", err)
+	}
+	if _, err := svc.RecibirOrdenCompra(empDemo, oc.ID, actorA, origenTst, []application.LineaRecepcion{
+		{SKU: skuLote, Cantidad: 20, Lote: loteA, Vencimiento: fechaEnDias(60)},
+		{SKU: skuLote, Cantidad: 10, Lote: loteB, Vencimiento: fechaEnDias(200)},
+	}); err != nil {
+		t.Fatalf("recibir en dos lotes: %v", err)
+	}
+
+	saldos := svc.SaldosPorLote(empDemo, sede1, prodID)
+	if len(saldos) != 2 {
+		t.Fatalf("tenían que quedar dos lotes: %+v", saldos)
+	}
+	porLote := map[string]float64{}
+	for _, l := range saldos {
+		porLote[l.Lote] = l.Cantidad
+	}
+	if !casi(porLote[loteA], 20) || !casi(porLote[loteB], 10) {
+		t.Errorf("cada lote con lo suyo: %+v", porLote)
+	}
+	// Y lo recibido de la LÍNEA suma las dos entregas, o la orden quedaría
+	// eternamente pendiente de 10 unidades que sí llegaron.
+	oc2, _ := svc.OrdenCompra(empDemo, oc.ID)
+	if !casi(oc2.Lineas[0].CantidadRecibida, 30) {
+		t.Errorf("la línea tenía que quedar recibida por 30, quedó %v", oc2.Lineas[0].CantidadRecibida)
+	}
+	total, suma := saldoTotalYPorLote(t, svc, skuLote, prodID)
+	if !casi(total, suma) {
+		t.Fatalf("el saldo por lote se apartó del producto: %v vs %v", total, suma)
+	}
+}
+
+// TestLotes_ElRastroDiceAQuienSeLeVendio es la consulta que justifica todo el
+// módulo: guardar el lote y no poder preguntarlo es tener el dato y no la función.
+func TestLotes_ElRastroDiceAQuienSeLeVendio(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	productoConLote(t, svc, skuLote, true)
+	if err := recibirLote(t, svc, skuLote, 20, loteA, fechaEnDias(120)); err != nil {
+		t.Fatalf("recibir: %v", err)
+	}
+	// Dos ventas a clientes distintos del MISMO lote.
+	facturarACliente(t, svc, skuLote, 3)
+	facturarACliente(t, svc, skuLote, 2)
+
+	r := svc.RastroDeLote(empDemo, skuLote, loteA, "")
+	if !casi(r.Recibido, 20) {
+		t.Errorf("recibido = %v, se esperaban 20", r.Recibido)
+	}
+	if !casi(r.Salido, 5) {
+		t.Errorf("salido = %v, se esperaban 5", r.Salido)
+	}
+	if !casi(r.EnStock, 15) {
+		t.Errorf("en stock = %v, se esperaban 15", r.EnStock)
+	}
+	if len(r.Pasos) < 3 {
+		t.Fatalf("el rastro tenía que traer la entrada y las dos salidas: %+v", r.Pasos)
+	}
+	// El primer paso es la compra, con su orden y su proveedor: de ahí sale a quién
+	// RECLAMARLE si el lote viene malo.
+	if r.Pasos[0].Documento == "" || r.Pasos[0].Tercero == "" {
+		t.Errorf("la entrada tenía que nombrar la orden y el proveedor: %+v", r.Pasos[0])
+	}
+	// Y la respuesta corta: a quién avisar.
+	if len(r.Clientes) == 0 {
+		t.Fatal("el rastro tiene que decir a quién se le vendió: es para lo que existe")
+	}
+	// Un lote agotado o inexistente no revienta: devuelve un rastro vacío.
+	vacio := svc.RastroDeLote(empDemo, skuLote, "L-QUE-NO-EXISTE", "")
+	if len(vacio.Pasos) != 0 || vacio.EnStock != 0 {
+		t.Errorf("un lote inexistente devuelve rastro vacío: %+v", vacio)
+	}
+}

@@ -486,6 +486,17 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 		return fiscal.Documento{}, fmt.Errorf("%w: faltan %.2f Bs", ErrCobroInsuficiente, doc.Total-doc.Cobrado)
 	}
 
+	// UN LOTE VENCIDO NO SE VENDE. Se comprueba ANTES de numerar y de anexar el
+	// documento: la factura es de solo anexado y fallar después dejaría el folio
+	// quemado y una venta a medias. Acá todavía no se ha tocado nada.
+	sedeChequeo := sedeID
+	if in.SedeID != "" {
+		sedeChequeo = in.SedeID
+	}
+	if err := s.validarLotesVendibles(empresaID, sedeChequeo, doc.Lineas); err != nil {
+		return fiscal.Documento{}, err
+	}
+
 	// Numeración fiscal serializada por empresa+sede+serie.
 	doc.Serie = s.serieDoc(empresaID, fiscal.SerieFactura, modalidad)
 	doc.Numero = s.numerador.Siguiente(empresaID, sedeID, doc.Serie)

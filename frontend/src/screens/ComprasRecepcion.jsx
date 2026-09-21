@@ -162,18 +162,21 @@ export function ModalRecepcion({ orden, onClose, onSaved, toast }) {
   // Al enviar se AGREGA por SKU (el backend imputa la recepción por SKU): dos
   // líneas del mismo producto suman su cantidad a recibir en una sola entrada.
   const lineasEnvio = useMemo(() => {
-    const porSku = {}
+    // Una línea por (SKU, lote): el servidor agrega así, y es lo que permite que
+    // una misma entrega llegue partida en dos lotes —lo normal cuando el proveedor
+    // completa el pedido con lo que tiene—. Fusionar por SKU obligaría a hacer dos
+    // recepciones, o haría que un lote pisara al otro sin decirlo.
+    const porClave = {}
     lineasPend.forEach((l, i) => {
       const n = Number(cant[i]) || 0
       if (n <= 0) return
-      const prev = porSku[l.sku] || { sku: l.sku, cantidad: 0, lote: '', vencimiento: '' }
+      const lt = String(lote[i] || '').trim()
+      const k = l.sku + '\u0000' + lt
+      const prev = porClave[k] || { sku: l.sku, cantidad: 0, lote: lt, vencimiento: venc[i] || '' }
       prev.cantidad += n
-      // Dos líneas del mismo SKU comparten recepción, así que comparten lote: gana
-      // el primero declarado. Partir un SKU en dos lotes se hace en dos recepciones.
-      if (!prev.lote && lote[i]) { prev.lote = String(lote[i]).trim(); prev.vencimiento = venc[i] || '' }
-      porSku[l.sku] = prev
+      porClave[k] = prev
     })
-    return Object.values(porSku)
+    return Object.values(porClave)
   }, [lineasPend, cant, lote, venc])
 
   const hayError = lineasPend.some((l, i) => errorDe(l, i))
