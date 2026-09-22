@@ -217,7 +217,15 @@ func (s *Service) asentarCostoEnDestino(empresaID, actor string, c compra.CostoE
 			lineas = append(lineas, contabilidad.Linea{Codigo: codigo, Haber: -monto})
 		}
 	}
-	agregar(contabilidad.CtaInventario, c.Absorbido)
+	// Lo capitalizado entra a la cuenta del RUBRO de cada producto: cada línea sabe
+	// cuánto absorbió, así que el reparto es exacto y no una proporción.
+	absorbidoPorProducto := montoPorProducto{}
+	for _, l := range c.Lineas {
+		if l.Absorbido > 0.004 {
+			absorbidoPorProducto[l.ProductoID] += l.Absorbido
+		}
+	}
+	lineas = append(lineas, s.lineasDeInventario(empresaID, absorbidoPorProducto, true)...)
 	agregar(contabilidad.CtaDiferenciaEnCompras, c.AlGasto)
 	agregar(contabilidad.CtaCuentasPorPagar, -c.Monto)
 	if len(lineas) == 0 {

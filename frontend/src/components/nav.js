@@ -113,6 +113,8 @@ export const NAV = [
       { id: 'kardex', label: 'Kardex' },
       { id: 'movimientos', label: 'Movimientos' },
       { id: 'transferencias', label: 'Transferencias' },
+      { id: 'conteo', label: 'Conteo físico' },
+      { id: 'valoracion', label: 'Valoración' },
     ],
   },
   {

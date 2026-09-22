@@ -202,6 +202,18 @@ func (r *RubroRepo) List(empresaID string) []inventario.Rubro {
 	return out
 }
 
+func (r *RubroRepo) Update(x inventario.Rubro) (inventario.Rubro, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, y := range r.items {
+		if y.EmpresaID == x.EmpresaID && y.ID == x.ID {
+			r.items[i] = x
+			return x, true
+		}
+	}
+	return inventario.Rubro{}, false
+}
+
 func (r *RubroRepo) Create(x inventario.Rubro) inventario.Rubro {
 	r.mu.Lock()
 	defer r.mu.Unlock()

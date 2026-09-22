@@ -189,9 +189,31 @@ type bucket struct {
 // lo marca ANTES de emitir sus salidas: si no, cada línea competiría con la propia
 // reserva que la respalda y no podría surtirse.
 func (s *Service) bucketsDe(empresaID, sedeID, almacenID, productoID string) []bucket {
+	// EL PRINCIPAL ABSORBE LO QUE NO TIENE ALMACÉN, igual que movsDeAlmacen. No es
+	// un detalle: todo el histórico anterior a los almacenes se guardó sin uno, y
+	// las pantallas que muestran «la existencia del almacén principal» ya lo cuentan
+	// dentro. Si el reparto filtrara exacto, la pantalla y el ledger dirían cosas
+	// distintas sobre el mismo almacén — y lo cazó un conteo físico que anunciaba
+	// sumar 22 unidades donde había que restar 3, porque comparaba la existencia que
+	// ve la pantalla contra las casillas que ve el reparto.
 	movs := s.movimientos.List(empresaID, inventario.FiltroMovimiento{
-		SedeID: sedeID, AlmacenID: almacenID, ProductoID: productoID,
+		SedeID: sedeID, ProductoID: productoID,
 	})
+	if almacenID != "" {
+		incluirSinAlmacen := false
+		if s.almacenes != nil {
+			if a, ok := s.almacenes.ByID(empresaID, almacenID); ok {
+				incluirSinAlmacen = s.esAlmacenPrincipal(empresaID, a)
+			}
+		}
+		acotados := make([]inventario.Movimiento, 0, len(movs))
+		for _, m := range movs {
+			if m.AlmacenID == almacenID || (incluirSinAlmacen && m.AlmacenID == "") {
+				acotados = append(acotados, m)
+			}
+		}
+		movs = acotados
+	}
 	hoy := time.Now().UTC().Format("2006-01-02")
 
 	type clave = claveCasilla

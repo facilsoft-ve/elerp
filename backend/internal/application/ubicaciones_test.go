@@ -173,29 +173,36 @@ func TestUbicacion_SeGastaPrimeroLoQueNoEstaUbicado(t *testing.T) {
 		t.Fatalf("cargar en B-02: %v", err)
 	}
 
-	// Una salida de 4 ACOTADA AL ALMACÉN: tiene que salir de lo SIN UBICAR, no de
-	// B-02. Se acota a propósito — el seed trae saldo sin almacén, que se consume
-	// antes que nada (ver TestUbicacion_LoSinAlmacenSeGastaAntesQueLoDelAlmacen) y
-	// taparía el orden que esta prueba vigila.
+	// Una salida de 4. Lo que esta prueba defiende es el ORDEN: sale de casillas
+	// SIN UBICAR, nunca de B-02.
+	//
+	// No se puede fijar de qué casilla sin ubicar sale exactamente, y es correcto que
+	// no se pueda: el almacén principal absorbe también el saldo histórico que no
+	// tiene almacén —igual que lo hace la pantalla de existencias por almacén—, y ese
+	// saldo se consume antes por ser el menos localizado. Fijar una casilla concreta
+	// ataría la prueba al seed en vez de a la regla.
+	sinUbicarAntes := 0.0
+	for _, u := range svc.ExistenciaPorUbicacion(empDemo, sede1, sku) {
+		if u.UbicacionID == "" {
+			sinUbicarAntes += u.Cantidad
+		}
+	}
 	if _, err := svc.Ajustar(empDemo, sede1, alm, sku, "salida", -4, actorA, origenTst); err != nil {
 		t.Fatalf("ajuste: %v", err)
 	}
-	enB02, sinUbicarEnAlm := 0.0, 0.0
+	enB02, sinUbicarDespues := 0.0, 0.0
 	for _, u := range svc.ExistenciaPorUbicacion(empDemo, sede1, sku) {
-		if u.AlmacenID != alm {
-			continue
-		}
-		if u.UbicacionID == pasillo {
+		if u.UbicacionID == pasillo && u.AlmacenID == alm {
 			enB02 = u.Cantidad
 		} else if u.UbicacionID == "" {
-			sinUbicarEnAlm = u.Cantidad
+			sinUbicarDespues += u.Cantidad
 		}
 	}
 	if !casi(enB02, 10) {
 		t.Errorf("B-02 no tenía que tocarse todavía, quedó en %v", enB02)
 	}
-	if !casi(sinUbicarEnAlm, 2) {
-		t.Errorf("lo sin ubicar tenía que bajar de 6 a 2, quedó en %v", sinUbicarEnAlm)
+	if !casi(sinUbicarAntes-sinUbicarDespues, 4) {
+		t.Errorf("las 4 tenían que salir de lo sin ubicar: bajó %v", sinUbicarAntes-sinUbicarDespues)
 	}
 
 	suma, total := sumaYTotal(t, svc, sku)

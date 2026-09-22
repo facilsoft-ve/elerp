@@ -322,6 +322,7 @@ export function Existencias({ onKardex }) {
   const [soloBajo, setSoloBajo] = useState('todos')
   const [ajuste, setAjuste] = useState(null)
   const [apartando, setApartando] = useState(null)
+  const [corrigiendo, setCorrigiendo] = useState(null)
   // Qué SKU tiene desplegado su desglose por ubicación. Uno a la vez: la pregunta
   // «¿dónde está esto?» es de un producto concreto, no de la lista entera.
   const [dondeEsta, setDondeEsta] = useState('')
@@ -443,6 +444,12 @@ export function Existencias({ onKardex }) {
                           <Icon.History size={15} />
                         </button>
                         {editable ? (
+                          <button onClick={() => setCorrigiendo(e)} title="Corregir el costo"
+                            className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+                            <Icon.Banknote size={15} />
+                          </button>
+                        ) : null}
+                        {editable ? (
                           <button onClick={() => setApartando(e)} title="Apartar para un cliente"
                             className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
                             <Icon.Boxes size={15} />
@@ -469,6 +476,11 @@ export function Existencias({ onKardex }) {
       </div>
       {rows.length ? <div className="mt-2 text-[11.5px] text-slate-400">{fmtNum(rows.length, 0)} producto(s){soloBajo === 'bajo' ? ' con stock bajo' : ''}</div> : null}
 
+      {corrigiendo ? (
+        <CorregirCostoModal existencia={corrigiendo} toast={toast}
+          onClose={() => setCorrigiendo(null)}
+          onSaved={() => { setCorrigiendo(null); recargar() }} />
+      ) : null}
       {apartando ? (
         <ApartarModal existencia={apartando} almacenId={almacenSel} toast={toast}
           onClose={() => setApartando(null)}
@@ -584,6 +596,68 @@ function ApartarModal({ existencia, almacenId, onClose, onSaved, toast }) {
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
           <Button onClick={guardar} disabled={guardando}>{guardando ? 'Apartando…' : 'Apartar'}</Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/* CORREGIR EL COSTO: poner el promedio donde debe estar.
+ *
+ * Cambia lo que vale lo que hay, NO cuánto hay — si además falta o sobra
+ * mercancía, eso es un ajuste y es otro botón. Mezclarlos dejaría un movimiento
+ * que nadie sabría leer después.
+ */
+function CorregirCostoModal({ existencia, onClose, onSaved, toast }) {
+  const { ui } = useUI()
+  const [costo, setCosto] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const [guardando, setGuardando] = useState(false)
+
+  const actual = Number(existencia.costoPromedio) || 0
+  const cant = Number(existencia.cantidad) || 0
+  const nuevo = Number(costo)
+  const impacto = Number.isFinite(nuevo) && costo !== '' ? (nuevo - actual) * cant : 0
+
+  const guardar = async () => {
+    if (!(nuevo >= 0) || costo === '') return toast({ title: 'Indica el costo corregido', kind: 'error' })
+    if (!motivo.trim()) return toast({ title: 'Di por qué se corrige', body: 'Un cambio de valor sin motivo no se puede auditar después.', kind: 'error' })
+    setGuardando(true)
+    try {
+      const r = await api.corregirCosto(existencia.sku, { costo: nuevo, motivo: motivo.trim() })
+      toast({
+        title: 'Costo corregido',
+        body: `${existencia.nombre}: de ${fmtCurrency(r.costoAnterior, ui.ccy)} a ${fmtCurrency(r.costoNuevo, ui.ccy)}. El inventario cambia ${fmtCurrency(r.valorAjustado, ui.ccy)} sin mover unidades.`,
+      })
+      onSaved()
+    } catch (e) {
+      toast({ title: 'No se pudo corregir', body: e?.message || 'Error', kind: 'error' })
+    } finally { setGuardando(false) }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Corregir costo · ${existencia.nombre}`}>
+      <div className="space-y-3">
+        <div className="text-[12.5px] text-slate-500 dark:text-slate-400">
+          Hay <strong>{fmtNum(cant)}</strong> a un costo promedio de <strong>{fmtCurrency(actual, ui.ccy)}</strong>.
+          Corregirlo cambia <strong>lo que vale</strong> el inventario, no cuántas unidades hay.
+        </div>
+        <Field label="Costo corregido" hint="El promedio al que debería estar valorada la mercancía que hay hoy.">
+          <Input type="number" min="0" step="any" value={costo} autoFocus
+            onChange={(e) => setCosto(e.target.value)} placeholder={String(actual)} />
+        </Field>
+        {costo !== '' && Number.isFinite(nuevo) ? (
+          <div className={`text-[12.5px] rounded-lg px-3 py-2 ${impacto >= 0 ? 'bg-emerald-50 dark:bg-emerald-900/25 text-emerald-900 dark:text-emerald-200' : 'bg-amber-50 dark:bg-amber-900/25 text-amber-900 dark:text-amber-200'}`}>
+            El inventario {impacto >= 0 ? 'sube' : 'baja'} <strong>{fmtCurrency(Math.abs(impacto), ui.ccy)}</strong>,
+            y la diferencia va al resultado del período.
+          </div>
+        ) : null}
+        <Field label="¿Por qué se corrige?" hint="Queda en el Kardex y en el asiento. Es lo que alguien leerá dentro de seis meses.">
+          <Input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="La factura venía en dólares…" />
+        </Field>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button onClick={guardar} disabled={guardando}>{guardando ? 'Corrigiendo…' : 'Corregir costo'}</Button>
         </div>
       </div>
     </Modal>

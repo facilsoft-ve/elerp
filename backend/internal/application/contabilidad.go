@@ -493,10 +493,10 @@ func (s *Service) asentarVenta(empresaID, actor string, doc fiscal.Documento, co
 	// Costo de lo vendido: sale del inventario al costo promedio del ledger, no de
 	// un porcentaje estimado.
 	if costo > 0.004 {
-		s.asentar(empresaID, actor, doc.Fecha, "Costo de ventas de "+doc.NumeroCompleto, "documento", doc.ID, []contabilidad.Linea{
-			{Codigo: contabilidad.CtaCostoDeVentas, Debe: round2(costo)},
-			{Codigo: contabilidad.CtaInventario, Haber: round2(costo)},
-		})
+		s.asentar(empresaID, actor, doc.Fecha, "Costo de ventas de "+doc.NumeroCompleto, "documento", doc.ID, append(
+			[]contabilidad.Linea{{Codigo: contabilidad.CtaCostoDeVentas, Debe: round2(costo)}},
+			s.lineasInventarioDeDocumento(empresaID, doc.ID, costo, false)...,
+		))
 	}
 }
 
@@ -539,10 +539,12 @@ func (s *Service) asentarReversaFiscal(empresaID, actor string, rev fiscal.Docum
 		{Codigo: contabilidad.CtaCuentasPorCobrar, Haber: porCobrar},
 	})
 	if costo > 0.004 {
-		s.asentar(empresaID, actor, rev.Fecha, "Reingreso de inventario por "+rev.NumeroCompleto, "documento", rev.ID, []contabilidad.Linea{
-			{Codigo: contabilidad.CtaInventario, Debe: round2(costo)},
-			{Codigo: contabilidad.CtaCostoDeVentas, Haber: round2(costo)},
-		})
+		// El reingreso vuelve a la MISMA cuenta de la que salió: si volviera a la
+		// general, la del rubro quedaría con menos de lo que tiene en el anaquel.
+		s.asentar(empresaID, actor, rev.Fecha, "Reingreso de inventario por "+rev.NumeroCompleto, "documento", rev.ID, append(
+			s.lineasInventarioDeDocumento(empresaID, rev.ID, costo, true),
+			contabilidad.Linea{Codigo: contabilidad.CtaCostoDeVentas, Haber: round2(costo)},
+		))
 	}
 }
 
@@ -894,24 +896,29 @@ func (s *Service) asentarMovimientoInventario(empresaID, actor string, m inventa
 		return
 	}
 	monto := m.Cantidad * m.CostoUnitario
+	// La cuenta de inventario sale del RUBRO del producto, no es fija: ver
+	// cuenta_rubro.go. Sin rubros con cuenta propia devuelve la general de siempre.
+	inv := func(importe float64, alDebe bool) []contabilidad.Linea {
+		return s.lineasDeInventario(empresaID, montoPorProducto{m.ProductoID: importe}, alDebe)
+	}
 	switch {
 	case m.Tipo == inventario.MovEntrada && monto > 0.004:
-		s.asentar(empresaID, actor, m.Fecha, "Entrada de inventario — "+m.Motivo, "movimiento", m.ID, []contabilidad.Linea{
-			{Codigo: contabilidad.CtaInventario, Debe: round2(monto)},
-			{Codigo: contabilidad.CtaCapital, Haber: round2(monto)},
-		})
+		s.asentar(empresaID, actor, m.Fecha, "Entrada de inventario — "+m.Motivo, "movimiento", m.ID, append(
+			inv(monto, true),
+			contabilidad.Linea{Codigo: contabilidad.CtaCapital, Haber: round2(monto)},
+		))
 	case m.Tipo == inventario.MovAjuste && monto < -0.004:
 		// Merma: la mercancía que falta es un costo del período.
-		s.asentar(empresaID, actor, m.Fecha, "Ajuste de inventario (merma) — "+m.Motivo, "movimiento", m.ID, []contabilidad.Linea{
-			{Codigo: contabilidad.CtaCostoDeVentas, Debe: round2(-monto)},
-			{Codigo: contabilidad.CtaInventario, Haber: round2(-monto)},
-		})
+		s.asentar(empresaID, actor, m.Fecha, "Ajuste de inventario (merma) — "+m.Motivo, "movimiento", m.ID, append(
+			[]contabilidad.Linea{{Codigo: contabilidad.CtaCostoDeVentas, Debe: round2(-monto)}},
+			inv(-monto, false)...,
+		))
 	case m.Tipo == inventario.MovAjuste && monto > 0.004:
 		// Sobrante encontrado en un conteo: entra al inventario y rebaja el costo.
-		s.asentar(empresaID, actor, m.Fecha, "Ajuste de inventario (sobrante) — "+m.Motivo, "movimiento", m.ID, []contabilidad.Linea{
-			{Codigo: contabilidad.CtaInventario, Debe: round2(monto)},
-			{Codigo: contabilidad.CtaCostoDeVentas, Haber: round2(monto)},
-		})
+		s.asentar(empresaID, actor, m.Fecha, "Ajuste de inventario (sobrante) — "+m.Motivo, "movimiento", m.ID, append(
+			inv(monto, true),
+			contabilidad.Linea{Codigo: contabilidad.CtaCostoDeVentas, Haber: round2(monto)},
+		))
 	}
 	// Las transferencias entre sedes NO se asientan: la mercancía sigue siendo de
 	// la misma empresa, así que el patrimonio no cambia.

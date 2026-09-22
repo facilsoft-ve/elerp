@@ -263,6 +263,21 @@ type Rubro struct {
 	ID        string `json:"id" bson:"id"`
 	EmpresaID string `json:"empresaId" bson:"empresaid"`
 	Nombre    string `json:"nombre" bson:"nombre"`
+	// CuentaInventario permite que este rubro se acumule en su propia cuenta de
+	// activo en vez de en la única de inventario. Vacío = la de siempre, que es lo
+	// que tiene toda empresa que no toque esto.
+	//
+	// POR QUÉ. Una ferretería que vende tornillos y también maquinaria quiere verlos
+	// separados en el balance; con una sola cuenta, el contador tiene que estimarlo
+	// a mano cada cierre.
+	//
+	// LA REGLA QUE NO SE PUEDE ROMPER: si un rubro tiene cuenta propia, TODOS sus
+	// asientos —entrada, venta, merma, sobrante, devolución, costo en destino— van a
+	// ella. En cuanto uno solo se quede en la cuenta general, esa cuenta crece para
+	// siempre y la general se va a negativo, con el balance cuadrando en los dos
+	// casos. Por eso la resuelve un único sitio (cuentaInventarioDe) y no cada
+	// asiento por su cuenta.
+	CuentaInventario string `json:"cuentaInventario,omitempty" bson:"cuentainventario,omitempty"`
 }
 
 // FiltroMovimiento acota una consulta al ledger. EmpresaID es obligatorio en
@@ -305,4 +320,7 @@ type TransferenciaRepo interface {
 type RubroRepo interface {
 	List(empresaID string) []Rubro
 	Create(r Rubro) Rubro
+	// Update existe para poder asignarle su cuenta contable. Un rubro no se borra:
+	// los productos que lo referencian dejarían de tener categoría.
+	Update(r Rubro) (Rubro, bool)
 }
