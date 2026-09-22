@@ -153,6 +153,10 @@ type VueltoParteEntrada struct {
 	Banco    string
 	Cedula   string
 	Telefono string
+	// CuentaID es NUESTRA cuenta, de la que sale el vuelto por pago móvil. Vacía,
+	// el servidor la resuelve si la empresa tiene una sola cuenta de ese tipo:
+	// obligar a elegir entre una opción es hacer trabajo por nada.
+	CuentaID string
 }
 
 // EmitirEntrada son los datos para emitir una factura.
@@ -1081,6 +1085,9 @@ func (s *Service) resolverVueltoPartes(empresaID string, in EmitirEntrada, exced
 					return nil, ErrVueltoPagoMovilDatos
 				}
 				vp.Banco, vp.Cedula, vp.Telefono = banco, cedula, telefono
+				// DE DÓNDE SALE: sin esto el egreso queda sin cuenta y Tesorería ve
+				// entrar dinero al pago móvil que nunca sale.
+				vp.CuentaID = s.cuentaDeVuelto(empresaID, pe.CuentaID)
 			}
 			sumaBs = round2(sumaBs + vp.MontoBs)
 			// El redondeo de la unidad mínima de cada moneda (un céntimo de esa
@@ -1270,4 +1277,31 @@ func (s *Service) Alicuotas(empresaID string) []fiscal.Alicuota {
 		return []fiscal.Alicuota{}
 	}
 	return s.alicuotas.List(empresaID)
+}
+
+/* cuentaDeVuelto resuelve de qué cuenta nuestra sale un vuelto por pago móvil.
+ *
+ * Si la caja la declaró, esa. Si no, y la empresa tiene UNA sola cuenta de pago
+ * móvil, esa: hacer elegir entre una opción es hacer trabajo por nada, y dejarlo
+ * vacío deja el egreso sin dueño. Con varias cuentas y sin declarar queda vacío
+ * a propósito — adivinar cuál se debitó sería inventar un movimiento bancario.
+ */
+func (s *Service) cuentaDeVuelto(empresaID, declarada string) string {
+	if v := strings.TrimSpace(declarada); v != "" {
+		return v
+	}
+	if s.cuentasCobro == nil {
+		return ""
+	}
+	var unica string
+	for _, c := range s.cuentasCobro.List(empresaID) {
+		if c.Tipo != fiscal.PagoPagoMovil {
+			continue
+		}
+		if unica != "" {
+			return "" // hay más de una: que la elija quien cobra
+		}
+		unica = c.ID
+	}
+	return unica
 }

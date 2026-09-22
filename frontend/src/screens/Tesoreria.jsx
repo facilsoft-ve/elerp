@@ -778,6 +778,11 @@ function RegistrarPagoProveedorModal({ proveedor, db, ccy, onClose, onHecho }) {
 
 function Saldos() {
   const { data: res, loading, error, reload } = useRecurso(() => api.saldosTesoreria(), [])
+  /* La ficha de la cuenta se edita acá porque es acá donde se ve que algo no
+   * cuadra. Lo que más pesa es A QUÉ CUENTA DEL PLAN asienta: sin eso, todo cobro
+   * caía en «Caja y bancos» y el libro no distinguía la plata del cajón de la del
+   * banco. */
+  const [ficha, setFicha] = useState(null)
   if (loading || error) {
     return <EstadoRecurso loading={loading} error={error} onRetry={reload} cols={3} rows={4}
       title="No se pudo cargar efectivo y bancos" />
@@ -804,8 +809,15 @@ function Saldos() {
                   <th className="py-2.5 px-3 font-medium">Cuenta</th>
                   <th className="py-2.5 pr-3 font-medium">Tipo</th>
                   <th className="py-2.5 pr-3 font-medium text-center">Operaciones</th>
+                  {/* SALIÓ va antes del saldo porque es lo que explica por qué el
+                      saldo bajó. Hoy son los vueltos entregados por pago móvil:
+                      plata que se transfirió desde esta cuenta y que sin mostrarla
+                      dejaba el saldo proyectado por encima del real. */}
                   <th className="py-2.5 pr-3 font-medium text-right">Entró</th>
-                  <th className="py-2.5 pr-3 font-medium text-right">En bolívares</th>
+                  <th className="py-2.5 pr-3 font-medium text-right">Salió</th>
+                  <th className="py-2.5 pr-3 font-medium text-right">Saldo en bolívares</th>
+                  <th className="py-2.5 pr-3 font-medium">Asienta en</th>
+                  <th className="py-2.5 pr-3" />
                 </tr>
               </thead>
               <tbody>
@@ -817,8 +829,22 @@ function Saldos() {
                     </td>
                     <td className="py-2.5 pr-3"><Badge size="sm" color="slate">{c.tipo}</Badge></td>
                     <td className="py-2.5 pr-3 text-center num text-[12.5px] text-slate-500">{fmtNum(c.operaciones, 0)}</td>
-                    <td className="py-2.5 pr-3 text-right num private-mask">{fmtCurrency(c.entradas, c.moneda)}</td>
+                    <td className="py-2.5 pr-3 text-right num private-mask">{fmtCurrency(c.entradas + (c.salidas || 0), c.moneda)}</td>
+                    <td className="py-2.5 pr-3 text-right num private-mask">
+                      {c.salidas > 0
+                        ? <span className="text-amber-700 dark:text-amber-400">− {fmtCurrency(c.salidas, c.moneda)}</span>
+                        : <span className="text-slate-300 dark:text-slate-600">—</span>}
+                    </td>
                     <td className="py-2.5 pr-3 text-right num font-medium private-mask">{fmtCurrency(c.entradasBs, 'VES')}</td>
+                    <td className="py-2.5 pr-3 text-[12.5px]">
+                      {c.codigoContable
+                        ? <span className="num text-slate-600 dark:text-slate-300">{c.codigoContable}</span>
+                        : <span className="text-slate-400">1101 · por defecto</span>}
+                    </td>
+                    <td className="py-2.5 pr-3 text-right">
+                      <button className="text-[12.5px] text-elerp-600 dark:text-teal-400 font-medium"
+                        onClick={() => setFicha(c)}>Editar</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -826,6 +852,8 @@ function Saldos() {
           </div>
         )}
       </div>
+
+      {ficha ? <FichaCuentaCobro cuenta={ficha} onClose={() => setFicha(null)} onGuardada={() => { setFicha(null); reload() }} /> : null}
 
       <div className="mt-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 px-3.5 py-3 text-[12px] text-slate-600 dark:text-slate-300 flex gap-2.5 items-start">
         <Icon.CircleAlert size={15} className="mt-0.5 shrink-0 text-slate-400" />
@@ -905,3 +933,77 @@ const Kpi = ({ label, valor, tono }) => (
     </div>
   </div>
 )
+
+/* FichaCuentaCobro: a qué banco va la plata y EN QUÉ CUENTA DEL PLAN asienta.
+ *
+ * Lo segundo es lo que no existía, y es lo que permite conciliar: sin mapear,
+ * todo cobro caía en «1101 Caja y bancos» —efectivo, pago móvil, Zelle, todo
+ * junto— y ninguna cuenta se podía cuadrar contra su estado de cuenta.
+ *
+ * Las cuentas que ofrece salen del PLAN, que es editable: quien quiera separar
+ * su banco abre «1101.02 Banco de Venezuela» en Contabilidad y lo elige acá. No
+ * hay una lista de bancos escrita en el código, a propósito.
+ */
+function FichaCuentaCobro({ cuenta, onClose, onGuardada }) {
+  const toast = useToast()
+  const [f, setF] = useState({
+    titular: cuenta.titular || '', datos: cuenta.datos || '',
+    codigoContable: cuenta.codigoContable || '',
+  })
+  const [plan, setPlan] = useState([])
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    api.planDeCuentas()
+      .then((r) => setPlan((Array.isArray(r) ? r : r?.cuentas || []).filter((c) => c.activa !== false)))
+      .catch(() => setPlan([]))
+  }, [])
+
+  // Solo cuentas de ACTIVO: el dinero de una cuenta de cobro es un activo, y
+  // ofrecer el plan entero invita a asentar un cobro contra una cuenta de gasto.
+  const activos = plan.filter((c) => c.tipo === 'activo')
+
+  const guardar = async () => {
+    setBusy(true)
+    try {
+      await api.actualizarCuentaCobro(cuenta.cuentaId || cuenta.id, {
+        titular: f.titular.trim(), datos: f.datos.trim(), codigoContable: f.codigoContable,
+      })
+      toast({ title: 'Cuenta actualizada', body: f.titular.trim() })
+      onGuardada()
+    } catch (e) {
+      toast({ title: 'No se pudo guardar', body: e?.message || 'Error', kind: 'error' })
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} size="sm" icon={<Icon.Wallet size={18} />}
+      title="Cuenta de cobro" sub={cuenta.tipo}
+      footer={<>
+        <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+        <Button onClick={guardar} loading={busy} icon={<Icon.Check size={16} />}>Guardar</Button>
+      </>}>
+      <div className="space-y-3.5">
+        <Field label="Titular">
+          <Input value={f.titular} onChange={(e) => setF((s) => ({ ...s, titular: e.target.value }))} autoFocus />
+        </Field>
+        <Field label="Datos" hint="nº de cuenta, teléfono o correo">
+          <Input value={f.datos} onChange={(e) => setF((s) => ({ ...s, datos: e.target.value }))} className="num" />
+        </Field>
+        <Field label="Asienta en"
+          hint="la cuenta del plan donde entra y sale la plata de esta cuenta">
+          <Select value={f.codigoContable} onChange={(e) => setF((s) => ({ ...s, codigoContable: e.target.value }))}>
+            <option value="">1101 · Caja y bancos (por defecto)</option>
+            {activos.map((c) => <option key={c.codigo} value={c.codigo}>{c.codigo} · {c.nombre}</option>)}
+          </Select>
+        </Field>
+        <div className="text-[11.5px] text-slate-400">
+          ¿No está la cuenta que buscas? El plan de cuentas es editable: créala en
+          <strong> Contabilidad › Plan de cuentas</strong> y vuelve acá. Cambiar esto no reescribe
+          los asientos ya hechos — el histórico refleja dónde se asentó cuando se asentó.
+        </div>
+      </div>
+    </Modal>
+  )
+}

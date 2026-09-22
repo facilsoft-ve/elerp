@@ -176,7 +176,8 @@ func CuerpoImprenta(doc fiscal.Documento, cfg facturaciondigital.Config, numero 
 	// que las alícuotas—, pero la BASE y el MONTO solo si se causó: declarar una
 	// base en cero con su 3 % es declarar un impuesto que no ocurrió.
 	cuerpo["IGTFPercentage"] = pctIGTFDeLey(doc.AlicuotaIGTF * 100)
-	if abs(doc.IGTF) > 0 {
+	hayIGTF := abs(doc.IGTF) > 0
+	if hayIGTF {
 		cuerpo["IGTFBaseAmount"] = r2(total)
 		cuerpo["IGTFAmount"] = abs(doc.IGTF)
 	}
@@ -204,6 +205,22 @@ func CuerpoImprenta(doc fiscal.Documento, cfg facturaciondigital.Config, numero 
 		cuerpo["TaxAmountReducedVES"] = r2(abs(ivaReducida) * t)
 		cuerpo["TotalVES"] = r2(total * t)
 		cuerpo["GrandTotalVES"] = r2(abs(doc.Total) * t)
+		/* EL RECARGO SUNTUARIO Y EL IGTF TAMBIÉN SE ESPEJAN.
+		 *
+		 * La regla de la imprenta compara CADA campo con su conversión, no solo los
+		 * totales: una factura con IGTF y sin IGTFAmountVES se rechaza entera. Se
+		 * descubrió en producción, con una venta cobrada en divisas — la prueba que
+		 * validó el espejo no tenía IGTF, así que el hueco no se veía.
+		 *
+		 * Van todos los que existen, no los que hoy hacen falta: el que se olvide
+		 * vuelve a aparecer como un rechazo con la factura ya cobrada. */
+		cuerpo["TaxBaseSumptuaryVES"] = r2(abs(baseAdicional) * t)
+		cuerpo["TaxAmountSumptuaryVES"] = r2(abs(ivaAdicional) * t)
+		cuerpo["DiscountVES"] = 0
+		if hayIGTF {
+			cuerpo["IGTFBaseAmountVES"] = r2(total * t)
+			cuerpo["IGTFAmountVES"] = r2(abs(doc.IGTF) * t)
+		}
 	}
 
 	// Los renglones. `Amount` y `TotalAmount` se derivan del propio renglón para

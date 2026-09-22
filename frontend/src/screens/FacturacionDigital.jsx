@@ -360,19 +360,53 @@ function Seccion({ n, titulo, sub, children }) {
  * se ve si salió, en qué quedó y por qué falló — con el mensaje literal de la
  * imprenta, que es lo que su soporte pide para diagnosticar. */
 function EmisionesModal({ onClose }) {
+  const toast = useToast()
   const [emisiones, setEmisiones] = useState(null)
   const [abierta, setAbierta] = useState(null)
+  const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
+  const cargar = useCallback(() => {
     api.emisionesDigitales()
       .then((r) => setEmisiones(r?.emisiones || []))
       .catch(() => setEmisiones([]))
   }, [])
+  useEffect(() => { cargar() }, [cargar])
+
+  const rechazadas = (emisiones || []).filter((e) => e.estado === 'rechazado')
+
+  /* REINTENTAR LO RECHAZADO. No es automático a propósito —repetir un 400 a
+   * ciegas repite el mismo error— pero tiene que poder hacerse a mano cuando la
+   * causa se corrigió. Sin esto, una factura ya cobrada que la imprenta rechazó
+   * quedaba sin poder fiscalizarse para siempre. */
+  const reintentar = async (fn, aviso) => {
+    setBusy(true)
+    try {
+      await fn()
+      toast({ title: 'De vuelta en la cola', body: aviso })
+      cargar()
+    } catch (e) {
+      toast({ title: 'No se pudo reintentar', body: e?.message || 'Error', kind: 'error' })
+    }
+    setBusy(false)
+  }
 
   return (
     <Modal open onClose={onClose} size="lg" icon={<Icon.ClipboardList size={18} />}
       title="Facturas enviadas a la imprenta"
       sub="El número de control llega unos minutos después de enviar: mientras tanto el documento no es fiscal todavía.">
+      {rechazadas.length ? (
+        <div className="mb-3 rounded-lg px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap"
+          style={{ background: '#FBEDEB', border: '1px solid #ECC8C4', color: '#B3362C' }}>
+          <div className="text-[12.5px]">
+            <strong>{rechazadas.length} factura(s) rechazada(s).</strong> Si ya corregiste lo que las
+            rechazó, vuelve a mandarlas: conservan su número.
+          </div>
+          <Button size="sm" variant="secondary" loading={busy}
+            onClick={() => reintentar(() => api.reintentarRechazadas(), `${rechazadas.length} factura(s).`)}
+            icon={<Icon.Refresh size={15} />}>Reintentar todas</Button>
+        </div>
+      ) : null}
+
       {emisiones === null ? <TableSkeleton rows={5} cols={4} /> : emisiones.length === 0 ? (
         <Empty icon={<Icon.FileText size={22} />} title="Todavía no se ha enviado ninguna"
           body="Acá van a aparecer las facturas a medida que se emitan, con su número de control y el enlace que ve el cliente." />
@@ -397,7 +431,11 @@ function EmisionesModal({ onClose }) {
                     <td className="px-3 py-2"><Badge color={st.color}>{st.label}</Badge></td>
                     <td className="px-3 py-2 num">{e.numeroControl || <span className="text-slate-400">—</span>}</td>
                     <td className="px-3 py-2 text-slate-500">{fechaCortaVE(e.creada)}</td>
-                    <td className="px-3 py-2 text-right">
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      {e.estado === 'rechazado' ? (
+                        <button className="text-[12.5px] font-medium mr-3" style={{ color: '#B3362C' }} disabled={busy}
+                          onClick={() => reintentar(() => api.reintentarEmision(e.id), `${e.tipo}-${e.numero}`)}>Reintentar</button>
+                      ) : null}
                       <button className="text-[12.5px] text-huberp-600 dark:text-teal-400 font-medium"
                         onClick={() => setAbierta(e)}>Detalle</button>
                     </td>

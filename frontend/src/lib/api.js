@@ -414,6 +414,8 @@ export const api = {
   // ---- Tesorería (cuentas de cobro para el POS) ----
   cuentasCobro: () => request('/api/tesoreria/cuentas-cobro'),
   crearCuentaCobro: (body) => request('/api/tesoreria/cuentas-cobro', { method: 'POST', body: JSON.stringify(body) }),
+  // Editar la ficha: a qué banco va la plata y en qué cuenta del plan asienta.
+  actualizarCuentaCobro: (id, body) => request(`/api/tesoreria/cuentas-cobro/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
 
   // ---- Configuración de Métodos de pago (POS + Ventas) ----
   // Los métodos vienen ordenados por `orden`. El POS usa los que tengan
@@ -530,6 +532,9 @@ export const api = {
   guardarConfigDigital: (body) => request('/api/facturacion-digital/config', { method: 'PUT', body: JSON.stringify(body) }),
   probarDigital: (body) => request('/api/facturacion-digital/probar', { method: 'POST', body: JSON.stringify(body) }),
   emisionesDigitales: () => request('/api/facturacion-digital/emisiones'),
+  // Reintentar lo rechazado, cuando la causa ya se corrigió.
+  reintentarEmision: (id) => request(`/api/facturacion-digital/emisiones/${encodeURIComponent(id)}/reintentar`, { method: 'POST' }),
+  reintentarRechazadas: () => request('/api/facturacion-digital/emisiones/reintentar-rechazadas', { method: 'POST' }),
 
   cotizarEnvio: (body) => request('/api/pedidos/cotizar-envio', { method: 'POST', body: JSON.stringify(body) }),
   canalesPedido: () => request('/api/pedidos/config/canales'),

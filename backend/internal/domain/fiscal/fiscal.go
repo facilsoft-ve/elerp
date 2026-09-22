@@ -9,6 +9,7 @@ package fiscal
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ErrFolioRetrocede se devuelve cuando se intenta fijar la numeración de una
@@ -126,13 +127,21 @@ type Pago struct {
 // la moneda de la parte; MontoBs es su equivalente en bolívares (con la tasa de
 // esa moneda al emitir). Banco/Cédula/Teléfono solo aplican al pago móvil.
 type VueltoParte struct {
-	Moneda   string  `json:"moneda" bson:"moneda"`
-	Metodo   string  `json:"metodo" bson:"metodo"` // efectivo | pago_movil
-	Monto    float64 `json:"monto" bson:"monto"`   // en la moneda de la parte
-	MontoBs  float64 `json:"montoBs" bson:"montobs"`
-	Banco    string  `json:"banco" bson:"banco"`
-	Cedula   string  `json:"cedula" bson:"cedula"`
-	Telefono string  `json:"telefono" bson:"telefono"`
+	Moneda  string  `json:"moneda" bson:"moneda"`
+	Metodo  string  `json:"metodo" bson:"metodo"` // efectivo | pago_movil
+	Monto   float64 `json:"monto" bson:"monto"`   // en la moneda de la parte
+	MontoBs float64 `json:"montoBs" bson:"montobs"`
+	// Banco, Cedula y Telefono son del CLIENTE: a dónde se le envía el vuelto.
+	Banco    string `json:"banco" bson:"banco"`
+	Cedula   string `json:"cedula" bson:"cedula"`
+	Telefono string `json:"telefono" bson:"telefono"`
+	/* CuentaID es NUESTRA cuenta, de la que sale la plata. No es lo mismo que los
+	 * tres campos de arriba y confundirlos deja el egreso sin dueño: sin esto,
+	 * Tesorería veía entrar dinero a la cuenta de pago móvil y nunca salir, y el
+	 * débito aparecía en el banco a fin de mes sin contraparte en ElERP.
+	 *
+	 * Vacío en el vuelto en efectivo: ese sale de la gaveta, no de una cuenta. */
+	CuentaID string `json:"cuentaId,omitempty" bson:"cuentaid,omitempty"`
 }
 
 // Documento es un documento fiscal inmutable.
@@ -323,6 +332,28 @@ type CuentaCobro struct {
 	Moneda    string `json:"moneda" bson:"moneda"`
 	Titular   string `json:"titular" bson:"titular"`
 	Datos     string `json:"datos" bson:"datos"` // nº de cuenta / teléfono / correo
+	/* CodigoContable es la cuenta del PLAN DE CUENTAS donde asienta lo que entra y
+	 * sale por acá.
+	 *
+	 * Sin esto todo cobro caía en «1101 Caja y bancos», daba igual si fue efectivo
+	 * en la gaveta, pago móvil o Zelle: el libro diario no distinguía la plata que
+	 * está en el banco de la que está en el cajón, y conciliar una cuenta contra su
+	 * estado de cuenta era imposible.
+	 *
+	 * Es CONFIGURACIÓN y no código: el plan de cuentas se edita, así que una
+	 * empresa puede abrir «1101.02 Banco de Venezuela» y apuntar su cuenta ahí.
+	 * Vacío ⇒ 1101, que es como se comportaba antes y no obliga a migrar nada. */
+	CodigoContable string `json:"codigoContable,omitempty" bson:"codigocontable,omitempty"`
+}
+
+// CuentaContable devuelve dónde asienta esta cuenta de cobro. Vacío cae en «Caja
+// y bancos», que es el comportamiento anterior: una cuenta sin mapear sigue
+// funcionando, solo que sin separar.
+func (c CuentaCobro) CuentaContable(porDefecto string) string {
+	if v := strings.TrimSpace(c.CodigoContable); v != "" {
+		return v
+	}
+	return porDefecto
 }
 
 // CuentaCobroRepo persiste cuentas de cobro, aislado por empresaID.
@@ -330,4 +361,8 @@ type CuentaCobroRepo interface {
 	List(empresaID string) []CuentaCobro
 	ByID(empresaID, id string) (CuentaCobro, bool)
 	Create(c CuentaCobro) CuentaCobro
+	// Update edita la ficha. Una cuenta de cobro es CONFIGURACIÓN (a qué banco va
+	// la plata, en qué cuenta del plan asienta), no un ledger: se corrige, no se
+	// reversa. Lo que no se toca nunca es lo ya asentado con ella.
+	Update(c CuentaCobro) (CuentaCobro, bool)
 }

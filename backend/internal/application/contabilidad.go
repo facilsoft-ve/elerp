@@ -478,16 +478,26 @@ func (s *Service) asentarVenta(empresaID, actor string, doc fiscal.Documento, co
 		cobrado = doc.Total
 	}
 	porCobrar := round2(doc.Total - cobrado)
-	lineas := []contabilidad.Linea{
-		{Codigo: contabilidad.CtaCajaBancos, Debe: round2(cobrado)},
-		{Codigo: contabilidad.CtaCuentasPorCobrar, Debe: porCobrar},
+	lineas := []contabilidad.Linea{}
+	/* EL DEBE SE REPARTE POR CUENTA. Antes todo lo cobrado caía en «Caja y
+	 * bancos», sin importar el medio: el libro no distinguía la plata del cajón de
+	 * la del banco, y ninguna cuenta se podía conciliar contra su estado de
+	 * cuenta. Ahora cada pago asienta donde diga SU cuenta de cobro, y lo que no
+	 * tiene cuenta —el efectivo— sigue en 1101, que es donde está de verdad. */
+	for _, l := range s.debePorCuenta(doc) {
+		lineas = append(lineas, l)
+	}
+	lineas = append(lineas,
+		contabilidad.Linea{Codigo: contabilidad.CtaCuentasPorCobrar, Debe: porCobrar},
+	)
+	lineas = append(lineas, []contabilidad.Linea{
 		// Al haber, el ingreso separado por condición de IVA y los impuestos que la
 		// empresa solo retiene: no son suyos, los debe.
 		{Codigo: contabilidad.CtaVentas, Haber: doc.BaseImponible},
 		{Codigo: contabilidad.CtaVentasExentas, Haber: doc.BaseExenta},
 		{Codigo: contabilidad.CtaIVADebito, Haber: doc.IVA},
 		{Codigo: contabilidad.CtaIGTFPorPagar, Haber: doc.IGTF},
-	}
+	}...)
 	s.asentar(empresaID, actor, doc.Fecha, "Factura "+doc.NumeroCompleto+" emitida", "documento", doc.ID, lineas)
 
 	// Costo de lo vendido: sale del inventario al costo promedio del ledger, no de
@@ -1045,4 +1055,63 @@ func (s *Service) RecontabilizarPendientes(empresaID, actor string) int {
 		}
 	}
 	return n
+}
+
+/* debePorCuenta reparte lo COBRADO de un documento entre las cuentas contables
+ * de los medios con que se pagó, ya neto del vuelto entregado.
+ *
+ * Dos reglas que sostienen el reparto:
+ *
+ *   · El vuelto SALE DE DONDE SALIÓ. El efectivo devuelto baja la caja; el
+ *     entregado por pago móvil baja la cuenta de la que se transfirió. Netearlo
+ *     todo contra «Caja y bancos» —que es lo que se hacía— dejaba la cuenta del
+ *     banco sobrestimada y la caja subestimada por el mismo monto.
+ *   · Si lo cobrado supera el total (el cliente pagó de más y se le devuelve), el
+ *     exceso ya está descontado por el vuelto: se asienta lo que quedó.
+ */
+func (s *Service) debePorCuenta(doc fiscal.Documento) []contabilidad.Linea {
+	porCodigo := map[string]float64{}
+	orden := []string{}
+	sumar := func(codigo string, monto float64) {
+		if codigo == "" {
+			codigo = contabilidad.CtaCajaBancos
+		}
+		if _, visto := porCodigo[codigo]; !visto {
+			orden = append(orden, codigo)
+		}
+		porCodigo[codigo] = round2(porCodigo[codigo] + monto)
+	}
+
+	contable := func(cuentaID string) string {
+		if cuentaID == "" || s.cuentasCobro == nil {
+			return contabilidad.CtaCajaBancos
+		}
+		if cc, ok := s.cuentasCobro.ByID(doc.EmpresaID, cuentaID); ok {
+			return cc.CuentaContable(contabilidad.CtaCajaBancos)
+		}
+		return contabilidad.CtaCajaBancos
+	}
+
+	for _, pg := range doc.Pagos {
+		montoBs := pg.Monto
+		if pg.EnDivisa && pg.TasaCambio > 0 {
+			montoBs = round2(pg.Monto * pg.TasaCambio)
+		}
+		sumar(contable(pg.CuentaID), montoBs)
+	}
+	for _, vp := range doc.VueltoPartes {
+		if vp.Metodo == "" || vp.Metodo == fiscal.VueltoEfectivo {
+			sumar(contabilidad.CtaCajaBancos, -vp.MontoBs)
+			continue
+		}
+		sumar(contable(vp.CuentaID), -vp.MontoBs)
+	}
+
+	out := make([]contabilidad.Linea, 0, len(orden))
+	for _, c := range orden {
+		if m := porCodigo[c]; m > 0.004 || m < -0.004 {
+			out = append(out, contabilidad.Linea{Codigo: c, Debe: m})
+		}
+	}
+	return out
 }

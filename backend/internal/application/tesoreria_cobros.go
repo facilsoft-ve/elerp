@@ -293,9 +293,19 @@ type SaldoCuenta struct {
 	Tipo     string `json:"tipo"`
 	Datos    string `json:"datos"`
 	Moneda   string `json:"moneda"`
-	// Entradas en la moneda de la cuenta, y su equivalente en bolívares.
-	Entradas    float64 `json:"entradas"`
-	EntradasBs  float64 `json:"entradasBs"`
+	// CodigoContable es dónde asienta esta cuenta. Viaja en la proyección para que
+	// la pantalla lo muestre y se pueda corregir desde donde se ve el saldo.
+	CodigoContable string `json:"codigoContable,omitempty"`
+	// Entradas es el SALDO NETO de la cuenta (entradas menos salidas) en su
+	// moneda, y EntradasBs su equivalente en bolívares. Se llama así por
+	// compatibilidad con las pantallas que ya lo leen.
+	Entradas   float64 `json:"entradas"`
+	EntradasBs float64 `json:"entradasBs"`
+	/* Salidas es lo que SALIÓ de la cuenta: hoy, el vuelto entregado por pago
+	 * móvil. Se informa aparte del neto porque un saldo que solo baja no explica
+	 * por qué, y la conciliación bancaria necesita saber qué débito buscar. */
+	Salidas     float64 `json:"salidas"`
+	SalidasBs   float64 `json:"salidasBs"`
 	Operaciones int     `json:"operaciones"`
 }
 
@@ -324,6 +334,7 @@ func (s *Service) SaldosDeTesoreria(empresaID string) ResumenTesoreria {
 	for _, cc := range s.cuentasCobro.List(empresaID) {
 		porCuenta[cc.ID] = &SaldoCuenta{
 			CuentaID: cc.ID, Titular: cc.Titular, Tipo: cc.Tipo, Datos: cc.Datos, Moneda: cc.Moneda,
+			CodigoContable: cc.CodigoContable,
 		}
 	}
 
@@ -372,6 +383,16 @@ func (s *Service) SaldosDeTesoreria(empresaID string) ResumenTesoreria {
 				} else if vp.Moneda == "" || vp.Moneda == empresa.MonedaVES {
 					res.EfectivoBs -= vp.Monto
 				}
+			} else if c, ok := porCuenta[vp.CuentaID]; ok && vp.CuentaID != "" {
+				/* SALE DE LA CUENTA. Es el egreso que faltaba: Tesorería veía entrar
+				 * dinero al pago móvil y nunca salir, así que el saldo proyectado
+				 * quedaba por encima del real y el débito aparecía en el banco a fin
+				 * de mes sin contraparte. */
+				c.Entradas = round2(c.Entradas - vp.Monto)
+				c.EntradasBs = round2(c.EntradasBs - vp.MontoBs)
+				c.Salidas = round2(c.Salidas + vp.Monto)
+				c.SalidasBs = round2(c.SalidasBs + vp.MontoBs)
+				c.Operaciones++
 			}
 			res.VueltoEntregadoBs += vp.MontoBs
 			res.TotalBs -= vp.MontoBs
@@ -392,6 +413,8 @@ func (s *Service) SaldosDeTesoreria(empresaID string) ResumenTesoreria {
 		if c := porCuenta[cc.ID]; c != nil {
 			c.Entradas = round2(c.Entradas)
 			c.EntradasBs = round2(c.EntradasBs)
+			c.Salidas = round2(c.Salidas)
+			c.SalidasBs = round2(c.SalidasBs)
 			res.Cuentas = append(res.Cuentas, *c)
 		}
 	}

@@ -31,6 +31,10 @@ func (s *Server) rutasFacturacionDigital(api fiber.Router) {
 	// y dice si la cuenta está habilitada para emitir.
 	g.Post("/probar", admin, s.handleProbarDigital)
 	g.Get("/emisiones", admin, s.handleEmisionesDigitales)
+	// Reintentar lo rechazado, cuando la causa ya se corrigió. No es automático a
+	// propósito: repetir un 400 a ciegas repite el mismo error.
+	g.Post("/emisiones/:id/reintentar", admin, s.handleReintentarEmision)
+	g.Post("/emisiones/reintentar-rechazadas", admin, s.handleReintentarRechazadas)
 }
 
 func (s *Server) handleConfigDigital(c *fiber.Ctx) error {
@@ -247,4 +251,17 @@ func (s *Server) handleQRFactura(c *fiber.Ctx) error {
 	// reimprimir un ticket no vuelve a generarlo.
 	c.Set("Cache-Control", "public, max-age=604800, immutable")
 	return c.Send(png)
+}
+
+func (s *Server) handleReintentarEmision(c *fiber.Ctx) error {
+	out, err := s.svc.ReintentarEmision(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleReintentarRechazadas(c *fiber.Ctx) error {
+	n := s.svc.ReintentarRechazadas(empresaIDOf(c), principalOf(c).UserID, origen(c))
+	return c.JSON(fiber.Map{"reencoladas": n})
 }

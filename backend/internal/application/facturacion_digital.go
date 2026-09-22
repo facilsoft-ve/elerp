@@ -545,6 +545,57 @@ func (s *Service) completarEnlaces(ctx context.Context, cli *unidigital.Cliente,
 	s.emisionesDigitales.Update(e)
 }
 
+/* ReintentarEmision devuelve una emisión RECHAZADA a la cola.
+ *
+ * El rechazo no se reintenta solo, y eso está bien: un 400 es una regla de
+ * negocio incumplida, y repetirlo a ciegas repite el mismo error. Pero tiene que
+ * poder reintentarse A MANO cuando la causa se corrigió —que es el caso real:
+ * un error nuestro de mapeo dejó facturas ya cobradas sin poder fiscalizarse, y
+ * sin esto quedaban muertas para siempre.
+ *
+ * CONSERVA SU NÚMERO. El correlativo se reservó y la imprenta nunca lo aceptó,
+ * así que sigue libre del lado de ella; y como la serie usa nuestro id como
+ * clave de idempotencia (`useSystemReferenceAsKey`), si por lo que fuera sí lo
+ * hubiera aceptado, lo deduplica en vez de emitir dos veces.
+ */
+func (s *Service) ReintentarEmision(empresaID, id, actor, origen string) (fd.Emision, error) {
+	if s.emisionesDigitales == nil {
+		return fd.Emision{}, ErrDigitalNoDisponible
+	}
+	e, ok := s.emisionesDigitales.ByID(empresaID, id)
+	if !ok {
+		return fd.Emision{}, errors.New("esa emisión no existe")
+	}
+	if e.Estado != fd.EstadoRechazado {
+		return fd.Emision{}, errors.New("solo se puede reintentar una emisión rechazada")
+	}
+	e.Estado = fd.EstadoPendiente
+	e.ProximoIntento = ""
+	e.Actualizada = ahora()
+	out, _ := s.emisionesDigitales.Update(e)
+	s.audit.Append(evento(empresaID, actor, origen, "facturaciondigital.reintentar", e.DocumentoID, ""))
+	return out, nil
+}
+
+// ReintentarRechazadas devuelve a la cola TODAS las rechazadas de una empresa.
+// Es la herramienta para después de corregir un error de mapeo: rechazo por
+// rechazo serían veinte clics para arreglar un problema que fue uno solo.
+func (s *Service) ReintentarRechazadas(empresaID, actor, origen string) int {
+	if s.emisionesDigitales == nil {
+		return 0
+	}
+	n := 0
+	for _, e := range s.emisionesDigitales.List(empresaID) {
+		if e.Estado != fd.EstadoRechazado {
+			continue
+		}
+		if _, err := s.ReintentarEmision(empresaID, e.ID, actor, origen); err == nil {
+			n++
+		}
+	}
+	return n
+}
+
 // registrarFallo anota el intento y decide si se reintenta. Un 400 NO se
 // reintenta solo: es una regla de negocio incumplida, y repetirlo a ciegas
 // quema otro correlativo y vuelve a fallar igual.

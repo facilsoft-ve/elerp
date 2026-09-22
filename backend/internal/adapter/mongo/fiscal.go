@@ -215,6 +215,14 @@ func (r *CuentaCobroRepo) Create(c fiscal.CuentaCobro) fiscal.CuentaCobro {
 	return c
 }
 
+func (r *CuentaCobroRepo) Update(c fiscal.CuentaCobro) (fiscal.CuentaCobro, bool) {
+	if _, ok := r.ByID(c.EmpresaID, c.ID); !ok {
+		return fiscal.CuentaCobro{}, false
+	}
+	r.c.replace(c.ID, c)
+	return c, true
+}
+
 // --- Métodos de pago ---
 
 type MetodoPagoRepo struct{ c coll[fiscal.MetodoPago] }

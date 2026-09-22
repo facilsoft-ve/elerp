@@ -1312,3 +1312,109 @@ func skuExentoDemo(t *testing.T, svc *application.Service) string {
 	t.Fatal("el catálogo demo no trae ningún producto exento")
 	return ""
 }
+
+/* EL VUELTO POR PAGO MÓVIL SALE DE UNA CUENTA, y Tesorería tiene que verlo.
+ *
+ * Sin esto la cuenta mostraba lo que entró y nunca lo que salió: el saldo
+ * proyectado quedaba por encima del real y el débito aparecía en el banco a fin
+ * de mes sin contraparte en ElERP.
+ */
+func TestTesoreria_ElVueltoPorPagoMovilSaleDeSuCuenta(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	if _, err := svc.AbrirCajaConFondo(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo, 100); err != nil {
+		t.Fatalf("abrir: %v", err)
+	}
+	antes := svc.SaldosDeTesoreria(empDemo)
+	saldoPM := func(r application.ResumenTesoreria) (float64, float64) {
+		for _, c := range r.Cuentas {
+			if c.Tipo == fiscal.PagoPagoMovil {
+				return c.EntradasBs, c.SalidasBs
+			}
+		}
+		t.Fatal("la empresa demo no tiene cuenta de pago móvil")
+		return 0, 0
+	}
+	entradaAntes, salidaAntes := saldoPM(antes)
+
+	if _, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{{SKU: skuExentoDemo(t, svc), Cantidad: 1, PrecioUnitario: 890}},
+		Pagos:  []application.PagoEntrada{{Metodo: "efectivo_bs", Monto: 1000, Moneda: "VES"}},
+		VueltoPartes: []application.VueltoParteEntrada{
+			{Moneda: "VES", Metodo: "pago_movil", Monto: 110, Banco: "0102", Cedula: "12345678", Telefono: "04141234567"},
+		},
+	}); err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+
+	entradaDespues, salidaDespues := saldoPM(svc.SaldosDeTesoreria(empDemo))
+	if salidaDespues-salidaAntes != 110 {
+		t.Fatalf("la salida de la cuenta = %v, debería ser 110", salidaDespues-salidaAntes)
+	}
+	if entradaDespues-entradaAntes != -110 {
+		t.Fatalf("el saldo neto tenía que bajar 110, cambió %v", entradaDespues-entradaAntes)
+	}
+}
+
+/* EL ASIENTO REPARTE EL DEBE POR CUENTA CONTABLE.
+ *
+ * Antes todo lo cobrado caía en «1101 Caja y bancos», daba igual el medio: el
+ * libro no distinguía la plata del cajón de la del banco y ninguna cuenta se
+ * podía conciliar. Y el vuelto por pago móvil se neteaba contra la caja, que es
+ * de donde NO salió.
+ */
+func TestAsiento_ElDebeSeRepartePorCuentaContable(t *testing.T) {
+	svc, st := nuevoServicio(t)
+	if _, err := svc.AbrirCajaConFondo(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo, 100); err != nil {
+		t.Fatalf("abrir: %v", err)
+	}
+	// La cuenta de pago móvil apunta a su propia cuenta del plan.
+	var pmID string
+	for _, cc := range svc.CuentasCobro(empDemo) {
+		if cc.Tipo == fiscal.PagoPagoMovil {
+			pmID = cc.ID
+			cc.CodigoContable = "1101"
+			st.CuentasCobro.Create(cc)
+			break
+		}
+	}
+	if pmID == "" {
+		t.Fatal("la empresa demo no tiene cuenta de pago móvil")
+	}
+
+	// Se cobra mitad en efectivo y mitad por pago móvil, y se devuelve por pago
+	// móvil: el vuelto tiene que bajar la cuenta del banco, no la caja.
+	doc, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{{SKU: skuExentoDemo(t, svc), Cantidad: 1, PrecioUnitario: 890}},
+		Pagos: []application.PagoEntrada{
+			{Metodo: "efectivo_bs", Monto: 500, Moneda: "VES"},
+			{Metodo: "pago_movil", CuentaID: pmID, Monto: 500, Moneda: "VES", Referencia: "0001"},
+		},
+		VueltoPartes: []application.VueltoParteEntrada{
+			{Moneda: "VES", Metodo: "pago_movil", Monto: 110, Banco: "0102", Cedula: "12345678", Telefono: "04141234567", CuentaID: pmID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+
+	// LO QUE NO SE NEGOCIA: el asiento cuadra. Si el reparto se equivoca en un
+	// céntimo, el libro deja de cuadrar y eso se nota acá y no en una auditoría.
+	var debe, haber float64
+	for _, a := range svc.LibroDiario(empDemo) {
+		if a.RefTipo != "documento" || a.RefID != doc.ID {
+			continue
+		}
+		for _, l := range a.Lineas {
+			debe = redondeoPrueba(debe + l.Debe)
+			haber = redondeoPrueba(haber + l.Haber)
+		}
+	}
+	if debe == 0 {
+		t.Fatal("la venta no generó asiento")
+	}
+	if debe != haber {
+		t.Fatalf("el asiento no cuadra: debe %v, haber %v", debe, haber)
+	}
+}
+
+func redondeoPrueba(v float64) float64 { return float64(int64(v*100+0.5)) / 100 }

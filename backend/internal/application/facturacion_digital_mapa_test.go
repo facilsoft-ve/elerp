@@ -370,3 +370,42 @@ func TestImprenta_ElReceptorTieneQueEstarIdentificado(t *testing.T) {
 		t.Fatalf("el documento completo no debería tener faltantes: %v", falta)
 	}
 }
+
+/* CADA CAMPO TIENE SU ESPEJO EN BOLÍVARES, no solo los totales.
+ *
+ * La imprenta compara uno por uno. Este caso —una venta con IGTF— se rechazó en
+ * producción con la factura ya cobrada, porque la prueba que validó el espejo no
+ * tenía IGTF y el hueco no se veía. Va con recargo suntuario además, que es el
+ * otro par que faltaba.
+ */
+func TestImprenta_ElEspejoEnBolivaresNoSeSaltaNingunCampo(t *testing.T) {
+	doc := docSimple()
+	doc.IGTF = 30
+	doc.AlicuotaIGTF = 0.03
+	doc.Total = 146
+	doc.Impuestos = []fiscal.DocumentoImpuesto{
+		{Tipo: fiscal.TipoGeneral, Porcentaje: 0.16, Base: 100, Monto: 16},
+		{Tipo: fiscal.TipoAdicional, Porcentaje: 0.15, Base: 100, Monto: 15},
+	}
+	m := mapear(t, doc)
+
+	// Todo campo X que la imprenta compara tiene que traer su XVES con el mismo
+	// valor: la factura está en bolívares, así que la conversión es la identidad.
+	for _, campo := range []string{
+		"ExemptAmount", "TaxBase", "TaxBaseReduced", "TaxBaseSumptuary",
+		"Subtotal", "SubtotalPlusDiscount", "TaxAmount", "TaxAmountReduced",
+		"TaxAmountSumptuary", "Total", "GrandTotal", "IGTFBaseAmount", "IGTFAmount",
+	} {
+		v, hay := m[campo]
+		if !hay {
+			continue // el campo no aplica a este documento
+		}
+		espejo, hayEspejo := m[campo+"VES"]
+		if !hayEspejo {
+			t.Fatalf("%s viaja sin su espejo %sVES: la imprenta rechaza el documento entero", campo, campo)
+		}
+		if v != espejo {
+			t.Fatalf("%s (%v) y %sVES (%v) tienen que coincidir en una factura en Bs", campo, v, campo, espejo)
+		}
+	}
+}

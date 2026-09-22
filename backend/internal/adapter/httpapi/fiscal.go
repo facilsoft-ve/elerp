@@ -92,6 +92,9 @@ func (s *Server) registerFiscal(r fiber.Router) {
 	tes := r.Group("/tesoreria", s.requireRoles(usuario.RolDueno, usuario.RolDesarrollador, usuario.RolContadora, usuario.RolVendedor))
 	tes.Get("/cuentas-cobro", s.handleCuentasCobro)
 	tes.Post("/cuentas-cobro", s.requireRoles(usuario.RolDueno, usuario.RolDesarrollador, usuario.RolContadora), s.handleCrearCuentaCobro)
+	// Editar la ficha: a qué banco va la plata y en qué cuenta del plan asienta.
+	// Es configuración, no ledger: se corrige. Lo ya asentado no se toca.
+	tes.Patch("/cuentas-cobro/:id", s.requireRoles(usuario.RolDueno, usuario.RolDesarrollador, usuario.RolContadora), s.handleActualizarCuentaCobro)
 
 	// Configuración › Métodos de pago. Los ven quienes acceden a Ajustes
 	// (Dueña/Desarrollador/Contadora); solo la Dueña/Desarrollador los modifican.
@@ -698,6 +701,18 @@ func (s *Server) handleCrearCuentaCobro(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+func (s *Server) handleActualizarCuentaCobro(c *fiber.Ctx) error {
+	var in fiscal.CuentaCobro
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.ActualizarCuentaCobro(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c), in)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
 }
 
 func (s *Server) handleMetodosPago(c *fiber.Ctx) error {

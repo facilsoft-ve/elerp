@@ -3,6 +3,7 @@ package application
 import (
 	"errors"
 	"sort"
+	"strings"
 
 	"github.com/mornix/elerp/internal/domain/empresa"
 	"github.com/mornix/elerp/internal/domain/fiscal"
@@ -18,6 +19,38 @@ func (s *Service) CrearCuentaCobro(empresaID, actor, origen string, c fiscal.Cue
 	c.EmpresaID = empresaID
 	out := s.cuentasCobro.Create(c)
 	s.audit.Append(evento(empresaID, actor, origen, "tesoreria.cuenta.crear", out.ID, out.Tipo))
+	return out, nil
+}
+
+// ErrCuentaCobroNoExiste indica que la cuenta no pertenece a la empresa.
+var ErrCuentaCobroNoExiste = errors.New("la cuenta de cobro no existe")
+
+/* ActualizarCuentaCobro edita la ficha de una cuenta de cobro.
+ *
+ * Lo que más pesa acá es CodigoContable: es dónde asienta lo que entra y sale
+ * por esta cuenta. Cambiarlo NO reescribe los asientos ya hechos —eso sería
+ * reescribir el libro— y es lo correcto: el histórico refleja dónde se asentó
+ * cuando se asentó.
+ */
+func (s *Service) ActualizarCuentaCobro(empresaID, id, actor, origen string, c fiscal.CuentaCobro) (fiscal.CuentaCobro, error) {
+	cur, ok := s.cuentasCobro.ByID(empresaID, id)
+	if !ok {
+		return fiscal.CuentaCobro{}, ErrCuentaCobroNoExiste
+	}
+	cur.Titular = strings.TrimSpace(c.Titular)
+	cur.Datos = strings.TrimSpace(c.Datos)
+	cur.CodigoContable = strings.TrimSpace(c.CodigoContable)
+	if t := strings.TrimSpace(c.Tipo); t != "" {
+		cur.Tipo = t
+	}
+	if m := strings.TrimSpace(c.Moneda); m != "" {
+		cur.Moneda = m
+	}
+	out, ok := s.cuentasCobro.Update(cur)
+	if !ok {
+		return fiscal.CuentaCobro{}, ErrCuentaCobroNoExiste
+	}
+	s.audit.Append(evento(empresaID, actor, origen, "tesoreria.cuenta.editar", out.ID, out.CodigoContable))
 	return out, nil
 }
 

@@ -153,6 +153,11 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
   const tasa = useTasa()
   const toast = useToast()
   const cuentas = db.CUENTAS_COBRO || []
+  /* La cuenta de la que sale el vuelto por pago móvil. Con una sola, es esa y no
+   * se pregunta; con varias se deja que el servidor decida no adivinar: inventar
+   * de cuál cuenta se debitó es peor que dejarlo sin atribuir. */
+  const cuentasPagoMovil = cuentas.filter((c) => c.tipo === 'pago_movil')
+  const cuentaVueltoPagoMovil = cuentasPagoMovil.length === 1 ? cuentasPagoMovil[0].id : ''
 
   // Divisas activas de la empresa (multimoneda). Sin db.TASAS (backend viejo) se
   // cae a solo el dólar: así el POS de siempre no cambia.
@@ -550,7 +555,13 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
           vueltoPartes: partesCalc.map((p) => ({
             moneda: p.moneda, metodo: p.metodo, monto: p.monto,
             ...(p.metodo === 'pago_movil'
-              ? { banco: p.banco, cedula: String(p.cedula || '').trim(), telefono: String(p.telefono || '').trim() }
+              ? {
+                banco: p.banco, cedula: String(p.cedula || '').trim(), telefono: String(p.telefono || '').trim(),
+                // DE CUÁL DE NUESTRAS CUENTAS sale. El banco/cédula/teléfono de
+                // arriba son del CLIENTE —a dónde se le manda—; esto es el egreso.
+                // Con una sola cuenta de pago móvil el servidor la resuelve solo.
+                cuentaId: cuentaVueltoPagoMovil,
+              }
               : {}),
           })),
         } : {}),
