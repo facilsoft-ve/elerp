@@ -304,11 +304,29 @@ func sembrarNichos(st *Store, semilla *inmem.Store, refrescar bool) {
 				st.Planos.Upsert(snap.Plano)
 			}
 		}
-		if len(snap.Mesas) > 0 && len(st.Mesas.List(n.EmpresaID, "")) == 0 {
-			for _, m := range snap.Mesas {
-				st.Mesas.c.insert(m)
+		/* MESAS del salón. Se repone lo que FALTE, no todo o nada.
+		 *
+		 * Antes solo se sembraba con el salón vacío, y eso dejaba sin arreglo un
+		 * salón a medias — que es exactamente como quedó cuando el `replace` de
+		 * Mongo, que filtraba solo por id y no por tenant, se llevó mesas del demo
+		 * base hacia copias de demostración. Reponer por nombre es idempotente y
+		 * devuelve el salón completo sin tocar lo que alguien haya movido. */
+		if len(snap.Mesas) > 0 {
+			hay := map[string]bool{}
+			for _, m := range st.Mesas.List(n.EmpresaID, "") {
+				hay[m.Nombre] = true
 			}
-			log.Printf("Mongo: %s → %d mesas y plano del salón", n.Giro, len(snap.Mesas))
+			repuestas := 0
+			for _, m := range snap.Mesas {
+				if hay[m.Nombre] {
+					continue
+				}
+				st.Mesas.c.insert(m)
+				repuestas++
+			}
+			if repuestas > 0 {
+				log.Printf("Mongo: %s → %d mesa(s) repuesta(s) en el salón", n.Giro, repuestas)
+			}
 		}
 	}
 }
