@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"errors"
+
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/mornix/elerp/internal/application"
@@ -22,6 +24,10 @@ func (s *Server) registerContabilidad(r fiber.Router) {
 
 	g := r.Group("/contabilidad", acceso)
 	g.Get("/plan", s.handlePlanDeCuentas)
+	// En qué cuenta se acumula cada rubro. Cuelga de Contabilidad y no de Inventario
+	// porque la decisión es contable: quién la toma es la contadora, no el almacén.
+	g.Get("/rubros", s.handleRubrosContables)
+	g.Patch("/rubros/:id/cuenta", s.requireRoles(usuario.RolDueno, usuario.RolDesarrollador, usuario.RolContadora), s.handleCuentaRubro)
 	// Edición del plan de cuentas (maestro editable; mismo gate del grupo). No hay
 	// borrado: solo desactivar. El código es inmutable.
 	g.Post("/plan", s.handleCrearCuenta)
@@ -49,6 +55,31 @@ func (s *Server) registerContabilidad(r fiber.Router) {
 type cuentaView struct {
 	contabilidad.Cuenta
 	Base bool `json:"base"`
+}
+
+// handleRubrosContables lista los rubros con la cuenta en la que se acumulan.
+func (s *Server) handleRubrosContables(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"rubros": s.svc.Rubros(empresaIDOf(c))})
+}
+
+func (s *Server) handleCuentaRubro(c *fiber.Ctx) error {
+	var in struct {
+		// Cuenta vacía devuelve el rubro a la cuenta general, que es un cambio
+		// legítimo: nadie queda atado a haber separado una categoría.
+		Cuenta string `json:"cuenta"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.ActualizarCuentaRubro(empresaIDOf(c), c.Params("id"), in.Cuenta, principalOf(c).UserID, origen(c))
+	if err != nil {
+		estado := fiber.StatusBadRequest
+		if errors.Is(err, application.ErrRubroNoExiste) {
+			estado = fiber.StatusNotFound
+		}
+		return c.Status(estado).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
 }
 
 func (s *Server) handlePlanDeCuentas(c *fiber.Ctx) error {

@@ -7,6 +7,8 @@ import { Kardex } from './Kardex.jsx'
 import { Transferencias } from './Transferencias.jsx'
 import { Movimientos } from './Movimientos.jsx'
 import { ComprasRecepcion } from './ComprasRecepcion.jsx'
+import { Conteo } from './Conteo.jsx'
+import { Valoracion } from './Valoracion.jsx'
 
 // Contenedor del módulo Inventario. Las 4 vistas viven en pestañas. Acepta rutas
 // "inventario", "inventario:<sub>" y "kardex:<sku>" (esta última abre Kardex con
@@ -18,6 +20,8 @@ const TABS = [
   { id: 'kardex', label: 'Kardex', icon: <Icon.History size={15} /> },
   { id: 'movimientos', label: 'Movimientos', icon: <Icon.ArrowDown size={15} /> },
   { id: 'transferencias', label: 'Transferencias', icon: <Icon.ArrowLeftRight size={15} /> },
+  { id: 'conteo', label: 'Conteo físico', icon: <Icon.ClipboardList size={15} /> },
+  { id: 'valoracion', label: 'Valoración', icon: <Icon.Banknote size={15} /> },
 ]
 
 export function Inventario({ route }) {
@@ -40,7 +44,7 @@ export function Inventario({ route }) {
       <PageHeader
         breadcrumb={['Inventario', TABS.find((t) => t.id === tab)?.label]}
         title="Inventario"
-        sub="Catálogo, existencias por sede, recepción de mercancía, Kardex valorado y transferencias entre sedes."
+        sub="Catálogo, existencias por sede, recepción de mercancía, Kardex valorado, transferencias, conteo físico y valoración."
         tabs={TABS} activeTab={tab} onTab={setTab} />
       {tab === 'catalogo' ? <Catalogo onKardex={openKardex} /> : null}
       {tab === 'existencias' ? <Existencias onKardex={openKardex} /> : null}
@@ -48,6 +52,8 @@ export function Inventario({ route }) {
       {tab === 'kardex' ? <Kardex sku={kardexSku} setSku={setKardexSku} /> : null}
       {tab === 'movimientos' ? <Movimientos onKardex={openKardex} /> : null}
       {tab === 'transferencias' ? <Transferencias /> : null}
+      {tab === 'conteo' ? <Conteo /> : null}
+      {tab === 'valoracion' ? <Valoracion /> : null}
     </div>
   )
 }

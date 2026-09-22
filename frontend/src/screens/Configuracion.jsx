@@ -4108,6 +4108,7 @@ function Almacenes() {
       ) : null}
 
       <TiposDeOperacion puedeEditar={puedeEditar} almacenes={lista} sedeNombre={sedeNombre} toast={toast} />
+      <CuentasPorRubro puedeEditar={puedeEditar} toast={toast} />
     </div>
   )
 }
@@ -4871,6 +4872,92 @@ function Integraciones() {
       <div className="text-[11.5px] text-slate-400 px-1">
         Solo se muestra «Conectado» cuando la integración está realmente en uso. Lo demás indica con honestidad qué falta.
       </div>
+    </div>
+  )
+}
+
+/* CUENTA DE INVENTARIO POR RUBRO.
+ *
+ * Vive aquí, con los almacenes, aunque la decisión sea contable: quien separa
+ * categorías de inventario está pensando en el almacén, y obligarle a buscarlo en
+ * otra pantalla lo convertiría en una opción que nadie encuentra.
+ *
+ * Al asignar una cuenta, el inventario que el rubro YA TIENE se reclasifica con un
+ * asiento. Sin eso, activar esto teniendo mercancía dejaría el informe de
+ * valoración descuadrado desde el primer día — y con razón.
+ */
+function CuentasPorRubro({ puedeEditar, toast }) {
+  const [rubros, setRubros] = useState(null)
+  const [cuentas, setCuentas] = useState([])
+  const [guardando, setGuardando] = useState('')
+
+  const cargar = async () => {
+    try { setRubros((await api.rubrosContables())?.rubros || []) } catch { setRubros([]) }
+  }
+  useEffect(() => {
+    cargar()
+    api.planDeCuentas?.()
+      .then((r) => setCuentas((r?.cuentas || r || []).filter((c) => c.tipo === 'activo')))
+      .catch(() => setCuentas([]))
+  }, [])
+
+  const asignar = async (rubro, cuenta) => {
+    setGuardando(rubro.id)
+    try {
+      await api.actualizarCuentaRubro(rubro.id, cuenta)
+      toast({
+        title: cuenta ? 'Cuenta asignada' : 'Vuelve a la cuenta general',
+        body: `${rubro.nombre}. El inventario que ya tenía se reclasificó con un asiento.`,
+      })
+      cargar()
+    } catch (e) {
+      toast({ title: 'No se pudo asignar', body: e?.message || 'Error', kind: 'error' })
+    } finally { setGuardando('') }
+  }
+
+  if (rubros !== null && rubros.length === 0) return null
+
+  return (
+    <div className="mt-6">
+      <div className="text-[12.5px] text-slate-500 dark:text-slate-400 max-w-2xl mb-3">
+        <strong>En qué cuenta se acumula cada categoría.</strong> Por defecto todo el inventario va a una
+        sola cuenta de activo. Si una categoría debe verse aparte en el balance, dale la suya:
+        <strong> todos</strong> sus movimientos pasarán a ella —compras, ventas, mermas y devoluciones— y
+        lo que ya tenía se reclasifica con un asiento.
+      </div>
+
+      {rubros === null ? (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4"><TableSkeleton rows={3} cols={2} /></div>
+      ) : (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
+          <table className="w-full text-[13px]">
+            <thead className="bg-slate-50 dark:bg-slate-800/60 text-[11.5px] uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="text-left px-4 py-2">Categoría</th>
+                <th className="text-left px-4 py-2">Cuenta de inventario</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rubros.map((r) => (
+                <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
+                  <td className="px-4 py-2">{r.nombre}</td>
+                  <td className="px-4 py-2">
+                    {puedeEditar ? (
+                      <Select value={r.cuentaInventario || ''} disabled={guardando === r.id}
+                        onChange={(e) => asignar(r, e.target.value)} className="!w-72">
+                        <option value="">La general (1201)</option>
+                        {cuentas.map((c) => <option key={c.codigo} value={c.codigo}>{c.codigo} · {c.nombre}</option>)}
+                      </Select>
+                    ) : (
+                      <span className="num text-slate-500">{r.cuentaInventario || '1201 (la general)'}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }

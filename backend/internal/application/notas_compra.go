@@ -399,15 +399,22 @@ func (s *Service) asentarNotaCompra(empresaID, actor string, n compra.NotaCompra
 	// proveedor acredita. Lo que sobra o falta entre ambos es resultado del período.
 	if n.EsDevolucion() {
 		valor := 0.0
+		// La devolución sale de la cuenta en la que la mercancía entró, que es la del
+		// rubro del producto. Devolverla contra la cuenta general dejaría la del rubro
+		// con más de lo que hay en el anaquel, para siempre.
+		salidaPorProducto := montoPorProducto{}
 		for _, l := range n.Lineas {
-			valor += l.Cantidad * l.CostoSalida
+			importe := l.Cantidad * l.CostoSalida
+			valor += importe
+			if importe > 0.004 {
+				salidaPorProducto[l.ProductoID] += importe
+			}
 		}
 		valor = round2(valor)
-		lineas := []contabilidad.Linea{
+		lineas := append([]contabilidad.Linea{
 			{Codigo: contabilidad.CtaCuentasPorPagar, Debe: round2(total)},
 			{Codigo: contabilidad.CtaIVACreditoFiscal, Haber: round2(iva)},
-			{Codigo: contabilidad.CtaInventario, Haber: valor},
-		}
+		}, s.lineasDeInventario(empresaID, salidaPorProducto, false)...)
 		// base > valor ⇒ te acreditan más de lo que valía: ganancia (al haber).
 		// base < valor ⇒ sale del inventario más valor del que te devuelven: pérdida.
 		// Se compara antes de restar y cada rama redondea una magnitud positiva: deja

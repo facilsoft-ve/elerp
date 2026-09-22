@@ -33,6 +33,16 @@ func (s *Server) registerInventario(r fiber.Router) {
 	g.Post("/productos/:sku/trasladar", s.escribirInventario, s.handleTrasladar)
 	g.Get("/pendiente-de-ubicar", s.handlePendienteDeUbicar)
 
+	// VALORACIÓN: dónde está el valor y si coincide con la contabilidad.
+	g.Get("/valoracion", s.handleValoracion)
+	// CORRECCIÓN DE COSTO: revaluar sin mover unidades.
+	g.Post("/existencias/:sku/corregir-costo", s.escribirInventario, s.handleCorregirCosto)
+	// CONTEO FÍSICO: la hoja entera en una operación. La vista previa NO escribe, y
+	// por eso no exige el permiso de escritura: es lo que hay que poder mirar antes
+	// de decidir.
+	g.Post("/conteo/previsualizar", s.handlePrevisualizarConteo)
+	g.Post("/conteo", s.escribirInventario, s.handleAplicarConteo)
+
 	// APARTADOS: mercancía comprometida que todavía no salió. Crear y despachar
 	// tocan el inventario; listar, no.
 	g.Get("/apartados", s.handleApartados)
@@ -418,6 +428,81 @@ func respuestaApartado(c *fiber.Ctx, out inventario.Apartado, err error) error {
 		estado = fiber.StatusConflict
 	}
 	return c.Status(estado).JSON(fiber.Map{"error": err.Error()})
+}
+
+func (s *Server) handleValoracion(c *fiber.Ctx) error {
+	// Sin ?sede= mira la empresa entera, que es lo único que se puede comparar con
+	// el diario: el saldo de una cuenta contable no es de una sede.
+	return c.JSON(s.svc.Valoracion(empresaIDOf(c), c.Query("sede")))
+}
+
+func (s *Server) handleCorregirCosto(c *fiber.Ctx) error {
+	var in struct {
+		Costo  float64 `json:"costo"`
+		Motivo string  `json:"motivo"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.CorregirCosto(empresaIDOf(c), s.sedeParam(c), c.Params("sku"), in.Costo,
+		in.Motivo, principalOf(c).UserID, origen(c))
+	if err != nil {
+		estado := fiber.StatusBadRequest
+		// «No hay existencia que revaluar» es un conflicto de estado, no un dato mal
+		// escrito: la petición era correcta, el almacén es el que está vacío.
+		if errors.Is(err, application.ErrCorreccionSinExistencia) || errors.Is(err, application.ErrCorreccionSinCambio) {
+			estado = fiber.StatusConflict
+		}
+		return c.Status(estado).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+// conteoBody es la hoja de conteo.
+type conteoBody struct {
+	AlmacenID string `json:"almacenId"`
+	Motivo    string `json:"motivo"`
+	Lineas    []struct {
+		SKU         string  `json:"sku"`
+		UbicacionID string  `json:"ubicacionId"`
+		Contado     float64 `json:"contado"`
+		Lote        string  `json:"lote"`
+	} `json:"lineas"`
+}
+
+func (in conteoBody) aDominio() []application.LineaConteo {
+	out := make([]application.LineaConteo, 0, len(in.Lineas))
+	for _, l := range in.Lineas {
+		out = append(out, application.LineaConteo{
+			SKU: l.SKU, UbicacionID: l.UbicacionID, Contado: l.Contado, Lote: l.Lote,
+		})
+	}
+	return out
+}
+
+func (s *Server) handlePrevisualizarConteo(c *fiber.Ctx) error {
+	var in conteoBody
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.PrevisualizarConteo(empresaIDOf(c), s.sedeParam(c), in.AlmacenID, in.aDominio())
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleAplicarConteo(c *fiber.Ctx) error {
+	var in conteoBody
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.AplicarConteo(empresaIDOf(c), s.sedeParam(c), in.AlmacenID, in.Motivo,
+		in.aDominio(), principalOf(c).UserID, origen(c))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
 }
 
 func (s *Server) handleTrasladar(c *fiber.Ctx) error {

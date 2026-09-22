@@ -651,6 +651,19 @@ export const api = {
   sembrarTiposOperacion: () => request('/api/config/operaciones/sembrar', { method: 'POST' }),
   // Lo que espera en el muelle el segundo paso de una recepción.
   pendienteDeUbicar: () => request('/api/inventario/pendiente-de-ubicar'),
+  // VALORACIÓN: dónde está el valor y si coincide con la contabilidad. Sin sede
+  // mira la empresa entera, que es lo único comparable con el diario.
+  valoracion: (sedeId = '') => request('/api/inventario/valoracion' + (sedeId ? '?sede=' + encodeURIComponent(sedeId) : '')),
+  // CORRECCIÓN DE COSTO: revaluar sin mover unidades.
+  corregirCosto: (sku, body) =>
+    request(`/api/inventario/existencias/${encodeURIComponent(sku)}/corregir-costo`, { method: 'POST', body: JSON.stringify(body) }),
+  // CONTEO FÍSICO. Previsualizar NO escribe: es lo que hay que mirar antes de aplicar.
+  previsualizarConteo: (body) => request('/api/inventario/conteo/previsualizar', { method: 'POST', body: JSON.stringify(body) }),
+  aplicarConteo: (body) => request('/api/inventario/conteo', { method: 'POST', body: JSON.stringify(body) }),
+  // Cuentas de inventario por rubro (Contabilidad).
+  rubrosContables: () => request('/api/contabilidad/rubros'),
+  actualizarCuentaRubro: (id, cuenta) =>
+    request(`/api/contabilidad/rubros/${encodeURIComponent(id)}/cuenta`, { method: 'PATCH', body: JSON.stringify({ cuenta }) }),
   // APARTADOS: mercancía comprometida que todavía no salió.
   apartados: () => request('/api/inventario/apartados'),
   crearApartado: (body) => request('/api/inventario/apartados', { method: 'POST', body: JSON.stringify(body) }),

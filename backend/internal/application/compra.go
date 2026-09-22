@@ -527,6 +527,11 @@ func (s *Service) RecibirOrdenCompra(empresaID, id, actor, origen string, lineas
 	// precisamente que nadie decide dónde va la mercancía hasta haberla revisado.
 	// Colocarla ya en su sitio y llamarlo «dos pasos» sería un paso con un rodeo.
 	almacenID := s.almacenParaEscritura(empresaID, o.SedeID, "")
+	// Desglose por producto de ESTA recepción, para el asiento. Se arma aquí y no
+	// se deduce después del ledger porque una orden admite varias recepciones: leer
+	// los movimientos de la orden daría el acumulado de todas, y este asiento es
+	// solo de la que se está registrando.
+	costoPorProducto := montoPorProducto{}
 	enDosPasos := false
 	muelle := ""
 	if op, hay := s.OperacionPara(empresaID, o.SedeID, almacen.ClaseRecepcion); hay {
@@ -562,6 +567,7 @@ func (s *Service) RecibirOrdenCompra(empresaID, id, actor, origen string, lineas
 		})
 		o.Lineas[i].CantidadRecibida = round2(o.Lineas[i].CantidadRecibida + cant)
 		costoRecepcion += cant * l.CostoUnitario
+		costoPorProducto[l.ProductoID] += cant * l.CostoUnitario
 	}
 	costoRecepcion = round2(costoRecepcion)
 
@@ -587,7 +593,7 @@ func (s *Service) RecibirOrdenCompra(empresaID, id, actor, origen string, lineas
 	// Asiento de compra por el costo recibido en esta recepción: la mercancía
 	// entra al inventario contra la deuda con el proveedor. Sin IVA: el crédito
 	// fiscal se reconoce con la factura del proveedor.
-	s.asentarCompra(empresaID, actor, out, costoRecepcion)
+	s.asentarCompra(empresaID, actor, out, costoRecepcion, costoPorProducto)
 
 	s.audit.Append(evento(empresaID, actor, origen, "compras.orden.recibir", out.NumeroCompleto, out.Estado))
 	return out, nil
@@ -595,13 +601,19 @@ func (s *Service) RecibirOrdenCompra(empresaID, id, actor, origen string, lineas
 
 // asentarCompra registra el asiento derivado de una recepción de compra: el
 // inventario sube y la cuenta por pagar al proveedor sube por el mismo monto.
-func (s *Service) asentarCompra(empresaID, actor string, o compra.OrdenCompra, costo float64) {
+func (s *Service) asentarCompra(empresaID, actor string, o compra.OrdenCompra, costo float64, porProducto montoPorProducto) {
 	if s.asientos == nil || costo <= 0.004 {
 		return
 	}
+	// La mercancía entra a la cuenta del RUBRO de cada producto (ver cuenta_rubro.go).
+	// Sin rubros con cuenta propia sale una sola línea, idéntica a la de antes.
+	inv := s.lineasDeInventario(empresaID, porProducto, true)
+	if len(inv) == 0 {
+		inv = []contabilidad.Linea{{Codigo: contabilidad.CtaInventario, Debe: round2(costo)}}
+	}
 	// La recepción ocurre AHORA (se registra al recibir la mercancía); "" ⇒ hoy.
-	s.asentar(empresaID, actor, "", "Recepción de compra "+o.NumeroCompleto, "compra", o.ID, []contabilidad.Linea{
-		{Codigo: contabilidad.CtaInventario, Debe: round2(costo)},
-		{Codigo: contabilidad.CtaCuentasPorPagar, Haber: round2(costo)},
-	})
+	s.asentar(empresaID, actor, "", "Recepción de compra "+o.NumeroCompleto, "compra", o.ID, append(
+		inv,
+		contabilidad.Linea{Codigo: contabilidad.CtaCuentasPorPagar, Haber: round2(costo)},
+	))
 }

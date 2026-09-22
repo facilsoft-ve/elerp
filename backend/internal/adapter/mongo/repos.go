@@ -226,6 +226,13 @@ func (r *RubroRepo) Create(x inventario.Rubro) inventario.Rubro {
 	r.c.insert(x)
 	return x
 }
+func (r *RubroRepo) Update(x inventario.Rubro) (inventario.Rubro, bool) {
+	if _, ok := r.c.one(map[string]any{"empresaid": x.EmpresaID, "id": x.ID}); !ok {
+		return inventario.Rubro{}, false
+	}
+	r.c.replace(x.ID, x)
+	return x, true
+}
 
 // --- Auditoría (append-only) ---
 
