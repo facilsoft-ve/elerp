@@ -134,6 +134,22 @@ func (r *CanalPedidoRepo) ByID(empresaID, id string) (pedido.Canal, bool) {
 	return pedido.Canal{}, false
 }
 
+// ByTokenHash NO filtra por empresa: quien llama es la tienda del cliente, que
+// solo trae su token. El token ES la identidad, y de él sale la empresa.
+func (r *CanalPedidoRepo) ByTokenHash(hash string) (pedido.Canal, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if hash == "" {
+		return pedido.Canal{}, false
+	}
+	for _, c := range r.items {
+		if c.TokenHash == hash {
+			return c, true
+		}
+	}
+	return pedido.Canal{}, false
+}
+
 func (r *CanalPedidoRepo) Upsert(c pedido.Canal) pedido.Canal {
 	r.mu.Lock()
 	defer r.mu.Unlock()

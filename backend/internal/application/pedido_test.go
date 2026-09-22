@@ -288,3 +288,84 @@ func TestPedido_VariasAppsALaVez(t *testing.T) {
 		t.Fatalf("modo de envío = %q, Yummy reparte con su propia flota", pa2.ModoEnvio)
 	}
 }
+
+/* LA PUERTA DE LA TIENDA WEB.
+ *
+ * El token ES la identidad del canal: de él salen la empresa y la sede. Lo que
+ * se prueba acá es que esa puerta no se abra sin llave y que la llave no se
+ * pueda leer dos veces. */
+
+func TestPedido_TokenDelCanal(t *testing.T) {
+	svc, emp := servicioPedidos(t)
+	canal, err := svc.GuardarCanalPedido(emp, actorA, origenTst, pedido.Canal{
+		Nombre: "Mi tienda", Origen: pedido.OrigenEcommerce, Activo: true,
+	})
+	if err != nil {
+		t.Fatalf("canal: %v", err)
+	}
+	// Sin token generado, nadie entra.
+	if _, ok := svc.CanalPorToken(""); ok {
+		t.Fatal("un token vacío no puede resolver un canal")
+	}
+	token, err := svc.GenerarTokenCanal(emp, canal.ID, actorA, origenTst)
+	if err != nil {
+		t.Fatalf("generar token: %v", err)
+	}
+	if len(token) < 20 {
+		t.Fatalf("token demasiado corto para ser impredecible: %q", token)
+	}
+	c, ok := svc.CanalPorToken(token)
+	if !ok || c.ID != canal.ID {
+		t.Fatal("el token tiene que resolver su canal")
+	}
+	// El token NO se guarda en claro: si se pudiera volver a leer, cualquiera con
+	// acceso a la pantalla de configuración podría llevárselo.
+	for _, x := range svc.CanalesPedido(emp) {
+		if x.ID != canal.ID {
+			continue
+		}
+		if x.TokenHash == token {
+			t.Fatal("el token quedó guardado en claro")
+		}
+		// Y lo que SÍ se puede mostrar es solo una pista para reconocerlo.
+		if x.TokenPista == "" || len(x.TokenPista) > 6 {
+			t.Fatalf("la pista del token debe ser corta: %q", x.TokenPista)
+		}
+	}
+	// Uno inventado no entra.
+	if _, ok := svc.CanalPorToken("elerp_loquesea"); ok {
+		t.Fatal("un token inventado no puede resolver un canal")
+	}
+	// REGENERAR INVALIDA EL ANTERIOR: es justo lo que hace falta cuando se
+	// sospecha que se filtró.
+	nuevo, err := svc.GenerarTokenCanal(emp, canal.ID, actorA, origenTst)
+	if err != nil {
+		t.Fatalf("regenerar: %v", err)
+	}
+	if nuevo == token {
+		t.Fatal("regenerar devolvió el mismo token")
+	}
+	if _, ok := svc.CanalPorToken(token); ok {
+		t.Fatal("el token anterior sigue sirviendo después de regenerar")
+	}
+}
+
+// Un canal APAGADO no acepta pedidos: desactivarlo es la forma de cortarle la
+// entrada a una tienda sin tener que ir a cambiar nada en su sistema.
+func TestPedido_CanalApagadoNoRecibe(t *testing.T) {
+	svc, emp := servicioPedidos(t)
+	canal, _ := svc.GuardarCanalPedido(emp, actorA, origenTst, pedido.Canal{
+		Nombre: "Tienda", Origen: pedido.OrigenEcommerce, Activo: true,
+	})
+	token, _ := svc.GenerarTokenCanal(emp, canal.ID, actorA, origenTst)
+	if _, ok := svc.CanalPorToken(token); !ok {
+		t.Fatal("con el canal activo el token debe valer")
+	}
+	canal.Activo = false
+	if _, err := svc.GuardarCanalPedido(emp, actorA, origenTst, canal); err != nil {
+		t.Fatalf("apagar: %v", err)
+	}
+	if _, ok := svc.CanalPorToken(token); ok {
+		t.Fatal("un canal apagado no puede seguir recibiendo pedidos")
+	}
+}

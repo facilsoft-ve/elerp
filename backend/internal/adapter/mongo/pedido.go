@@ -82,6 +82,16 @@ func (r *CanalPedidoRepo) List(empresaID string) []pedido.Canal {
 func (r *CanalPedidoRepo) ByID(empresaID, id string) (pedido.Canal, bool) {
 	return r.c.one(map[string]any{"empresaid": empresaID, "id": id})
 }
+
+// ByTokenHash NO filtra por empresa: quien llama es la tienda del cliente, que
+// solo trae su token. El token ES la identidad, y de él sale la empresa.
+func (r *CanalPedidoRepo) ByTokenHash(hash string) (pedido.Canal, bool) {
+	if hash == "" {
+		return pedido.Canal{}, false
+	}
+	return r.c.one(map[string]any{"tokenhash": hash})
+}
+
 func (r *CanalPedidoRepo) Upsert(c pedido.Canal) pedido.Canal {
 	if c.ID == "" {
 		c.ID = newID("can_")

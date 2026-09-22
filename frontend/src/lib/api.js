@@ -524,6 +524,9 @@ export const api = {
     { method: 'POST', body: JSON.stringify({ disponible }) }),
   canalesPedido: () => request('/api/pedidos/config/canales'),
   guardarCanalPedido: (body) => request('/api/pedidos/config/canales', { method: 'PUT', body: JSON.stringify(body) }),
+  // Genera el token del canal y lo devuelve EN CLARO una sola vez: no se puede
+  // volver a leer, así que la pantalla tiene que mostrarlo en ese momento.
+  tokenCanalPedido: (id) => request(`/api/pedidos/config/canales/${encodeURIComponent(id)}/token`, { method: 'POST' }),
   zonasPedido: () => request('/api/pedidos/config/zonas'),
   guardarZonaPedido: (body) => request('/api/pedidos/config/zonas', { method: 'PUT', body: JSON.stringify(body) }),
   repartidores: () => request('/api/pedidos/config/repartidores'),

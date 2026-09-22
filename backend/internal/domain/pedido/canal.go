@@ -39,9 +39,22 @@ type Canal struct {
 	// se ofrece elección de envío.
 	EnvioPropioDelCanal bool `json:"envioPropioDelCanal" bson:"enviopropiodelcanal"`
 
-	// Token autentica al canal cuando publica pedidos por API. Se guarda
-	// hasheado; se muestra UNA vez al crearlo.
+	/* TOKEN DEL CANAL: con qué se autentica una tienda web al publicar pedidos.
+	 *
+	 * Se guarda HASHEADO y se muestra UNA sola vez, al generarlo. Si se pudiera
+	 * volver a leer, cualquiera con acceso a la pantalla de configuración podría
+	 * llevárselo — y un token de integración no se rota tan fácil como una
+	 * contraseña, porque hay que ir a tocar el sistema del cliente.
+	 *
+	 * El hash es SHA-256 y no bcrypt a propósito: un token es alto en entropía y
+	 * se verifica en CADA pedido que entra, así que el costo deliberado de bcrypt
+	 * acá no compra seguridad, solo latencia en la puerta por donde llega el
+	 * trabajo.
+	 */
 	TokenHash string `json:"-" bson:"tokenhash,omitempty"`
+	// TokenPista son los últimos caracteres del token, para reconocerlo en la
+	// pantalla sin poder reconstruirlo («…f3a9»).
+	TokenPista string `json:"tokenPista,omitempty" bson:"tokenpista,omitempty"`
 	// WebhookSecreto firma los avisos que el canal nos manda (estados del envío).
 	WebhookSecreto string `json:"-" bson:"webhooksecreto,omitempty"`
 
@@ -147,6 +160,10 @@ func (c *Canal) Normalizar() {
 type CanalRepository interface {
 	List(empresaID string) []Canal
 	ByID(empresaID, id string) (Canal, bool)
+	// ByTokenHash resuelve el canal que publica un pedido. NO lleva empresaID:
+	// quien llama es la tienda del cliente, que solo trae su token — el token ES
+	// la identidad, y de él sale la empresa.
+	ByTokenHash(hash string) (Canal, bool)
 	Upsert(c Canal) Canal
 }
 

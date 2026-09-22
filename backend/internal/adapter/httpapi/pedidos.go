@@ -48,6 +48,9 @@ func (s *Server) registerPedidos(api fiber.Router) {
 
 	// Maestros del módulo.
 	g.Get("/config/canales", admin, s.handleCanalesPedido)
+	// El token se genera y se muestra UNA vez: si se pudiera volver a leer,
+	// cualquiera con acceso a esta pantalla podría llevárselo.
+	g.Post("/config/canales/:id/token", admin, s.handleTokenCanal)
 	g.Put("/config/canales", admin, s.handleGuardarCanalPedido)
 	g.Get("/config/zonas", admin, s.handleZonasPedido)
 	g.Put("/config/zonas", admin, s.handleGuardarZonaPedido)
@@ -212,6 +215,28 @@ func (s *Server) handleGuardarCanalPedido(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(out)
+}
+
+// handleTokenCanal genera el token de un canal y lo devuelve en claro, una vez.
+func (s *Server) handleTokenCanal(c *fiber.Ctx) error {
+	token, err := s.svc.GenerarTokenCanal(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{
+		"token": token,
+		"url":   s.urlEntradaPedidos(),
+		"aviso": "Guarda este token ahora: por seguridad no se puede volver a ver. Si lo pierdes, genera uno nuevo (el anterior deja de servir).",
+	})
+}
+
+// urlEntradaPedidos es la dirección a la que la tienda tiene que publicar.
+func (s *Server) urlEntradaPedidos() string {
+	base := strings.TrimRight(s.cfg.FrontendURL, "/")
+	if base == "" || strings.Contains(base, "*") {
+		return "/pedidos/entrada"
+	}
+	return base + "/pedidos/entrada"
 }
 
 func (s *Server) handleZonasPedido(c *fiber.Ctx) error {
@@ -429,4 +454,106 @@ func (s *Server) handleDisponibilidadRepartidor(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(r)
+}
+
+/* --- Entrada pública: la tienda web publica sus pedidos ------------------- */
+
+/* POR QUÉ ESTA RUTA VIVE FUERA DE /api.
+ *
+ * Quien llama es el sistema del cliente —su tienda web—, que no tiene sesión de
+ * usuario ni la va a tener: no es una persona, es un servidor. Se autentica con
+ * el TOKEN DEL CANAL, que además dice de qué empresa y qué sede es el pedido.
+ *
+ * Sin esto el módulo declaraba tres orígenes y solo funcionaban dos: el
+ * ecommerce no tenía por dónde entrar.
+ */
+func (s *Server) registerPedidosPublico(app *fiber.App) {
+	app.Post("/pedidos/entrada", s.handleEntradaPedido)
+}
+
+// handleEntradaPedido recibe un pedido de un canal conectado.
+func (s *Server) handleEntradaPedido(c *fiber.Ctx) error {
+	// El token va en cabecera y no en el cuerpo: así no queda escrito en los
+	// registros de quien reenvía la petición ni en el historial de una prueba.
+	token := strings.TrimSpace(string(c.Request().Header.Peek("X-Canal-Token")))
+	if token == "" {
+		token = strings.TrimPrefix(strings.TrimSpace(string(c.Request().Header.Peek("Authorization"))), "Bearer ")
+	}
+	canal, ok := s.svc.CanalPorToken(token)
+	if !ok {
+		// 401 y no 404: la ruta existe, lo que no vale es la credencial. Y no se
+		// distingue «token inválido» de «canal apagado» — decirlo ayudaría a
+		// quien esté probando tokens ajenos.
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "token de canal inválido o canal inactivo"})
+	}
+
+	var in struct {
+		Referencia    string  `json:"referencia"`
+		ClienteNombre string  `json:"cliente"`
+		Telefono      string  `json:"telefono"`
+		Direccion     string  `json:"direccion"`
+		Referencia2   string  `json:"puntoDeReferencia"`
+		Lat           float64 `json:"lat"`
+		Lon           float64 `json:"lon"`
+		Pagado        bool    `json:"pagado"`
+		Total         float64 `json:"total"`
+		Programado    string  `json:"programadoPara"`
+		Items         []struct {
+			SKU      string  `json:"sku"`
+			Nombre   string  `json:"nombre"`
+			Cantidad float64 `json:"cantidad"`
+			Precio   float64 `json:"precioUnitario"`
+			Nota     string  `json:"nota"`
+		} `json:"items"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	items := make([]pedido.Item, 0, len(in.Items))
+	for _, it := range in.Items {
+		items = append(items, pedido.Item{
+			SKU: it.SKU, Nombre: it.Nombre, Cantidad: it.Cantidad,
+			PrecioUnitario: it.Precio, Nota: it.Nota,
+		})
+	}
+	// La forma de pago la declara la tienda: en un ecommerce lo normal es que ya
+	// se haya cobrado, pero hay tiendas que ofrecen pagar al recibir. Quien lo
+	// sabe es ella, no nosotros.
+	formaPago := pedido.PagoEnCanal
+	if !in.Pagado {
+		formaPago = pedido.PagoContraEntrega
+	}
+	out, err := s.svc.CrearPedido(application.EntradaPedido{
+		EmpresaID: canal.EmpresaID, SedeID: canal.SedeID,
+		Origen: canal.Origen, CanalID: canal.ID, ReferenciaExterna: in.Referencia,
+		ClienteNombre: in.ClienteNombre,
+		Destino: pedido.Destino{
+			Direccion: in.Direccion, Referencia: in.Referencia2,
+			Lat: in.Lat, Lon: in.Lon, Telefono: in.Telefono,
+		},
+		Items: items, FormaPago: formaPago, Total: in.Total,
+		ProgramadoPara: in.Programado,
+		Actor:          "canal:" + canal.Nombre, OrigenEvento: "api",
+	})
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	// Se devuelve lo que la tienda necesita para su propio seguimiento: nuestro
+	// número y el enlace que le puede mostrar a su cliente. Nada más — el resto
+	// del pedido es del local, no de la tienda.
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"id":          out.ID,
+		"numero":      out.Numero,
+		"estado":      out.Estado,
+		"seguimiento": s.urlSeguimiento(out.TokenPublico),
+	})
+}
+
+// urlSeguimiento arma el enlace público del pedido.
+func (s *Server) urlSeguimiento(token string) string {
+	base := strings.TrimRight(s.cfg.FrontendURL, "/")
+	if base == "" || strings.Contains(base, "*") {
+		return "/t/" + token
+	}
+	return base + "/t/" + token
 }

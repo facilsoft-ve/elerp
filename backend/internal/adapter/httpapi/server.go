@@ -85,6 +85,9 @@ func NewServer(cfg config.Config, svc *application.Service, tenancy *application
 	// SEGUIMIENTO PÚBLICO del pedido: lo abre el cliente con el enlace que
 	// recibió, sin cuenta y sin pasar por la aplicación.
 	app.Get("/t/:token", s.handleSeguimientoPublico)
+	// ENTRADA DE PEDIDOS de una tienda web: se autentica con el token del canal,
+	// no con sesión de usuario — quien llama es un servidor, no una persona.
+	s.registerPedidosPublico(app)
 	app.Get("/api/health", s.handleHealth)
 	app.Get("/api/auth/login", authLimiter, s.handleLogin)
 	app.Get("/api/auth/dev-login", authLimiter, s.handleDevLogin)

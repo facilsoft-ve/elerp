@@ -561,6 +561,8 @@ function CanalModal({ canal, onClose, onSaved, toast }) {
     minutosAceptacion: canal.minutosAceptacion || 0, envioPropioDelCanal: !!canal.envioPropioDelCanal,
   })
   const [busy, setBusy] = useState(false)
+  const [token, setToken] = useState('')
+  const [generando, setGenerando] = useState(false)
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
   const esApp = f.origen === 'app_commerce'
 
@@ -599,12 +601,41 @@ function CanalModal({ canal, onClose, onSaved, toast }) {
           </Select>
         </Field>
 
-        {/* ENTRANTE: la tienda nos llama. Se le entrega la dirección. */}
+        {/* ENTRANTE: la tienda nos llama. Se le entrega la dirección y la clave. */}
         {!esApp ? (
           <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2.5 text-[12.5px] text-slate-600 dark:text-slate-300">
             Tu tienda web publica los pedidos llamando a esta dirección:
             <div className="mono text-[11.5px] mt-1 break-all">{urlEntrante}</div>
-            <div className="mt-1.5 text-slate-500">Al guardar te damos la clave de acceso para que la pegues en tu tienda.</div>
+            {canal.id ? (
+              <div className="mt-2">
+                {/* EL TOKEN SE MUESTRA UNA VEZ. Si se pudiera volver a leer,
+                    cualquiera con acceso a esta pantalla podría llevárselo — y un
+                    token de integración no se rota tan fácil como una contraseña:
+                    hay que ir a tocar el sistema del cliente. */}
+                {token ? (
+                  <div className="rounded-lg px-2.5 py-2 mt-1"
+                    style={{ background: '#FDF6E7', border: '1px solid #F0DFB8', color: '#92600A' }}>
+                    <div className="font-semibold text-[12px]">Cópialo ahora: no se puede volver a ver.</div>
+                    <div className="mono text-[11.5px] mt-1 break-all select-all">{token}</div>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="ghost" loading={generando}
+                    onClick={async () => {
+                      setGenerando(true)
+                      try { setToken((await api.tokenCanalPedido(canal.id)).token) }
+                      catch (e) { toast({ title: 'No se pudo generar', body: e?.message || 'Error', kind: 'error' }) }
+                      finally { setGenerando(false) }
+                    }}>
+                    {canal.tokenPista ? `Regenerar clave (actual …${canal.tokenPista})` : 'Generar clave de acceso'}
+                  </Button>
+                )}
+                {canal.tokenPista && !token ? (
+                  <div className="mt-1 text-slate-500">Regenerarla invalida la anterior: habrá que actualizar tu tienda.</div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="mt-1.5 text-slate-500">Guarda el canal primero y después genera su clave de acceso.</div>
+            )}
           </div>
         ) : (
           /* SALIENTE: nosotros nos adaptamos a la app. Cómo conecta cada una

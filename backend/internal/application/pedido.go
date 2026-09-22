@@ -2,7 +2,9 @@ package application
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base32"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -794,4 +796,61 @@ func (s *Service) MarcarDisponibilidad(empresaID, usuarioID string, disponible b
 	s.audit.Append(evento(empresaID, usuarioID, origen, "pedido.repartidor.disponibilidad", out.Nombre,
 		fmt.Sprintf("%v", disponible)))
 	return out, nil
+}
+
+/* --- Token del canal: cómo entra una tienda web -------------------------- */
+
+// HashTokenCanal es cómo se guarda y se compara el token de un canal.
+//
+// SHA-256 y no bcrypt a propósito: un token es alto en entropía y se verifica en
+// CADA pedido que entra. El costo deliberado de bcrypt acá no compra seguridad,
+// solo latencia en la puerta por donde llega el trabajo.
+func HashTokenCanal(token string) string {
+	suma := sha256.Sum256([]byte(strings.TrimSpace(token)))
+	return hex.EncodeToString(suma[:])
+}
+
+// GenerarTokenCanal emite un token nuevo para un canal y devuelve el valor EN
+// CLARO una sola vez.
+//
+// Se muestra una vez y no se puede volver a leer: si se pudiera, cualquiera con
+// acceso a la pantalla de configuración podría llevárselo, y un token de
+// integración no se rota tan fácil como una contraseña —hay que ir a tocar el
+// sistema del cliente—. Regenerarlo invalida el anterior, que es justamente lo
+// que hace falta cuando se sospecha que se filtró.
+func (s *Service) GenerarTokenCanal(empresaID, canalID, actor, origen string) (string, error) {
+	if s.canalesPedido == nil {
+		return "", ErrPedidosNoDisponible
+	}
+	c, ok := s.canalesPedido.ByID(empresaID, canalID)
+	if !ok {
+		return "", errors.New("el canal no existe")
+	}
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "", errors.New("no se pudo generar el token")
+	}
+	token := "elerp_" + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b))
+	c.TokenHash = HashTokenCanal(token)
+	c.TokenPista = token[len(token)-4:]
+	c.Actualizado = ahora()
+	s.canalesPedido.Upsert(c)
+	s.audit.Append(evento(empresaID, actor, origen, "pedido.canal.token", c.Nombre, "token regenerado"))
+	return token, nil
+}
+
+// CanalPorToken resuelve qué canal está publicando un pedido.
+//
+// El token ES la identidad: de él sale la empresa y la sede. Por eso el canal
+// tiene que estar ACTIVO — desactivarlo es la forma de cortarle la entrada a una
+// tienda sin tener que ir a cambiar nada en su sistema.
+func (s *Service) CanalPorToken(token string) (pedido.Canal, bool) {
+	if s.canalesPedido == nil || strings.TrimSpace(token) == "" {
+		return pedido.Canal{}, false
+	}
+	c, ok := s.canalesPedido.ByTokenHash(HashTokenCanal(token))
+	if !ok || !c.Activo {
+		return pedido.Canal{}, false
+	}
+	return c, true
 }
