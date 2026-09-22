@@ -12,11 +12,11 @@ import { RejillaProductos, DisponibilidadModal, EtiquetaAlicuota } from '../comp
 import { TasaModal, fechaCortaVE } from '../components/tasa.jsx'
 import { precioEnBs, monedaDe, porCodigo } from '../lib/precio.js'
 import { CobroModal, VentaEmitida } from './Cobro.jsx'
+import { NuevoClienteModal, puedeCrearCliente } from '../components/cliente.jsx'
 import { useEspera, DejarEnEsperaModal, EsperaModal } from './Espera.jsx'
 import { useSolicitudesMesa, BotonMesasPorCobrar, EtiquetaMesa, MesasPorCobrarModal } from './PosMesas.jsx'
 
 export const puedeEmitir = (rol) => rol !== 'contadora'
-export const puedeCrearCliente = (rol) => ['dueno', 'desarrollador', 'vendedor', 'cajero'].includes(rol)
 
 /* Punto de venta.
  *
@@ -63,18 +63,48 @@ export function POS({ onModoCaja }) {
     return e ? e.cantidad : 0
   }
 
+  /* LA VENTA EN CURSO SOBREVIVE A LA RECARGA.
+   *
+   * Lo que se teclea en el mostrador corresponde a cosas que YA pasaron: el
+   * cliente puso los productos sobre el mesón, y si además se pasó la tarjeta,
+   * esa plata entró. Perder eso por una recarga, una pestaña cerrada o un
+   * navegador caído no deja un dato corrupto —nada se escribió—, deja al sistema
+   * ciego a algo que sí ocurrió, y un sobrante inexplicable al cerrar la caja.
+   *
+   * Se guarda EN EL EQUIPO y no en el servidor a propósito: una venta a medias
+   * no es una venta, y mandarla al servidor la convertiría en un registro que
+   * después hay que limpiar. Para apartar una venta de verdad está «Dejar en
+   * espera», que sí es una decisión y sí se persiste. */
+  const LLAVE_VENTA = 'elerp:pos:venta-en-curso'
+  const borradorInicial = (() => {
+    try { return JSON.parse(localStorage.getItem(LLAVE_VENTA) || 'null') } catch { return null }
+  })()
+
   // Carrito: [{ sku, nombre, cantidad, precioUnitario (Bs), exento }]
-  const [cart, setCart] = useState([])
+  const [cart, setCart] = useState(() => borradorInicial?.cart || [])
+  const [recuperada, setRecuperada] = useState(() => (borradorInicial?.cart || []).length > 0)
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(0)
   const searchRef = useRef(null)
 
-  const [clienteId, setClienteId] = useState('') // '' = consumidor final
+  const [clienteId, setClienteId] = useState(() => borradorInicial?.clienteId || '') // '' = consumidor final
   const [nuevoCliente, setNuevoCliente] = useState(false)
   const [contingencia, setContingencia] = useState(false)
 
   const [cobrando, setCobrando] = useState(false)
   const [emitida, setEmitida] = useState(null) // documento emitido (estado de éxito)
+  /* IDENTIDAD DE LA VENTA. El modal de cobro limpia lo tecleado cuando ESTO
+   * cambia, y no cuando se abre: cerrarlo para corregir un dato —identificar al
+   * cliente, por ejemplo— no puede costar volver a contar la plata. Se avanza al
+   * empezar de cero, al soltar la mesa y al retomar algo en espera. */
+  /* El id es un TOKEN y no un contador: tiene que sobrevivir a la recarga para
+   * que el cobro a medias se reencuentre con su propia venta y no con otra. */
+  const [ventaId, setVentaId] = useState(() => borradorInicial?.ventaId || nuevoTokenVenta())
+  const nuevaIdentidad = () => {
+    setVentaId(nuevoTokenVenta())
+    setRecuperada(false)
+    try { localStorage.removeItem(LLAVE_VENTA) } catch { /* sin almacenamiento igual funciona */ }
+  }
 
   // Módulo Restaurante: las mesas que pidieron factura se cobran ACÁ, no en una
   // pantalla aparte. `mesaSel` es la solicitud cargada en el carrito; mientras
@@ -87,12 +117,13 @@ export function POS({ onModoCaja }) {
     setMesaSel(s)
     setCart(s.lineas.map((l) => ({ ...l })))
     setClienteId(s.clienteId || '')
+    nuevaIdentidad()
     setVerMesas(false)
     toast({ title: `Mesa ${s.mesaNombre} en el carrito`, body: s.nota || `${s.lineas.length} renglón(es)` })
   }
   // Soltar la mesa vacía el carrito: esos renglones son de la mesa, no de una venta
   // suelta del mostrador. La solicitud sigue esperando para cobrarse.
-  const soltarMesa = () => { setMesaSel(null); setCart([]); setClienteId('') }
+  const soltarMesa = () => { setMesaSel(null); setCart([]); setClienteId(''); nuevaIdentidad() }
 
   // Ventas en espera (2.6): el carrito apartado del mostrador.
   const espera = useEspera()
@@ -106,6 +137,7 @@ export function POS({ onModoCaja }) {
       precioUnitario: l.precioUnitario, exento: !!l.exento,
     })))
     if (v.clienteId) setClienteId(v.clienteId)
+    nuevaIdentidad()
     espera.recargar()
     toast({ title: 'Venta retomada', body: v.nota || `${v.lineas?.length || 0} ítem(s)` })
   }
@@ -179,11 +211,19 @@ export function POS({ onModoCaja }) {
   const errCarrito = cart.length === 0 ? 'Agrega al menos un producto.' : ''
   const errLinea = cart.some((l) => !(Number(l.cantidad) > 0)) ? 'Todas las cantidades deben ser mayores a 0.' : ''
 
+  // Se guarda mientras se arma. Un carrito vacío no es nada que recuperar.
+  useEffect(() => {
+    try {
+      if (!cart.length) { localStorage.removeItem(LLAVE_VENTA); return }
+      localStorage.setItem(LLAVE_VENTA, JSON.stringify({ ventaId, cart, clienteId }))
+    } catch { /* sin almacenamiento el mostrador funciona igual, solo no recupera */ }
+  }, [ventaId, cart, clienteId])
+
   const clienteNombre = (db.CLIENTES || []).find((c) => c.id === clienteId)?.nombre || 'Consumidor final'
 
   const nuevaVenta = () => {
     setEmitida(null)
-    setCart([]); setQ(''); setClienteId('')
+    setCart([]); setQ(''); setClienteId(''); nuevaIdentidad()
     setMesaSel(null)
     setContingencia(false)
     searchRef.current?.focus()
@@ -204,13 +244,31 @@ export function POS({ onModoCaja }) {
   return (
     <div className="space-y-3">
       <BarraTurno sesion={sesion} onCerrada={recargarSesion} onModoCaja={onModoCaja} />
+
+      {/* SE RECUPERÓ UNA VENTA. Se avisa en vez de restaurarla en silencio: un
+          carrito que aparece solo hace dudar de si es de este cliente o del
+          anterior, y esa duda en el mostrador cuesta más que volver a armarlo. */}
+      {recuperada && cart.length ? (
+        <div className="rounded-xl px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap"
+          style={{ background: '#FFF7E8', border: '1px solid #EEDCB4', color: '#92600A' }}>
+          <div className="text-[12.5px]">
+            <strong>Se recuperó una venta que quedó a medias</strong> — {cart.length} renglón(es).
+            Si ya la cobraste o no es de este cliente, descártala.
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="ghost" onClick={() => { setCart([]); setClienteId(''); nuevaIdentidad() }}>Descartar</Button>
+            <Button size="sm" variant="secondary" onClick={() => setRecuperada(false)}>Es esta, seguir</Button>
+          </div>
+        </div>
+      ) : null}
       <DisponibilidadModal sku={infoSku} open={!!infoSku} onClose={() => setInfoSku('')} />
       <TasaModal open={verTasa} onClose={() => setVerTasa(false)} />
       <MesasPorCobrarModal open={verMesas} solicitudes={solicitudes}
         onElegir={tomarMesa} onClose={() => setVerMesas(false)} />
       <CobroModal open={cobrando} onClose={() => setCobrando(false)}
         lineas={cart} clienteId={clienteId} clienteNombre={clienteNombre} contingencia={contingencia}
-        permiteEnvio={!mesaSel}
+        permiteEnvio={!mesaSel} ventaId={ventaId}
+        onCliente={async (id) => { await reload(); setClienteId(id) }}
         onCobrar={mesaSel ? async (cobro) => {
           // Misma ruta fiscal que el mostrador (FacturarCotizacion → EmitirFactura),
           // y además enlaza la factura con la mesa y la cierra cuando ya no queda
@@ -422,65 +480,13 @@ const Row = ({ label, value, muted }) => (
 )
 
 // Alta rápida de cliente desde el POS (reusa la misma validación que Clientes).
-export function NuevoClienteModal({ onClose, onSaved, toast }) {
-  const [f, setF] = useState({ nombre: '', tipoDocumento: 'V', documento: '', telefono: '', direccion: '', email: '' })
-  const [touched, setTouched] = useState({})
-  const [busy, setBusy] = useState(false)
 
-  // Pasaporte (P) es texto libre; V/E/J/G validan como RIF/cédula.
-  const rifCheck = f.tipoDocumento === 'P' ? { valid: true, msg: '' } : validarRIF(`${f.tipoDocumento}${f.documento}`)
-  const emailOk = !f.email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())
-  const errs = {
-    nombre: !f.nombre.trim() ? 'Ingresa el nombre.' : '',
-    documento: !f.documento.trim() ? 'Ingresa el documento.' : !rifCheck.valid ? rifCheck.msg : '',
-    email: emailOk ? '' : 'El correo no tiene un formato válido.',
-  }
-  const valid = !errs.nombre && !errs.documento && !errs.email
-  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }))
-
-  const save = async () => {
-    setTouched({ nombre: true, documento: true })
-    if (!valid) return
-    setBusy(true)
-    try {
-      const c = await api.crearCliente({ nombre: f.nombre.trim(), tipoDocumento: f.tipoDocumento, documento: f.documento.trim(), telefono: f.telefono.trim(), direccion: f.direccion.trim(), email: f.email.trim() })
-      toast({ title: 'Cliente creado', body: f.nombre.trim() })
-      await onSaved(c)
-      onClose()
-    } catch (e) {
-      toast({ title: 'No se pudo crear', body: e?.message || 'Error', kind: 'error' })
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Modal open onClose={onClose} size="sm" icon={<Icon.User size={18} />} title="Nuevo cliente" sub="El documento es único por empresa."
-      footer={<>
-        <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-        <Button onClick={save} loading={busy} icon={<Icon.Check size={16} />}>Crear</Button>
-      </>}>
-      <div className="space-y-3.5">
-        <Field label="Nombre / Razón social" required error={touched.nombre ? errs.nombre : ''}>
-          <Input value={f.nombre} onChange={set('nombre')} onBlur={() => setTouched((t) => ({ ...t, nombre: true }))} invalid={touched.nombre && !!errs.nombre} autoFocus />
-        </Field>
-        <div className="grid grid-cols-[80px_1fr] gap-2">
-          <Field label="Tipo">
-            <Select value={f.tipoDocumento} onChange={set('tipoDocumento')}>
-              {TIPOS_DOCUMENTO.map((t) => <option key={t} value={t}>{t}</option>)}
-            </Select>
-          </Field>
-          <Field label="Documento" required error={touched.documento ? errs.documento : ''}>
-            <Input value={f.documento} onChange={set('documento')} onBlur={() => setTouched((t) => ({ ...t, documento: true }))} invalid={touched.documento && !!errs.documento} placeholder="12345678" />
-          </Field>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Teléfono" hint="opcional"><Input value={f.telefono} onChange={set('telefono')} placeholder="0412-…" /></Field>
-          <Field label="Correo" hint="opcional" error={touched.email ? errs.email : ''}>
-            <Input value={f.email} onChange={set('email')} onBlur={() => setTouched((t) => ({ ...t, email: true }))} invalid={touched.email && !!errs.email} type="email" placeholder="correo@dominio.com" />
-          </Field>
-        </div>
-        <Field label="Dirección" hint="opcional"><Input value={f.direccion} onChange={set('direccion')} /></Field>
-      </div>
-    </Modal>
-  )
+/* nuevoTokenVenta identifica la venta que se está armando. No es un id de
+ * negocio —una venta no existe hasta que se emite— sino la etiqueta que permite
+ * que el cobro a medias se reencuentre con SU carrito después de una recarga. */
+function nuevoTokenVenta() {
+  return `v${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
 }
+
+// Reexportadas desde su nuevo hogar: las importaban de acá cuatro pantallas.
+export { NuevoClienteModal, puedeCrearCliente }

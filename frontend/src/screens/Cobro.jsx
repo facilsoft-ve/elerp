@@ -10,6 +10,7 @@ import { fechaCortaVE } from '../components/tasa.jsx'
 import { usePosCanal } from './PantallaCliente.jsx'
 import { ImpresionFiscalModal, impresoraActivaDeSede } from './ImpresionFiscal.jsx'
 import { ComprobanteModal, comprobanteDeFactura } from '../components/ComprobantePDF.jsx'
+import { NuevoClienteModal } from '../components/cliente.jsx'
 
 /* Cobro (modal) — la vista que manda el prototipo («Modal de cobro»).
  *
@@ -124,7 +125,7 @@ const PLAZOS = [15, 30, 45, 60]
 // Redondeo a dos decimales para el preview del vuelto (el servidor recalcula).
 const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100
 
-export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, contingencia, onEmitida, canal = 'caja', onCobrar, cuponCodigo = '', permiteEnvio = true }) {
+export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, contingencia, onEmitida, canal = 'caja', onCobrar, cuponCodigo = '', permiteEnvio = true, ventaId = 0, onCliente }) {
   /* ENVÍO A DOMICILIO. Va en el cobro y no en una pantalla aparte porque es ahí
    * donde se decide: el cliente está al teléfono o en el mostrador y dice «me lo
    * mandan». Obligar a facturar primero y cargar el pedido después significa
@@ -204,15 +205,65 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
   // (pendiente → procesando → listo | error) que bloquea «Emitir» hasta «listo».
   const [vueltoPartes, setVueltoPartes] = useState([])
   const [busy, setBusy] = useState(false)
+  /* PIDEN CLIENTE. Lo pone el servidor cuando la facturación digital rechaza la
+   * venta por falta de cliente identificado: la imprenta exige cédula/RIF y
+   * dirección en toda factura. Se guarda el motivo para mostrarlo ahí mismo, con
+   * el cobro intacto, en vez de mandar al cajero a otra pantalla. */
+  /* EL COBRO EN CURSO SOBREVIVE A LA RECARGA.
+   *
+   * Cuando el cajero teclea «tarjeta, 1.160» ya pasó el punto de venta: esa plata
+   * entró de verdad. Que ElERP lo pierda por una recarga, una pestaña cerrada o
+   * un navegador caído no deja un dato corrupto —nada se escribió—, deja algo
+   * peor: el sistema ciego a un cobro que sí ocurrió, y un sobrante inexplicable
+   * al cerrar la caja.
+   *
+   * Por eso el borrador se guarda en el equipo mientras se teclea y se borra al
+   * emitir. Es local a propósito: no es un cobro, es lo que alguien estaba
+   * escribiendo, y mandarlo al servidor lo convertiría en un registro a medias.
+   */
+  const claveBorrador = `elerp:cobro:${canal}:${ventaId}`
+  const [pidenCliente, setPidenCliente] = useState('')
+  const [nuevoCliente, setNuevoCliente] = useState(false)
   const recibidoRef = useRef(null)
 
-  // Al abrir se limpia todo: un cobro nunca hereda datos del anterior.
+  /* EL COBRO SE LIMPIA ENTRE VENTAS, no al cerrar el modal.
+   *
+   * Antes se borraba todo cada vez que se abría, y eso convertía cualquier
+   * interrupción en volver a contar la plata: cerrar para identificar al cliente
+   * —que con la facturación digital encendida es obligatorio— dejaba los pagos
+   * ya tecleados en la nada, y al reabrir no había nada.
+   *
+   * Lo que tiene que limpiar es una venta NUEVA, y eso lo sabe quien la abre:
+   * `ventaId` cambia cuando se emite, se suelta la mesa o se empieza de cero. */
   useEffect(() => {
-    if (!open) return
     setMetodo(''); setRecibido(''); setCuentaId(''); setReferencia('')
     setMix([{ metodo: primerMetodoId, cuentaId: '', monto: '' }]); setBusy(false)
     setVueltoPartes([])
-  }, [open, primerMetodoId])
+    // El envío también: sin esto la próxima venta abría con la dirección de la
+    // anterior, que es como se manda un pedido a la casa equivocada.
+    setEnvio(null); setCotEnvio(null); setPidenCliente('')
+    // Y se recupera lo que hubiera quedado a medias de ESTA misma venta.
+    try {
+      const b = JSON.parse(localStorage.getItem(claveBorrador) || 'null')
+      if (b) {
+        if (b.metodo) setMetodo(b.metodo)
+        if (b.recibido) setRecibido(b.recibido)
+        if (b.cuentaId) setCuentaId(b.cuentaId)
+        if (b.referencia) setReferencia(b.referencia)
+        if (b.mix) setMix(b.mix)
+        if (b.envio) setEnvio(b.envio)
+      }
+    } catch { /* sin almacenamiento el cobro funciona igual, solo no se recupera */ }
+  }, [ventaId, primerMetodoId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Se guarda mientras se teclea. Un cobro a medias sin método todavía no es
+  // nada que valga la pena recuperar, así que no ensucia el almacenamiento.
+  useEffect(() => {
+    try {
+      if (!metodo && !envio) { localStorage.removeItem(claveBorrador); return }
+      localStorage.setItem(claveBorrador, JSON.stringify({ metodo, recibido, cuentaId, referencia, mix, envio }))
+    } catch { /* idem */ }
+  }, [claveBorrador, metodo, recibido, cuentaId, referencia, mix, envio])
 
   const meta = METODOS.find((m) => m.id === metodo)
 
@@ -521,9 +572,17 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
           body: `${resp.pedido.error}. Cárgalo a mano en Pedidos.`, kind: 'error',
         })
       }
+      // El borrador ya cumplió: lo tecleado se convirtió en un documento.
+      try { localStorage.removeItem(claveBorrador) } catch { /* idem */ }
       onEmitida(doc)
     } catch (e) {
-      toast({ title: 'No se pudo emitir', body: e?.message || 'Error', kind: 'error' })
+      if (e?.codigo === 'cliente_requerido_imprenta') {
+        // No es un fallo del cobro: falta un dato, y se pide acá mismo. Mandar al
+        // cajero a buscarlo a otra pantalla es lo que le costaba lo ya tecleado.
+        setPidenCliente(e.message || 'Esta venta necesita un cliente identificado.')
+      } else {
+        toast({ title: 'No se pudo emitir', body: e?.message || 'Error', kind: 'error' })
+      }
       setBusy(false)
     }
   }
@@ -549,6 +608,34 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
           </Button>
         </>
       }>
+      {/* A QUIÉN SE LE FACTURA. Va arriba de todo y se puede cambiar sin salir:
+          antes el cliente solo se elegía en la pantalla de atrás, así que
+          corregirlo obligaba a cerrar el cobro — y cerrar el cobro era perder lo
+          ya tecleado. Con la facturación digital encendida esto deja de ser una
+          comodidad: sin cliente identificado la factura no se puede emitir. */}
+      <div className={`mb-3 rounded-xl px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap ${
+        pidenCliente ? '' : 'bg-slate-50 dark:bg-slate-800/60'}`}
+        style={pidenCliente ? { background: '#FBEDEB', border: '1px solid #ECC8C4' } : undefined}>
+        <div className="text-[12.5px]" style={pidenCliente ? { color: '#B3362C' } : undefined}>
+          {pidenCliente || <>Se factura a <strong>{clienteNombre}</strong></>}
+        </div>
+        {onCliente ? (
+          <Button size="sm" variant="secondary" icon={<Icon.User size={15} />}
+            onClick={() => setNuevoCliente(true)}>
+            {clienteId ? 'Cambiar cliente' : 'Agregar cliente'}
+          </Button>
+        ) : null}
+      </div>
+
+      {nuevoCliente ? (
+        <NuevoClienteModal toast={toast} onClose={() => setNuevoCliente(false)}
+          onSaved={async (c) => {
+            // El cobro NO se toca: solo se completa el dato que faltaba.
+            if (c?.id && onCliente) await onCliente(c.id)
+            setPidenCliente('')
+          }} />
+      ) : null}
+
       {/* Layout de 2 columnas en pantallas grandes (tablet/escritorio del cajero):
           izquierda = cómo paga el cliente + los totales del documento (debajo de
           la selección del método); derecha = todo lo relativo al vuelto. Separar

@@ -1074,6 +1074,7 @@ function FacturarModal({ cot, onClose, onSaved, toast }) {
   return (
     <CobroModal open onClose={onClose} canal="ventas"
       lineas={lineasCobro} clienteId={cot.clienteId} clienteNombre={cot.clienteNombre} contingencia={false}
+      ventaId={cot.id}
       onCobrar={async (cobro) => (
         // La respuesta COMPLETA: si la venta se lleva a domicilio trae también el
         // pedido, y quedarse solo con el documento lo perdería en silencio.

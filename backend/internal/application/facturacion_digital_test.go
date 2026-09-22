@@ -1,10 +1,12 @@
 package application_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mornix/elerp/internal/adapter/unidigital"
 	"github.com/mornix/elerp/internal/application"
+	"github.com/mornix/elerp/internal/domain/cliente"
 	fd "github.com/mornix/elerp/internal/domain/facturaciondigital"
 )
 
@@ -161,5 +163,55 @@ func TestDigital_NoSeEncolaDosVeces(t *testing.T) {
 	b, _ := svc.EncolarEmision(empDemo, fd.CanalVentas, doc)
 	if a.ID != b.ID {
 		t.Fatalf("el mismo documento se encoló dos veces: %s y %s", a.ID, b.ID)
+	}
+}
+
+/* EXIGIR EL CLIENTE ANTES DE COBRAR.
+ *
+ * Con la imprenta encendida la factura necesita cédula/RIF y dirección. Se
+ * pregunta ANTES de emitir porque después el cliente ya se fue: quedaría una
+ * venta cobrada que nunca va a ser fiscal, y nadie a quien pedirle la cédula.
+ */
+func TestDigital_ExigeClienteAntesDeCobrar(t *testing.T) {
+	svc, st := nuevoServicio(t)
+	svc.ConFacturacionDigital(st.ConfigDigital, st.EmisionesDigitales)
+	if _, err := svc.GuardarConfigDigital(empDemo, actorA, origenTst, application.EntradaConfigDigital{
+		Activa: true, PorPOS: true, Usuario: "u@x.com", Password: "clave",
+		SerieStrongID: "serie-1", CorreoRespaldo: "facturas@mornix.tech",
+	}); err != nil {
+		t.Fatalf("activar: %v", err)
+	}
+
+	// Sin cliente: se niega, y el motivo es para leérselo al cajero.
+	motivo := svc.FaltaClienteParaImprenta(empDemo, fd.CanalPOS, "")
+	if motivo == "" {
+		t.Fatal("sin cliente identificado la venta tenía que negarse antes de emitir")
+	}
+	if !strings.Contains(motivo, "cliente") {
+		t.Fatalf("el motivo tiene que decir qué falta, en castellano: %q", motivo)
+	}
+
+	// Un cliente sin dirección tampoco sirve, y el aviso lo NOMBRA: «faltan
+	// datos» obliga a adivinar cuál, con el cliente esperando en el mostrador.
+	sinDir := st.Clientes.Create(cliente.Cliente{
+		EmpresaID: empDemo, Nombre: "Pedro Sin Casa", TipoDocumento: "V", Documento: "V-12345678",
+	})
+	m2 := svc.FaltaClienteParaImprenta(empDemo, fd.CanalPOS, sinDir.ID)
+	if m2 == "" || !strings.Contains(m2, "dirección") {
+		t.Fatalf("debería reclamar la dirección y nombrar al cliente: %q", m2)
+	}
+
+	// Completo: pasa.
+	ok := st.Clientes.Create(cliente.Cliente{
+		EmpresaID: empDemo, Nombre: "Ana Completa", TipoDocumento: "V", Documento: "V-87654321",
+		Direccion: "Av. Bolívar, Caracas",
+	})
+	if m3 := svc.FaltaClienteParaImprenta(empDemo, fd.CanalPOS, ok.ID); m3 != "" {
+		t.Fatalf("un cliente completo no debería frenar la venta: %q", m3)
+	}
+
+	// Y con el módulo apagado no se le pide nada a nadie: ElERP factura como antes.
+	if m4 := svc.FaltaClienteParaImprenta(empDemo, fd.CanalVentas, ""); m4 != "" {
+		t.Fatalf("el canal apagado no puede exigir cliente: %q", m4)
 	}
 }

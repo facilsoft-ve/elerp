@@ -95,7 +95,7 @@ export function ModoCaja({ onSalir }) {
     setCliente(sol.clienteId ? { id: sol.clienteId, nombre: sol.clienteNombre || '' } : null)
     setVerMesas(false)
   }
-  const soltarMesa = () => { setMesaSel(null); setCart([]); setCliente(null) }
+  const soltarMesa = () => { setMesaSel(null); setCart([]); setCliente(null); setVentaSenal((n) => n + 1) }
   const [cliente, setCliente] = useState(null) // null = Consumidor final
   const [identificando, setIdentificando] = useState(false)
   const [infoSku, setInfoSku] = useState('')
@@ -856,7 +856,12 @@ export function ModoCaja({ onSalir }) {
       <CobroModal open={cobrando} onClose={() => setCobrando(false)}
         lineas={cart} clienteId={cliente?.id || ''} clienteNombre={cliente?.nombre || 'Consumidor final'} contingencia={false}
         cuponCodigo={cupon?.codigo || ''}
-        permiteEnvio={!mesaSel}
+        permiteEnvio={!mesaSel} ventaId={ventaSenal}
+        onCliente={async (id) => {
+          await reload()
+          const c = (db.CLIENTES || []).find((x) => x.id === id)
+          setCliente(c || { id })
+        }}
         onCobrar={mesaSel ? async (cobro) => {
           const res = await api.facturarCotizacion(mesaSel.id, { ...cobro, clienteId: cliente?.id || '' })
           return res?.documento || res
