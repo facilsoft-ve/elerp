@@ -53,6 +53,10 @@ type Mesa struct {
 	ID        string `json:"id" bson:"id"`
 	EmpresaID string `json:"empresaId" bson:"empresaid"` // tenant
 	SedeID    string `json:"sedeId" bson:"sedeid"`       // el salón es por sede
+	// PisoID es la planta donde está la mesa. Vacío = planta baja: es lo que
+	// tienen todas las mesas dibujadas antes de que existieran los pisos, y no
+	// hay que migrarlas para que sigan apareciendo donde están.
+	PisoID    string `json:"pisoId,omitempty" bson:"pisoid,omitempty"`
 	Nombre    string `json:"nombre" bson:"nombre"`       // "1", "Terraza 3", "Barra 2"
 	Zona      string `json:"zona" bson:"zona"`           // salón/zona (opcional)
 	Capacidad int    `json:"capacidad" bson:"capacidad"` // comensales

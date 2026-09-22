@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"go.mongodb.org/mongo-driver/bson"
 	"time"
 
 	gomongo "go.mongodb.org/mongo-driver/mongo"
@@ -77,10 +78,46 @@ func (m coll[T]) insert(doc T) {
 	_, _ = m.c.InsertOne(ctx, doc)
 }
 
+/* replace reemplaza el documento por su id DENTRO DE SU TENANT.
+ *
+ * El filtro incluye `empresaid` y esto no es un detalle: los ids lógicos se
+ * repiten entre tenants a propósito —una copia de demostración conserva los de
+ * su base para no tener que reescribir cada referencia de cada colección—, así
+ * que filtrar solo por id alcanza el documento de OTRA empresa.
+ *
+ * Lo que pasaba sin esto, y costó encontrarlo: guardar el mapa del salón en una
+ * demo pisaba la mesa del tenant base, le escribía el empresaid de la copia, y
+ * dejaba la copia con la mesa DUPLICADA y la base sin ella. Con upsert activo el
+ * daño es silencioso: no falla nada, solo aparecen datos donde no van.
+ *
+ * El tenant se saca del propio documento. Un documento sin `empresaid` (el meta
+ * del sembrado, la organización) se reemplaza por id a secas, que es correcto:
+ * no pertenece a ninguna empresa.
+ */
 func (m coll[T]) replace(id string, doc T) {
 	ctx, cancel := opctx()
 	defer cancel()
-	_, _ = m.c.ReplaceOne(ctx, map[string]any{"id": id}, doc, options.Replace().SetUpsert(true))
+	filtro := map[string]any{"id": id}
+	if emp := empresaDe(doc); emp != "" {
+		filtro["empresaid"] = emp
+	}
+	_, _ = m.c.ReplaceOne(ctx, filtro, doc, options.Replace().SetUpsert(true))
+}
+
+// empresaDe lee el `empresaid` de un documento, o "" si no lo tiene. Se resuelve
+// sobre el BSON y no sobre la estructura de Go para que valga igual para los
+// treinta y pico de tipos que pasan por acá, sin repetir el acceso en cada uno.
+func empresaDe(doc any) string {
+	b, err := bson.Marshal(doc)
+	if err != nil {
+		return ""
+	}
+	var m bson.M
+	if err := bson.Unmarshal(b, &m); err != nil {
+		return ""
+	}
+	s, _ := m["empresaid"].(string)
+	return s
 }
 
 func (m coll[T]) count() int64 {

@@ -177,19 +177,49 @@ function MapaMesas() {
   const [err, setErr] = useState(null)
   const [sel, setSel] = useState(null)      // {tipo:'mesa'|'mostrador'|'area', id}
   const [herramienta, setHerramienta] = useState('mesa')
+  /* MODO DEL ÁREA, explícito y a la vista.
+   *
+   * Antes el mismo arrastre hacía tres cosas distintas según un estado
+   * invisible: creaba si no había nada elegido, ampliaba si había algo elegido,
+   * y recortaba si se empezaba encima de una zona. Nadie puede predecir eso, y
+   * lo peor no era el dibujo sino el color: como el gesto ELEGÍA el área sin
+   * pedirlo, tocar un color después de recortar lo aplicaba a la zona
+   * equivocada.
+   *
+   * Ahora el modo se elige y se ve, el área sobre la que se trabaja se nombra en
+   * la barra, y NINGÚN arrastre cambia esa elección. Lo que va a pasar al soltar
+   * está escrito antes de empezar. */
+  const [modoArea, setModoArea] = useState('nueva')   // nueva | ampliar | quitar
+  // Piso activo del editor. Vacío hasta que carga el plano.
+  const [pisoID, setPisoID] = useState('')
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   const [tipos, setTipos] = useState([])
+
+  /* LOS PISOS Y EL PISO ACTIVO.
+   *
+   * `pisos` es la lista completa; `plano` es SIEMPRE la planta que se está
+   * editando. Mantenerlo así deja intacto todo el editor —que ya sabía trabajar
+   * sobre un plano— en vez de hacerle preguntar por el piso en cada línea; al
+   * cambiar de planta se guarda la actual en la lista y se carga la otra.
+   *
+   * Un plano guardado antes de los pisos no trae la lista: sus campos SON la
+   * planta baja, igual que en el servidor. */
+  const [pisos, setPisos] = useState([])
 
   const cargar = useCallback(async () => {
     setErr(null)
     try {
       const [ms, pl] = await Promise.all([api.mesas(), api.planoSalon()])
       setMesas(ms)
-      setPlano({
+      const lista = (pl?.pisos || []).length ? pl.pisos.map(normalizarPiso) : [{
+        id: 'piso_1', nombre: 'Planta baja',
         filas: pl?.filas || 6, columnas: pl?.columnas || 8,
         bloqueadas: pl?.bloqueadas || [], areas: pl?.areas || [], mostradores: pl?.mostradores || [],
-      })
+      }]
+      setPisos(lista)
+      setPisoID(lista[0].id)
+      setPlano(planoDePiso(lista[0]))
     } catch (e) { setErr(e); setMesas([]) }
   }, [])
   useEffect(() => { cargar() }, [cargar])
@@ -216,6 +246,67 @@ function MapaMesas() {
     return () => window.removeEventListener('beforeunload', avisar)
   }, [dirty])
 
+  /* Cambiar de planta. Lo que se dibujó en la actual se guarda en la lista
+   * ANTES de cargar la otra: perder media terraza por tocar una pestaña sería
+   * exactamente el tipo de cosa que hace que nadie use el editor. */
+  const irAPiso = (id) => {
+    if (id === pisoID) return
+    const destino = pisos.find((x) => x.id === id)
+    if (!destino) return
+    const actualizados = pisos.map((x) => (x.id === pisoID ? { ...x, ...plano } : x))
+    setPisos(actualizados)
+    setPisoID(id)
+    setPlano(planoDePiso(destino))
+    setSel(null)
+  }
+
+  const agregarPiso = () => {
+    if (pisos.length >= 10) {
+      toast({ title: 'Ya son demasiadas plantas', body: 'Un local admite hasta 10 pisos.', kind: 'warn' })
+      return
+    }
+    const id = `piso_${Date.now().toString(36)}`
+    // La planta nueva nace con la forma de la que se está viendo: una segunda
+    // planta suele parecerse a la de abajo, y empezar de una grilla por defecto
+    // obliga a redimensionarla siempre.
+    const nuevo = {
+      id, nombre: `Piso ${pisos.length + 1}`,
+      filas: plano.filas, columnas: plano.columnas,
+      bloqueadas: [], areas: [], mostradores: [],
+    }
+    const actualizados = [...pisos.map((x) => (x.id === pisoID ? { ...x, ...plano } : x)), nuevo]
+    setPisos(actualizados)
+    setPisoID(id)
+    setPlano(planoDePiso(nuevo))
+    setSel(null)
+    setDirty(true)
+  }
+
+  const renombrarPiso = (id, nombre) => {
+    setPisos((ps) => ps.map((x) => (x.id === id ? { ...x, nombre } : x)))
+    setDirty(true)
+  }
+
+  const eliminarPiso = async (id) => {
+    if (pisos.length <= 1) return
+    const pi = pisos.find((x) => x.id === id)
+    const dentro = (mesas || []).filter((m) => (m.pisoId || pisos[0].id) === id)
+    if (!(await confirm({
+      title: `¿Eliminar «${pi?.nombre}»?`,
+      body: dentro.length
+        ? `Se van a eliminar también sus ${dentro.length} mesa(s). Esto no se puede deshacer.`
+        : 'La planta está vacía. Esto no se puede deshacer.',
+      confirmLabel: 'Eliminar', tone: 'danger',
+    }))) return
+    const quedan = pisos.filter((x) => x.id !== id)
+    setPisos(quedan)
+    setMesas((ms) => (ms || []).filter((m) => (m.pisoId || pisos[0].id) !== id))
+    setPisoID(quedan[0].id)
+    setPlano(planoDePiso(quedan[0]))
+    setSel(null)
+    setDirty(true)
+  }
+
   const wrapRef = useRef(null)
   const [ancho, setAncho] = useState(720)
   useEffect(() => {
@@ -236,7 +327,20 @@ function MapaMesas() {
    * ya lo alcanza. Achicar ahí sería ganar vista y perder el uso. */
   const cel = Math.max(46, Math.min(68, Math.floor(ancho / (plano.columnas || 8))))
 
-  const salon = { mesas: mesas || [], plano }
+  /* LAS MESAS DE ESTA PLANTA. Todo lo que dibuja o valida el editor —colisiones,
+   * anclas, tiradores— trabaja sobre esto y no sobre la lista completa: una mesa
+   * del segundo piso no estorba a una de la planta baja aunque compartan celda,
+   * porque no están en el mismo sitio del local. */
+  const pisoBase = pisos[0]?.id || 'piso_1'
+  const enEstePiso = (m) => (m.pisoId || pisoBase) === pisoID
+  const mesasPiso = (mesas || []).filter(enEstePiso)
+
+  /* LA ZONA SOBRE LA QUE SE TRABAJA. Es explícita: se elige tocando su rótulo y
+   * se nombra en la barra. Ningún arrastre la cambia — ese era el defecto que
+   * hacía que un color terminara en el área equivocada. */
+  const areaObjetivo = sel?.tipo === 'area' ? (plano.areas || []).find((a) => a.id === sel.id) : null
+
+  const salon = { mesas: mesasPiso, plano }
   const dimension = (m) => dimensionDeMesa(m)
   // El ancho se recorta al borde de la grilla: una mesa larga en la última
   // columna se dibuja angosta en vez de desbordar el plano.
@@ -247,8 +351,8 @@ function MapaMesas() {
       Math.max(1, Math.min(df, plano.filas - (m.fila || 0))),
     ]
   }
-  const mesaEn = (c, r) => (mesas || []).find((m) => ocupaCelda(m, c, r))
-  const anclaEn = (c, r) => (mesas || []).find((m) => (m.columna || 0) === c && (m.fila || 0) === r)
+  const mesaEn = (c, r) => mesasPiso.find((m) => ocupaCelda(m, c, r))
+  const anclaEn = (c, r) => mesasPiso.find((m) => (m.columna || 0) === c && (m.fila || 0) === r)
   const bloqueada = (c, r) => (plano.bloqueadas || []).some((b) => b.columna === c && b.fila === r)
 
   const setFilas = (n) => { const v = clamp(n, 1, 20); setPlano((p) => ({ ...p, filas: v, bloqueadas: (p.bloqueadas || []).filter((b) => b.fila < v) })); setDirty(true) }
@@ -312,15 +416,31 @@ function MapaMesas() {
     e.preventDefault()
     const clase = herramienta === 'bloquear' ? 'bloqueo' : herramienta
 
-    /* Con la herramienta Área, dibujar sobre el plano AMPLÍA la zona
-     * seleccionada en vez de crear otra. Es lo que permite una terraza en L: se
-     * pinta el brazo que falta. Sin zona seleccionada, se crea una nueva. */
-    const ampliando = clase === 'area' && sel?.tipo === 'area'
-    if (!ampliando) setSel(null)
+    /* CON LA HERRAMIENTA ÁREA manda el MODO, no lo que esté seleccionado.
+     *
+     * Antes esto miraba si había una zona elegida para decidir entre crear y
+     * ampliar, y el propio gesto elegía la zona: así, dos arrastres seguidos
+     * hacían cosas distintas sin que nada en pantalla lo anunciara. Ahora lo que
+     * va a pasar está escrito en la barra antes de empezar. */
+    if (clase === 'area') {
+      const destino = modoArea === 'nueva' ? '' : (areaObjetivo?.id || '')
+      if (modoArea !== 'nueva' && !destino) {
+        toast({ title: 'Elige primero la zona', body: `Toca el rótulo de un área para ${modoArea === 'quitar' ? 'recortarla' : 'ampliarla'}.`, kind: 'warn' })
+        return
+      }
+      gesto.current = {
+        accion: modoArea === 'nueva' ? 'crear' : 'pintar', clase, c0: c, r0: r, movido: false,
+        id: destino, modo: modoArea === 'quitar' ? 'borrar' : (modoArea === 'ampliar' ? 'pintar' : 'crear'),
+      }
+      try { gridRef.current.setPointerCapture(e.pointerId) } catch { /* sin captura igual funciona */ }
+      gesto.current.v = vistaDelGesto(gesto.current, c, r)
+      setVista(gesto.current.v)
+      return
+    }
+    setSel(null)
 
     gesto.current = {
-      accion: ampliando ? 'pintar' : 'crear', clase, c0: c, r0: r, movido: false,
-      id: ampliando ? sel.id : '', modo: ampliando ? 'pintar' : 'crear',
+      accion: 'crear', clase, c0: c, r0: r, movido: false, id: '', modo: 'crear',
     }
     try { gridRef.current.setPointerCapture(e.pointerId) } catch { /* sin captura igual funciona */ }
     gesto.current.v = vistaDelGesto(gesto.current, c, r)
@@ -373,15 +493,16 @@ function MapaMesas() {
     e.preventDefault(); e.stopPropagation()
     setSel({ tipo: clase, id: el.id })
     if (clase === 'area') {
-      /* Dos gestos sobre un área, y el que se usa depende de DÓNDE se agarra:
-       * el rótulo la mueve entera, el cuerpo RECORTA las celdas que se barren.
-       * Los tiradores de tamaño no aplican a una forma libre —ya no existen— y
-       * recortar tenía que vivir en algún lado: el cuerpo es el sitio evidente,
-       * simétrico con pintar sobre el plano para ampliarla. */
+      /* EL RÓTULO LA MUEVE; el cuerpo solo la ELIGE.
+       *
+       * Antes arrastrar por dentro recortaba, y eso convertía un toque para
+       * seleccionar en un recorte accidental. Recortar ahora es un modo que se
+       * pide: el cuerpo se limita a decir «trabajo con esta», que es lo que
+       * cualquiera espera al tocar algo. */
+      if (tipo !== 'rotulo') return
       const o = celdaDe(e)
-      const modo = tipo === 'rotulo' ? 'mover' : 'borrar'
       gesto.current = {
-        accion: modo === 'mover' ? 'mover' : 'pintar', clase: 'area', id: el.id, modo,
+        accion: 'mover', clase: 'area', id: el.id, modo: 'mover',
         c0: o.c, r0: o.r, offC: o.c - (el.columna || 0), offR: o.r - (el.fila || 0), movido: false,
       }
       try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* idem */ }
@@ -522,6 +643,8 @@ function MapaMesas() {
           zona: zonaDeCelda(plano.areas, v.c, v.r),
           capacidad: aforoMaximo(v.dc, v.df), forma: 'cuadrada',
           columna: v.c, fila: v.r, anchoCeldas: v.dc, altoCeldas: v.df,
+          // Nace en la planta que se está dibujando, no en la baja.
+          pisoId: pisoID,
         })
         setMesas((ms) => [...(ms || []), m])
         setSel({ tipo: 'mesa', id: m.id })
@@ -558,18 +681,32 @@ function MapaMesas() {
   const guardar = async () => {
     setBusy(true)
     try {
-      const ms = (mesas || []).map((m) => ({ ...m, columna: clamp(m.columna || 0, 0, plano.columnas - 1), fila: clamp(m.fila || 0, 0, plano.filas - 1) }))
+      // La planta que se está editando se vuelca a la lista antes de guardar: es
+      // la única que vive fuera de `pisos`.
+      const todos = pisos.map((x) => (x.id === pisoID ? { ...x, ...plano } : x))
+      // Cada mesa se acota a la grilla de SU planta, no a la que está a la vista:
+      // recortar una mesa del segundo piso contra las columnas de la planta baja
+      // la movería sola.
+      const gridDe = (m) => todos.find((x) => x.id === (m.pisoId || pisoBase)) || todos[0]
+      const ms = (mesas || []).map((m) => {
+        const g = gridDe(m)
+        return { ...m, columna: clamp(m.columna || 0, 0, g.columnas - 1), fila: clamp(m.fila || 0, 0, g.filas - 1) }
+      })
       // El plano va PRIMERO: el servidor deduce de sus áreas la zona de cada
       // mesa, así que guardarlo después dejaría las zonas un guardado atrás.
       await api.guardarPlanoSalon({
-        filas: plano.filas, columnas: plano.columnas, bloqueadas: plano.bloqueadas,
-        areas: plano.areas || [], mostradores: plano.mostradores || [],
+        // La planta baja sigue viajando también en el nivel superior: es lo que
+        // lee cualquier pantalla que todavía no sabe de pisos (el POS, la
+        // comandera) y quitarlo las dejaría sin salón.
+        filas: todos[0].filas, columnas: todos[0].columnas, bloqueadas: todos[0].bloqueadas,
+        areas: todos[0].areas || [], mostradores: todos[0].mostradores || [],
+        pisos: todos,
       })
       // El tamaño viaja junto con la posición: mover y agrandar son el mismo
       // gesto, y por rutas distintas el plano queda a medias si una falla.
       await api.guardarMapaMesas(ms.map((m) => {
         const [dc, df] = dimensionDeMesa(m)
-        return { id: m.id, columna: m.columna, fila: m.fila, anchoCeldas: dc, altoCeldas: df }
+        return { id: m.id, columna: m.columna, fila: m.fila, anchoCeldas: dc, altoCeldas: df, pisoId: m.pisoId || pisoBase }
       }))
       await cargar(); setDirty(false); reload()
       toast({ title: 'Plano guardado' })
@@ -641,12 +778,58 @@ function MapaMesas() {
 
   return (
     <div>
+      {/* PISOS. Un local de dos plantas no es un plano más grande: es dos planos.
+          Las pestañas van arriba de todo porque cambian QUÉ se está mirando —el
+          resto de la barra habla de la planta activa— y porque así el editor de
+          un local de un solo piso se ve igual que siempre, con una sola pestaña
+          que nadie tiene que tocar. */}
+      <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+        {pisos.map((pi) => {
+          const activo = pi.id === pisoID
+          const cuantas = (mesas || []).filter((m) => (m.pisoId || pisoBase) === pi.id).length
+          return (
+            <button key={pi.id} type="button" onClick={() => irAPiso(pi.id)}
+              className={`h-8 px-3 rounded-lg text-[13px] font-medium border ring-focus transition-colors ${
+                activo
+                  ? 'bg-elerp-600 text-white border-elerp-600'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-elerp-400'}`}>
+              {pi.nombre}
+              <span className={`ml-1.5 text-[11.5px] ${activo ? 'text-white/70' : 'text-slate-400'}`}>{cuantas}</span>
+            </button>
+          )
+        })}
+        {puedeEditar ? (
+          <button type="button" onClick={agregarPiso} title="Agregar un piso"
+            className="h-8 w-8 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 text-slate-500 hover:border-elerp-400 ring-focus">+</button>
+        ) : null}
+      </div>
+
       <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
         <div className="flex items-center gap-4 flex-wrap">
           {stepper('Columnas', plano.columnas, setColumnas)}
           {stepper('Filas', plano.filas, setFilas)}
           {puedeEditar ? (
             <Segmented size="sm" value={herramienta} onChange={setHerramienta} options={HERRAMIENTAS} />
+          ) : null}
+          {/* EL MODO DEL ÁREA, visible. Es la mitad del arreglo: lo que el
+              siguiente arrastre va a hacer se lee antes de hacerlo. */}
+          {puedeEditar && herramienta === 'area' ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <Segmented size="sm" value={modoArea} onChange={setModoArea} options={MODOS_AREA} />
+              {modoArea !== 'nueva' ? (
+                areaObjetivo ? (
+                  <span className="inline-flex items-center gap-1.5 text-[12px] px-2 h-7 rounded-lg"
+                    style={{ background: (COLOR_AREA[areaObjetivo.color] || COLOR_AREA.violeta).chip,
+                      color: (COLOR_AREA[areaObjetivo.color] || COLOR_AREA.violeta).text }}>
+                    {modoArea === 'ampliar' ? 'ampliando' : 'recortando'} <strong>{areaObjetivo.nombre}</strong>
+                  </span>
+                ) : (
+                  <span className="text-[12px] text-amber-700 dark:text-amber-400">
+                    Toca el rótulo de una zona para elegirla.
+                  </span>
+                )
+              ) : null}
+            </div>
           ) : null}
         </div>
         {puedeEditar ? (
@@ -769,7 +952,7 @@ function MapaMesas() {
             })}
 
             {/* MESAS. */}
-            {(mesas || []).map((m) => {
+            {mesasPiso.map((m) => {
               const [dc, df] = dimensionVisible(m)
               const col = colorEstado(m.estado)
               const activo = sel?.tipo === 'mesa' && sel.id === m.id
@@ -851,15 +1034,33 @@ function MapaMesas() {
             <PanelMostrador key={mostSel.id} mostrador={mostSel} tipos={tipos} puedeEditar={puedeEditar}
               onCambio={(p) => editarDelPlano('mostrador', mostSel.id, p)} onQuitar={() => quitarDelPlano('mostrador', mostSel.id)} />
           ) : (
-            <div className="text-[12.5px] text-slate-400 space-y-2">
-              <p>Ajusta <strong>columnas y filas</strong> para dar forma al salón y <strong>arrastra sobre la grilla</strong> para dibujar.</p>
-              <ul className="space-y-1">
-                <li><strong className="text-slate-500 dark:text-slate-300">Mesa</strong> — ocupa piso y tiene aforo (4 personas por cuadro).</li>
-                <li><strong className="text-slate-500 dark:text-slate-300">Mostrador</strong> — barra, caja, barra de postres. Ocupa piso, sin aforo.</li>
-                <li><strong className="text-slate-500 dark:text-slate-300">Área</strong> — Terraza, Salón principal, Pórtico. No ocupa: las mesas viven adentro y toman su zona.</li>
-                <li><strong className="text-slate-500 dark:text-slate-300">Bloquear</strong> — paredes, columnas, cocina.</li>
-              </ul>
-              <p>Toca algo del plano para editarlo; arrastra sus bordes para cambiarle el tamaño.</p>
+            <div className="space-y-4">
+              {/* LA PLANTA que se está editando. Vive en el panel y no en la
+                  pestaña porque renombrar y eliminar son acciones deliberadas:
+                  un local de un solo piso nunca tiene que toparse con ellas. */}
+              {puedeEditar ? (
+                <div className="space-y-2.5">
+                  <div className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Planta</div>
+                  <Field label="Nombre de la planta" hint="Planta baja, Mezzanina, Terraza del techo…">
+                    <Input value={pisos.find((x) => x.id === pisoID)?.nombre || ''}
+                      onChange={(e) => renombrarPiso(pisoID, e.target.value)} />
+                  </Field>
+                  {pisos.length > 1 ? (
+                    <Button size="sm" variant="ghost" icon={<Icon.Trash size={14} />}
+                      onClick={() => eliminarPiso(pisoID)}>Eliminar esta planta</Button>
+                  ) : null}
+                </div>
+              ) : null}
+              <div className="text-[12.5px] text-slate-400 space-y-2 border-t border-slate-200 dark:border-slate-800 pt-3">
+                <p>Ajusta <strong>columnas y filas</strong> para dar forma a la planta y <strong>arrastra sobre la grilla</strong> para dibujar.</p>
+                <ul className="space-y-1">
+                  <li><strong className="text-slate-500 dark:text-slate-300">Mesa</strong> — ocupa piso y tiene aforo (4 personas por cuadro).</li>
+                  <li><strong className="text-slate-500 dark:text-slate-300">Mostrador</strong> — barra, caja, barra de postres. Ocupa piso, sin aforo.</li>
+                  <li><strong className="text-slate-500 dark:text-slate-300">Área</strong> — Terraza, Salón principal, Pórtico. No ocupa: las mesas viven adentro y toman su zona.</li>
+                  <li><strong className="text-slate-500 dark:text-slate-300">Bloquear</strong> — paredes, columnas, cocina.</li>
+                </ul>
+                <p>Toca algo del plano para editarlo; arrastra sus bordes para cambiarle el tamaño.</p>
+              </div>
             </div>
           )}
         </div>
@@ -876,10 +1077,37 @@ const HERRAMIENTAS = [
   { value: 'bloquear', label: 'Bloquear' },
 ]
 
+/* planoDePiso y normalizarPiso son el puente entre la lista de plantas y el
+ * editor, que trabaja sobre UNA. Están separados porque el editor no tiene por
+ * qué saber que un piso lleva id y nombre: lo suyo es la grilla y su contenido. */
+function planoDePiso(pi) {
+  return {
+    filas: pi?.filas || 6, columnas: pi?.columnas || 8,
+    bloqueadas: pi?.bloqueadas || [], areas: pi?.areas || [], mostradores: pi?.mostradores || [],
+  }
+}
+
+function normalizarPiso(pi) {
+  return {
+    id: pi?.id || 'piso_1', nombre: pi?.nombre || 'Planta baja',
+    filas: pi?.filas || 6, columnas: pi?.columnas || 8,
+    bloqueadas: pi?.bloqueadas || [], areas: pi?.areas || [], mostradores: pi?.mostradores || [],
+  }
+}
+
+/* Los tres modos del área, que antes estaban implícitos en el gesto. Nombrarlos
+ * es lo que los vuelve predecibles: «Nueva» siempre crea, «Ampliar» siempre suma
+ * a la zona elegida, «Quitar» siempre recorta esa misma. */
+const MODOS_AREA = [
+  { value: 'nueva', label: 'Nueva' },
+  { value: 'ampliar', label: 'Ampliar' },
+  { value: 'quitar', label: 'Quitar' },
+]
+
 const AYUDA_HERRAMIENTA = {
   mesa: 'Arrastra sobre la grilla para dibujar una mesa; su tamaño define el aforo.',
   mostrador: 'Arrastra para dibujar la barra, la caja o una estación de servicio.',
-  area: 'Arrastra para delimitar una zona (Terraza, Salón principal, Pórtico). Con una zona elegida, pintar la amplía y barrer por dentro la recorta: así se hacen las formas en L. Las mesas de adentro toman su nombre.',
+  area: 'Elige qué hacer —Nueva, Ampliar o Quitar— y arrastra. Para ampliar o recortar, primero toca el rótulo de la zona. Las mesas de adentro toman su nombre.',
   bloquear: 'Arrastra para marcar paredes o zonas donde no van mesas; toca una marcada para liberarla.',
 }
 
@@ -915,9 +1143,9 @@ function PanelArea({ area, puedeEditar, onCambio, onQuitar }) {
         </div>
       </div>
       <div className="text-[11.5px] text-slate-400">
-        <span className="num">{celdasDeArea(area).length}</span> cuadros.
-        Con la herramienta <strong>Área</strong>: pinta sobre el plano para ampliarla
-        y barre por encima de la zona para recortarla. El rótulo la mueve entera.
+        <span className="num">{celdasDeArea(area).length}</span> cuadros. Para cambiarle la forma,
+        elige <strong>Ampliar</strong> o <strong>Quitar</strong> arriba y arrastra sobre el plano.
+        El rótulo la mueve entera.
       </div>
       {puedeEditar ? (
         <Button size="sm" variant="ghost" icon={<Icon.Trash size={14} />} onClick={onQuitar}>Quitar área</Button>

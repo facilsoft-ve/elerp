@@ -305,6 +305,8 @@ type mesaBody struct {
 	Forma     string `json:"forma"`
 	Columna   int    `json:"columna"`
 	Fila      int    `json:"fila"`
+	// PisoID es la planta donde vive la mesa. Vacío = planta baja.
+	PisoID string `json:"pisoId"`
 	// AnchoCeldas y AltoCeldas son el tamaño de la mesa en cuadros del plano.
 	// Cada cuadro admite 4 personas, así que ampliar la mesa es lo que habilita
 	// un aforo mayor. 0 = que el servidor le ponga el mínimo que haga falta.
@@ -316,7 +318,7 @@ type mesaBody struct {
 func (b mesaBody) modelo() mesa.Mesa {
 	return mesa.Mesa{
 		Nombre: b.Nombre, Zona: b.Zona, Capacidad: b.Capacidad, Forma: b.Forma,
-		Columna: b.Columna, Fila: b.Fila,
+		Columna: b.Columna, Fila: b.Fila, PisoID: b.PisoID,
 		AnchoCeldas: b.AnchoCeldas, AltoCeldas: b.AltoCeldas,
 	}
 }
@@ -377,6 +379,9 @@ func (s *Server) handleGuardarPlano(c *fiber.Ctx) error {
 		// detecta porque ninguna de las dos claves viene, y entonces se conservan.
 		Areas       *[]mesa.Area      `json:"areas"`
 		Mostradores *[]mesa.Mostrador `json:"mostradores"`
+		// Pisos llega cuando el editor maneja plantas. Ausente = cliente de un solo
+		// piso, y se conserva lo que había.
+		Pisos *[]mesa.Piso `json:"pisos"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
@@ -394,6 +399,9 @@ func (s *Server) handleGuardarPlano(c *fiber.Ctx) error {
 	}
 	if in.Mostradores != nil {
 		entrada.Mostradores = *in.Mostradores
+	}
+	if in.Pisos != nil {
+		entrada.Pisos = *in.Pisos
 	}
 	out, err := s.svc.GuardarPlanoCompleto(empresaIDOf(c), sedeIDOf(c), principalOf(c).UserID, origen(c), entrada)
 	if err != nil {

@@ -53,6 +53,10 @@ func NuevoIDDemo() string { return newID(prefijoDemo) }
 var coleccionesSinEmpresa = map[string]bool{
 	"usuarios": true, "organizaciones": true, "membresias": true,
 	"contadores": true, "sesiones": true, "seedmeta": true, "credenciales": true,
+	// sedes: las crea CrearCopiaDemo con su id original, porque todo el ledger
+	// las referencia. Clonarlas también acá las dejaba DOS VECES, y con la sede
+	// repetida el visitante veía cada mesa, cada caja y cada pedido duplicados.
+	"sedes": true,
 }
 
 // ClonarEmpresa copia TODOS los documentos de negocio de una empresa a otra.

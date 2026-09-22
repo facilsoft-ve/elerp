@@ -90,6 +90,9 @@ type PlanoEntrada struct {
 	Bloqueadas  []mesa.Celda
 	Areas       []mesa.Area
 	Mostradores []mesa.Mostrador
+	// Pisos son las plantas del local. Vacío = el cliente todavía manda el formato
+	// de un solo piso, y los campos de arriba son la planta baja.
+	Pisos []mesa.Piso
 	// conservar deja áreas y mostradores como están. Lo usa la ruta vieja, que
 	// solo sabe de grilla: sin esto, un cliente anterior borraría la barra y las
 	// zonas del local con solo cambiar el número de filas.
@@ -153,9 +156,24 @@ func (s *Service) GuardarPlanoCompleto(empresaID, sedeID, actor, origen string, 
 		}
 	}
 
+	/* LOS PISOS. Cada planta se valida por separado —sus áreas no pueden pisarse
+	 * entre sí, pero sí pueden coincidir con las de otro piso: la terraza de
+	 * arriba y el salón de abajo ocupan las mismas coordenadas del plano y no se
+	 * estorban, porque no están en el mismo sitio del local. */
+	pisos := in.Pisos
+	if !in.conservar {
+		var err error
+		if pisos, err = s.saneaPisos(empresaID, sedeID, pisos); err != nil {
+			return mesa.Plano{}, err
+		}
+	} else if ant, ok := s.planos.Get(empresaID, sedeID); ok {
+		pisos = ant.Pisos
+	}
+
 	p := mesa.Plano{
 		EmpresaID: empresaID, SedeID: sedeID, Filas: filas, Columnas: columnas,
-		Bloqueadas: limpias, Areas: areas, Mostradores: mostradores, Actualizada: ahora(),
+		Bloqueadas: limpias, Areas: areas, Mostradores: mostradores,
+		Pisos: pisos, Actualizada: ahora(),
 	}
 	out := s.planos.Upsert(p)
 	// La zona de cada mesa se deduce del área donde está. Se hace DESPUÉS de
@@ -226,6 +244,13 @@ func (s *Service) saneaMostradores(empresaID, sedeID string, ms []mesa.Mostrador
 			}
 		}
 	}
+	return saneaMostradoresContra(mesas, ms, columnas, filas)
+}
+
+// saneaMostradoresContra es el núcleo: valida los muebles contra una grilla y un
+// conjunto de mesas concreto. Separado para que el caso de un piso y el de todo
+// el salón compartan las reglas en vez de tenerlas escritas dos veces.
+func saneaMostradoresContra(mesas []mesa.Mesa, ms []mesa.Mostrador, columnas, filas int) ([]mesa.Mostrador, error) {
 	out := make([]mesa.Mostrador, 0, len(ms))
 	for _, m := range ms {
 		m.Nombre = strings.TrimSpace(m.Nombre)
@@ -262,17 +287,85 @@ func (s *Service) saneaMostradores(empresaID, sedeID string, ms []mesa.Mostrador
 // aplicarZonasDeAreas pone a cada mesa la zona del área que la contiene. Sin
 // áreas dibujadas no toca nada: la zona escrita a mano sigue valiendo.
 func (s *Service) aplicarZonasDeAreas(empresaID, sedeID string, p mesa.Plano) {
-	if s.mesas == nil || len(p.Areas) == 0 {
+	if s.mesas == nil {
 		return
 	}
 	for _, m := range s.mesas.List(empresaID, sedeID) {
-		zona := p.ZonaDe(m.Columna, m.Fila)
+		// La zona sale del área de SU piso. Buscarla en todo el plano le pondría a
+		// una mesa de la planta alta el nombre de la terraza de abajo, que ocupa
+		// las mismas coordenadas y no es el mismo sitio.
+		zona := p.PisoDeMesa(m).ZonaDe(m.Columna, m.Fila)
 		if zona == "" || zona == m.Zona {
 			continue
 		}
 		m.Zona = zona
 		s.mesas.Update(m)
 	}
+}
+
+/* saneaPisos valida cada planta por separado.
+ *
+ * Lo que NO se comprueba entre pisos es el solapamiento: dos áreas en la misma
+ * coordenada de plantas distintas no se estorban —una está arriba de la otra— y
+ * rechazarlas obligaría a dibujar cada piso corrido a un lado, que es justamente
+ * el mapa ilegible que los pisos vienen a evitar.
+ */
+func (s *Service) saneaPisos(empresaID, sedeID string, pisos []mesa.Piso) ([]mesa.Piso, error) {
+	if len(pisos) == 0 {
+		return nil, nil // formato de un solo piso: lo de arriba es la planta baja
+	}
+	if len(pisos) > mesa.PisosMax {
+		return nil, fmt.Errorf("un local admite hasta %d pisos", mesa.PisosMax)
+	}
+	out := make([]mesa.Piso, 0, len(pisos))
+	ids := map[string]bool{}
+	for i := range pisos {
+		pi := pisos[i]
+		pi.Normalizar()
+		if pi.ID == "" {
+			pi.ID = fmt.Sprintf("piso_%d", i+1)
+		}
+		if ids[pi.ID] {
+			return nil, fmt.Errorf("hay dos pisos con el mismo identificador: %q", pi.ID)
+		}
+		ids[pi.ID] = true
+		pi.Orden = i
+
+		limpias := make([]mesa.Celda, 0, len(pi.Bloqueadas))
+		vistas := map[mesa.Celda]bool{}
+		for _, c := range pi.Bloqueadas {
+			if c.Columna < 0 || c.Columna >= pi.Columnas || c.Fila < 0 || c.Fila >= pi.Filas || vistas[c] {
+				continue
+			}
+			vistas[c] = true
+			limpias = append(limpias, c)
+		}
+		pi.Bloqueadas = limpias
+
+		var err error
+		if pi.Areas, err = saneaAreas(pi.Areas, pi.Columnas, pi.Filas); err != nil {
+			return nil, fmt.Errorf("piso «%s»: %w", pi.Nombre, err)
+		}
+		if pi.Mostradores, err = s.saneaMostradoresDePiso(empresaID, sedeID, pi); err != nil {
+			return nil, fmt.Errorf("piso «%s»: %w", pi.Nombre, err)
+		}
+		out = append(out, pi)
+	}
+	return out, nil
+}
+
+// saneaMostradoresDePiso valida los muebles contra su planta y contra las mesas
+// DE ESA PLANTA: una barra del segundo piso no pisa una mesa del primero.
+func (s *Service) saneaMostradoresDePiso(empresaID, sedeID string, pi mesa.Piso) ([]mesa.Mostrador, error) {
+	var mesas []mesa.Mesa
+	if s.mesas != nil {
+		for _, m := range s.mesas.List(empresaID, sedeID) {
+			if m.Activa && pi.EsDelPiso(m) {
+				mesas = append(mesas, m)
+			}
+		}
+	}
+	return saneaMostradoresContra(mesas, pi.Mostradores, pi.Columnas, pi.Filas)
 }
 
 func maxInt(a, b int) int {
@@ -443,6 +536,9 @@ type PosicionMesa struct {
 	Fila        int    `json:"fila"`
 	AnchoCeldas int    `json:"anchoCeldas,omitempty"`
 	AltoCeldas  int    `json:"altoCeldas,omitempty"`
+	// PisoID mueve la mesa de planta. Vacío = se conserva la que tenía: un
+	// cliente que no sabe de pisos no puede mandarlas todas a la planta baja.
+	PisoID string `json:"pisoId,omitempty"`
 }
 
 // GuardarMapa aplica en lote las posiciones (celda de grilla) de varias mesas (lo
@@ -462,6 +558,9 @@ func (s *Service) GuardarMapa(empresaID, actor, origen string, pos []PosicionMes
 			continue
 		}
 		m.Columna, m.Fila = p.Columna, p.Fila
+		if strings.TrimSpace(p.PisoID) != "" {
+			m.PisoID = p.PisoID
+		}
 		if p.AnchoCeldas > 0 && p.AltoCeldas > 0 {
 			if p.AnchoCeldas > maxCeldasMesa || p.AltoCeldas > maxCeldasMesa {
 				return fmt.Errorf("%w: «%s»", ErrTamanoMesaInvalido, m.Nombre)
@@ -490,8 +589,13 @@ func (s *Service) GuardarMapa(empresaID, actor, origen string, pos []PosicionMes
 			final = append(final, m)
 		}
 	}
+	// Dos mesas solo se estorban si están en LA MISMA PLANTA: la mesa 1 del salón
+	// y la mesa 1 de arriba ocupan la misma celda del plano y no se tocan.
 	for i := range final {
 		for j := i + 1; j < len(final); j++ {
+			if pisoDeMesa(final[i]) != pisoDeMesa(final[j]) {
+				continue
+			}
 			if final[i].SeSolapaCon(final[j]) {
 				return fmt.Errorf("%w: «%s» y «%s»", ErrMesasSolapadas, final[i].Nombre, final[j].Nombre)
 			}
@@ -502,11 +606,29 @@ func (s *Service) GuardarMapa(empresaID, actor, origen string, pos []PosicionMes
 	// local no permite.
 	if s.planos != nil && sedeID != "" {
 		if p, ok := s.planos.Get(empresaID, sedeID); ok {
-			for _, most := range p.Mostradores {
-				for _, m := range final {
-					if most.PisaMesa(m) {
-						return fmt.Errorf("%w: «%s» y «%s»", ErrMostradorPisaMesa, most.Nombre, m.Nombre)
+			// Cada mesa contra los muebles de SU planta: la barra de arriba no pisa
+			// una mesa de abajo por compartir coordenadas.
+			for _, pi := range p.PisosEfectivos() {
+				for _, most := range pi.Mostradores {
+					for _, m := range pi.MesasDe(final) {
+						if most.PisaMesa(m) {
+							return fmt.Errorf("%w: «%s» y «%s»", ErrMostradorPisaMesa, most.Nombre, m.Nombre)
+						}
 					}
+				}
+			}
+		}
+	}
+	/* La ZONA se recalcula al mover, no solo al guardar el plano. Mover una mesa a
+	 * otra planta —o a otra área de la misma— le dejaba el nombre de zona de donde
+	 * estaba antes, y la zona es justo lo que el personal usa para nombrarla en voz
+	 * alta: «la cuatro de la terraza» apuntando a una mesa que ya no está ahí. */
+	if s.planos != nil && sedeID != "" {
+		if pl, ok := s.planos.Get(empresaID, sedeID); ok {
+			for id, m := range nuevas {
+				if z := pl.PisoDeMesa(m).ZonaDe(m.Columna, m.Fila); z != "" && z != m.Zona {
+					m.Zona = z
+					nuevas[id] = m
 				}
 			}
 		}
@@ -516,4 +638,14 @@ func (s *Service) GuardarMapa(empresaID, actor, origen string, pos []PosicionMes
 	}
 	s.audit.Append(evento(empresaID, actor, origen, "restaurante.mapa.guardar", "", ""))
 	return nil
+}
+
+// pisoDeMesa normaliza el piso de una mesa para comparar. El vacío es la planta
+// baja: dos mesas anteriores a los pisos tienen que seguir estorbándose entre
+// sí, no dejar de hacerlo por no tener el campo.
+func pisoDeMesa(m mesa.Mesa) string {
+	if m.PisoID == "" {
+		return mesa.PisoPrincipal
+	}
+	return m.PisoID
 }

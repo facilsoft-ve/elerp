@@ -17,7 +17,13 @@ type Plano struct {
 	// Mostradores son los muebles de servicio (barra, caja, barra de postres).
 	// Sí ocupan superficie: son muebles reales y ahí no entra una mesa.
 	Mostradores []Mostrador `json:"mostradores" bson:"mostradores"`
-	Actualizada string      `json:"actualizada" bson:"actualizada"` // RFC3339
+	/* Pisos son las plantas del local, cada una con SU grilla y SU contenido.
+	 *
+	 * Los campos de arriba (Filas, Columnas, Bloqueadas, Areas, Mostradores) son
+	 * el formato anterior: con Pisos vacío, ESOS son la planta baja. Se leen
+	 * siempre por PisosEfectivos, nunca directo — ver piso.go. */
+	Pisos       []Piso `json:"pisos,omitempty" bson:"pisos,omitempty"`
+	Actualizada string `json:"actualizada" bson:"actualizada"` // RFC3339
 }
 
 /* ÁREAS Y MOSTRADORES.
