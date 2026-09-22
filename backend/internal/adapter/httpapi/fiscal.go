@@ -463,6 +463,13 @@ func (s *Server) handleEmitir(c *fiber.Ctx) error {
 		ent.Lineas = append(ent.Lineas, linea)
 	}
 
+	/* Con la imprenta digital encendida, la factura necesita cliente identificado.
+	 * Se verifica ANTES de emitir: después el cliente ya se fue y no hay a quién
+	 * pedirle la cédula, y quedaría una venta cobrada que nunca será fiscal. */
+	if motivo := s.svc.FaltaClienteParaImprenta(empresaIDOf(c), canalDeVenta(c), in.ClienteID); motivo != "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": motivo, "codigo": "cliente_requerido_imprenta"})
+	}
+
 	emp, _ := c.Locals("empresa").(empresa.Empresa)
 	out, err := s.svc.EmitirFactura(empresaIDOf(c), sedeIDOf(c), emp.Modalidad, principalOf(c).UserID, origen(c), ent)
 	if err != nil {

@@ -189,9 +189,38 @@ func (c Config) BaseURL() string {
 // Lista indica si la configuración alcanza para emitir. Sin serie o sin sucursal
 // la imprenta rechaza el documento, así que es mejor no dejar encender el módulo
 // que fallar en la primera venta.
+/* Lista dice si el módulo puede emitir de verdad.
+ *
+ * La SUCURSAL no entra: se emitió contra una cuenta sin sucursales y el campo va
+ * vacío sin problema. Exigirla dejaba el módulo imposible de encender.
+ *
+ * El CORREO DE RESPALDO sí entra, y es la condición menos evidente: la imprenta
+ * exige destinatario en cada factura, y la venta de mostrador a consumidor final
+ * no trae correo. Sin respaldo, el módulo se activaría y después rechazaría toda
+ * venta anónima — que es peor que no dejarlo activar.
+ */
 func (c Config) Lista() bool {
 	return c.Activa && strings.TrimSpace(c.Usuario) != "" && strings.TrimSpace(c.PasswordSHA512) != "" &&
-		strings.TrimSpace(c.SerieStrongID) != "" && strings.TrimSpace(c.SucursalStrongID) != ""
+		strings.TrimSpace(c.SerieStrongID) != "" && strings.TrimSpace(c.CorreoRespaldo) != ""
+}
+
+// QueFalta enumera, en castellano, lo que impide encender el módulo. La pantalla
+// lo muestra tal cual: «te falta algo» sin decir qué obliga a adivinar.
+func (c Config) QueFalta() []string {
+	falta := []string{}
+	if strings.TrimSpace(c.Usuario) == "" {
+		falta = append(falta, "el usuario de la imprenta")
+	}
+	if strings.TrimSpace(c.PasswordSHA512) == "" {
+		falta = append(falta, "la contraseña")
+	}
+	if strings.TrimSpace(c.SerieStrongID) == "" {
+		falta = append(falta, "elegir la serie")
+	}
+	if strings.TrimSpace(c.CorreoRespaldo) == "" {
+		falta = append(falta, "el correo de respaldo (la imprenta exige destinatario en cada factura)")
+	}
+	return falta
 }
 
 // Canales de emisión.

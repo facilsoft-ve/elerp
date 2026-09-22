@@ -28,7 +28,10 @@ import (
 
 var (
 	ErrDigitalNoDisponible = errors.New("la facturación digital no está disponible en esta instancia")
-	ErrDigitalIncompleta   = errors.New("faltan datos para activar: usuario, contraseña, serie y sucursal")
+	// ErrDigitalIncompleta es el caso genérico; al guardar se devuelve uno que
+	// NOMBRA lo que falta (Config.QueFalta), porque «faltan datos» obliga a
+	// adivinar cuál.
+	ErrDigitalIncompleta   = errors.New("faltan datos para activar la facturación digital")
 	ErrDigitalCredenciales = errors.New("la imprenta digital rechazó las credenciales")
 )
 
@@ -110,7 +113,8 @@ func (s *Service) GuardarConfigDigital(empresaID, actor, origen string, in Entra
 	c.Actualizada = ahora()
 
 	if c.Activa && !c.Lista() {
-		return fd.Config{}, ErrDigitalIncompleta
+		return fd.Config{}, fmt.Errorf("para activar la facturación digital falta %s",
+			strings.Join(c.QueFalta(), ", "))
 	}
 	out := s.configDigital.Upsert(c)
 	s.audit.Append(evento(empresaID, actor, origen, "config.facturaciondigital", empresaID,
@@ -189,7 +193,12 @@ func (s *Service) ProbarDigital(ctx context.Context, empresaID, ambiente, usuari
 	d.Configuradas, _ = cli.SeriesConfiguradas(ctx)
 	d.Sucursales, _ = cli.Sucursales(ctx)
 	d.Contadores, _ = cli.Contadores(ctx)
-	d.PuedeEmitir = len(d.Configuradas) > 0 && len(d.Sucursales) > 0
+	/* LO QUE DECIDE SI SE PUEDE EMITIR ES LA SERIE, no la sucursal.
+	 *
+	 * La sucursal parecía obligatoria porque el cuerpo la lleva; se emitió con el
+	 * campo vacío contra una cuenta sin sucursales (22/09/2026). Exigirla dejaba
+	 * el módulo imposible de activar en toda cuenta que no las use. */
+	d.PuedeEmitir = len(d.Configuradas) > 0
 	if !d.PuedeEmitir {
 		d.Problema = problemaDeProvision(d)
 	}
@@ -207,9 +216,6 @@ func problemaDeProvision(d DiagnosticoDigital) string {
 		} else {
 			falta = append(falta, "la cuenta no tiene series")
 		}
-	}
-	if len(d.Sucursales) == 0 {
-		falta = append(falta, "no hay sucursales registradas")
 	}
 	if len(falta) == 0 {
 		return ""
@@ -528,4 +534,39 @@ func (s *Service) marcarRechazada(e fd.Emision, er unidigital.ErrorAPI) {
 	e.Actualizada = ahora()
 	e.Intentos = append(e.Intentos, fd.Intento{Cuando: ahora(), Codigo: er.Code, Mensaje: er.Message})
 	s.emisionesDigitales.Update(e)
+}
+
+/* EXIGIR EL CLIENTE ANTES DE COBRAR, no después.
+ *
+ * Con la imprenta encendida toda factura necesita cédula/RIF y dirección del
+ * receptor —también la venta a consumidor final—. Descubrirlo DESPUÉS de emitir
+ * deja una factura local cobrada que nunca va a ser fiscal, y para entonces el
+ * cliente ya se fue: no hay a quién pedirle la cédula.
+ *
+ * Por eso esta consulta se hace antes de emitir, en el canal que corresponda.
+ * Devuelve el motivo en castellano, listo para mostrárselo al cajero.
+ */
+func (s *Service) FaltaClienteParaImprenta(empresaID, canal, clienteID string) string {
+	if s.configDigital == nil {
+		return ""
+	}
+	if !s.ConfigDigital(empresaID).AplicaA(canal) {
+		return "" // módulo o canal apagado: ElERP factura como siempre
+	}
+	cl, ok := s.clientes.ByID(empresaID, clienteID)
+	if !ok {
+		return "La facturación digital está activa: esta venta necesita un cliente identificado (cédula o RIF y dirección)."
+	}
+	falta := []string{}
+	if strings.TrimSpace(cl.Documento) == "" {
+		falta = append(falta, "la cédula o el RIF")
+	}
+	if strings.TrimSpace(cl.Direccion) == "" {
+		falta = append(falta, "la dirección")
+	}
+	if len(falta) == 0 {
+		return ""
+	}
+	return "La facturación digital exige identificar al cliente: a «" + cl.Nombre + "» le falta " +
+		strings.Join(falta, " y ") + "."
 }

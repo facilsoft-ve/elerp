@@ -106,6 +106,22 @@ cliente reclama.
 | Anulación | `POST /documents/anulled {"Control": n}` | **Confirmado emitiendo**: 200 «Documento anulado satisfactorimente», y el documento queda `annulled: true` conservando su control. |
 | Sucursal | `SucursalStrongId` obligatorio | **No lo es**: se emitió con el campo vacío. |
 
+### La quinta regla, y la que más cambia la operación
+
+La encontró la cola de emisión, no una prueba: la primera venta real del mostrador se rechazó con
+
+```
+[Error] Property FiscalRegistry 'Fiscal Registry' no debería estar vacío.
+[Error] Property Address 'Address' no debería estar vacío.
+```
+
+**La imprenta exige cédula/RIF y dirección del receptor en TODA factura**, también en la venta a
+consumidor final. Una bodega que hoy factura sin preguntar nada tiene que empezar a pedir la cédula.
+
+ElERP lo exige **antes de cobrar** (`FaltaClienteParaImprenta`, llamado en las dos rutas de
+facturación) y no al mapear: una vez emitida la factura local ya no se puede pedir la cédula —el
+cliente se fue— y quedaría una venta cobrada que nunca va a ser fiscal.
+
 ### Lo que quedó respondido de la sección 5
 
 - **`OperationCode`**: `C001`. Es el único que usan todos los ejemplos y el que acepta el sandbox.

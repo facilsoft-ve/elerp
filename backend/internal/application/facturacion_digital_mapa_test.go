@@ -48,7 +48,7 @@ func num(t *testing.T, m map[string]any, clave string) float64 {
 func TestImprenta_FacturaGravada(t *testing.T) {
 	doc := fiscal.Documento{
 		Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T14:30:00Z", Moneda: "VES",
-		ClienteNombre: "Bodega La Esquina", ClienteDocumento: "J-31122334-7",
+		ClienteNombre: "Bodega La Esquina", ClienteDocumento: "J-31122334-7", ClienteDireccion: "Av. Bolívar, Caracas",
 		BaseImponible: 100, IVA: 16, Subtotal: 100, Total: 116, AlicuotaIVA: 0.16,
 		Lineas: []fiscal.Linea{{Nombre: "Harina", Cantidad: 2, PrecioUnitario: 50, Total: 100, Alicuota: 0.16}},
 	}
@@ -74,7 +74,7 @@ func TestImprenta_FacturaGravada(t *testing.T) {
 // LA prueba de la hora: el servidor de la imprenta opera en UTC-04:00 y una
 // fecha fuera de rango es rechazo seguro.
 func TestImprenta_FechaEnHoraDeVenezuela(t *testing.T) {
-	doc := fiscal.Documento{Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T14:30:00Z", Moneda: "VES"}
+	doc := fiscal.Documento{Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T14:30:00Z", Moneda: "VES", ClienteDocumento: "V-12345678", ClienteDireccion: "Caracas"}
 	m := mapear(t, doc)
 	f, _ := m["EmissionDateAndTime"].(string)
 	// 14:30 UTC son las 10:30 en Venezuela.
@@ -83,10 +83,11 @@ func TestImprenta_FechaEnHoraDeVenezuela(t *testing.T) {
 	}
 }
 
-// Sin cliente identificado la factura es a consumidor final: es un caso
-// legítimo del mostrador, no un dato faltante que deba romper la emisión.
+// Sin NOMBRE la factura es a consumidor final: es un caso legítimo del
+// mostrador. La cédula y la dirección, en cambio, sí hacen falta (ver
+// TestImprenta_ElReceptorTieneQueEstarIdentificado).
 func TestImprenta_ConsumidorFinal(t *testing.T) {
-	m := mapear(t, fiscal.Documento{Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00", Moneda: "VES"})
+	m := mapear(t, fiscal.Documento{Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00", Moneda: "VES", ClienteDocumento: "V-12345678", ClienteDireccion: "Caracas"})
 	if m["Name"] != "CONSUMIDOR FINAL" {
 		t.Fatalf("Name = %v", m["Name"])
 	}
@@ -99,7 +100,7 @@ func TestImprenta_ConsumidorFinal(t *testing.T) {
 // de hace un mes tiene que mandar la base de ese mes.
 func TestImprenta_BasesPorAlicuota(t *testing.T) {
 	doc := fiscal.Documento{
-		Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00", Moneda: "VES",
+		Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00", Moneda: "VES", ClienteDocumento: "V-12345678", ClienteDireccion: "Caracas",
 		BaseImponible: 300, BaseExenta: 50, IVA: 40, Subtotal: 350, Total: 390,
 		Impuestos: []fiscal.DocumentoImpuesto{
 			{Tipo: fiscal.TipoGeneral, Porcentaje: 0.16, Base: 200, Monto: 32},
@@ -125,7 +126,7 @@ func TestImprenta_BasesPorAlicuota(t *testing.T) {
 // del 31 %: es como lo declara el SENIAT y como lo separa nuestro libro.
 func TestImprenta_RecargoSuntuarioVaAparte(t *testing.T) {
 	doc := fiscal.Documento{
-		Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00", Moneda: "VES",
+		Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00", Moneda: "VES", ClienteDocumento: "V-12345678", ClienteDireccion: "Caracas",
 		BaseImponible: 100, IVA: 31, Subtotal: 100, Total: 131,
 		Impuestos: []fiscal.DocumentoImpuesto{
 			{Tipo: fiscal.TipoGeneral, Porcentaje: 0.16, Base: 100, Monto: 16},
@@ -145,12 +146,12 @@ func TestImprenta_RecargoSuntuarioVaAparte(t *testing.T) {
 // impuesto que no ocurrió.
 func TestImprenta_IGTFSoloSiLoHubo(t *testing.T) {
 	sin := mapear(t, fiscal.Documento{Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00",
-		Moneda: "VES", BaseImponible: 100, IVA: 16, Subtotal: 100, Total: 116})
+		Moneda: "VES", ClienteDocumento: "V-12345678", ClienteDireccion: "Caracas", BaseImponible: 100, IVA: 16, Subtotal: 100, Total: 116})
 	if _, hay := sin["IGTFAmount"]; hay {
 		t.Fatal("sin IGTF causado no debe declararse el campo")
 	}
 	con := mapear(t, fiscal.Documento{Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00",
-		Moneda: "VES", BaseImponible: 100, IVA: 16, Subtotal: 100, Total: 119.48,
+		Moneda: "VES", ClienteDocumento: "V-12345678", ClienteDireccion: "Caracas", BaseImponible: 100, IVA: 16, Subtotal: 100, Total: 119.48,
 		IGTF: 3.48, AlicuotaIGTF: 0.03})
 	if num(t, con, "IGTFAmount") != 3.48 || num(t, con, "IGTFPercentage") != 3 {
 		t.Fatalf("IGTF mal declarado: %v", con)
@@ -165,7 +166,7 @@ func TestImprenta_IGTFSoloSiLoHubo(t *testing.T) {
 // pero la imprenta espera el documento en positivo: el que resta es el TIPO.
 func TestImprenta_NotaCreditoViajaEnPositivo(t *testing.T) {
 	doc := fiscal.Documento{
-		Tipo: fiscal.TipoNotaCredito, Fecha: "2026-09-18T10:00:00-04:00", Moneda: "VES",
+		Tipo: fiscal.TipoNotaCredito, Fecha: "2026-09-18T10:00:00-04:00", Moneda: "VES", ClienteDocumento: "V-12345678", ClienteDireccion: "Caracas",
 		BaseImponible: -100, IVA: -16, Subtotal: -100, Total: -116, AlicuotaIVA: 0.16,
 		Lineas: []fiscal.Linea{{Nombre: "Harina", Cantidad: -1, PrecioUnitario: 100, Total: -100, Alicuota: 0.16}},
 	}
@@ -186,7 +187,7 @@ func TestImprenta_NotaCreditoViajaEnPositivo(t *testing.T) {
 // las bases declaradas arriba.
 func TestImprenta_CodigoDeAlicuotaPorRenglon(t *testing.T) {
 	doc := fiscal.Documento{
-		Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00", Moneda: "VES",
+		Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00", Moneda: "VES", ClienteDocumento: "V-12345678", ClienteDireccion: "Caracas",
 		Lineas: []fiscal.Linea{
 			{Nombre: "Gravado", Cantidad: 1, PrecioUnitario: 100, Total: 100, Alicuota: 0.16, AlicuotaCodigo: "general"},
 			{Nombre: "Reducido", Cantidad: 1, PrecioUnitario: 100, Total: 100, Alicuota: 0.08, AlicuotaCodigo: "reducida"},
@@ -212,6 +213,7 @@ func TestImprenta_CodigoDeAlicuotaPorRenglon(t *testing.T) {
 func TestImprenta_ConversionAVES(t *testing.T) {
 	doc := fiscal.Documento{
 		Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00", Moneda: "USD", TasaCambio: 40,
+		ClienteDocumento: "V-12345678", ClienteDireccion: "Caracas",
 		BaseImponible: 100, IVA: 16, Subtotal: 100, Total: 116, AlicuotaIVA: 0.16,
 	}
 	m := mapear(t, doc)
@@ -222,7 +224,7 @@ func TestImprenta_ConversionAVES(t *testing.T) {
 	// del documento se ignora a propósito: convertir bolívares a bolívares por 40
 	// multiplicaría la factura por cuarenta.
 	enBs := mapear(t, fiscal.Documento{Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00",
-		Moneda: "VES", TasaCambio: 40, BaseImponible: 100, IVA: 16, Total: 116})
+		Moneda: "VES", ClienteDocumento: "V-12345678", ClienteDireccion: "Caracas", TasaCambio: 40, BaseImponible: 100, IVA: 16, Total: 116})
 	if num(t, enBs, "ExchangeRate") != 1 || num(t, enBs, "TaxBaseVES") != 100 || num(t, enBs, "GrandTotalVES") != 116 {
 		t.Fatalf("la factura en Bs debe convertirse a sí misma: %v", enBs)
 	}
@@ -254,7 +256,7 @@ func TestImprenta_LaAnulacionNoSeEnviaComoDocumento(t *testing.T) {
 func docSimple() fiscal.Documento {
 	return fiscal.Documento{
 		Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T14:30:00Z", Moneda: "VES",
-		ClienteNombre: "Bodega La Esquina", ClienteDocumento: "J-31122334-7",
+		ClienteNombre: "Bodega La Esquina", ClienteDocumento: "J-31122334-7", ClienteDireccion: "Av. Bolívar, Caracas",
 		BaseImponible: 100, IVA: 16, Subtotal: 100, Total: 116, AlicuotaIVA: 0.16,
 		Lineas: []fiscal.Linea{{Nombre: "Harina", Cantidad: 2, PrecioUnitario: 50, Total: 100, Alicuota: 0.16}},
 	}
@@ -327,5 +329,44 @@ func TestImprenta_ElCorreoEsObligatorio(t *testing.T) {
 	sinNada.CorreoRespaldo = ""
 	if _, err := application.CuerpoImprenta(docSimple(), sinNada, 7, "doc_local_1", ""); err == nil {
 		t.Fatal("sin correo ni respaldo tenía que negarse a emitir")
+	}
+}
+
+/* EL RECEPTOR TIENE QUE ESTAR IDENTIFICADO — la regla que más cambia la
+ * operación del mostrador, descubierta emitiendo (22/09/2026).
+ *
+ * Una bodega que hoy factura sin preguntar nada tiene que empezar a pedir la
+ * cédula. Se falla ACÁ, con nombre y apellido, en vez de dejar que la imprenta
+ * conteste «'Fiscal Registry' no debería estar vacío»: ese mensaje manda a
+ * buscar el problema en la integración, y el problema está en el mostrador.
+ */
+func TestImprenta_ElReceptorTieneQueEstarIdentificado(t *testing.T) {
+	base := docSimple()
+
+	sinNada := base
+	sinNada.ClienteDocumento, sinNada.ClienteDireccion = "", ""
+	if _, err := application.CuerpoImprenta(sinNada, cfgDigital, 7, "x", ""); err == nil {
+		t.Fatal("sin cédula ni dirección la imprenta rechaza: hay que negarse antes de emitir")
+	}
+
+	sinCedula := base
+	sinCedula.ClienteDocumento = ""
+	if _, err := application.CuerpoImprenta(sinCedula, cfgDigital, 7, "x", ""); err == nil {
+		t.Fatal("sin cédula ni RIF no se puede emitir")
+	}
+
+	sinDireccion := base
+	sinDireccion.ClienteDireccion = ""
+	if _, err := application.CuerpoImprenta(sinDireccion, cfgDigital, 7, "x", ""); err == nil {
+		t.Fatal("sin dirección no se puede emitir")
+	}
+
+	// Y el mensaje tiene que decir QUÉ falta: «datos incompletos» obliga a
+	// adivinar cuál, con el cliente esperando en el mostrador.
+	if falta := application.ReceptorIncompleto(sinCedula); len(falta) != 1 {
+		t.Fatalf("debería faltar exactamente una cosa: %v", falta)
+	}
+	if falta := application.ReceptorIncompleto(base); len(falta) != 0 {
+		t.Fatalf("el documento completo no debería tener faltantes: %v", falta)
 	}
 }

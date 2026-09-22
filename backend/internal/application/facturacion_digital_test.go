@@ -50,7 +50,7 @@ func TestDigital_CanalesIndependientes(t *testing.T) {
 	cfg, err := svc.GuardarConfigDigital(empDemo, actorA, origenTst, application.EntradaConfigDigital{
 		Activa: true, PorPOS: true, PorVentas: false,
 		Usuario: "u@x.com", Password: "clave",
-		SerieStrongID: "serie-1", SucursalStrongID: "suc-1",
+		SerieStrongID: "serie-1", CorreoRespaldo: "facturas@mornix.tech",
 	})
 	if err != nil {
 		t.Fatalf("guardar: %v", err)
@@ -70,7 +70,7 @@ func TestDigital_LaClaveSeGuardaHasheada(t *testing.T) {
 	svc.ConFacturacionDigital(st.ConfigDigital, st.EmisionesDigitales)
 	if _, err := svc.GuardarConfigDigital(empDemo, actorA, origenTst, application.EntradaConfigDigital{
 		Activa: true, PorPOS: true, Usuario: "u@x.com", Password: "secreta",
-		SerieStrongID: "serie-1", SucursalStrongID: "suc-1",
+		SerieStrongID: "serie-1", CorreoRespaldo: "facturas@mornix.tech",
 	}); err != nil {
 		t.Fatalf("guardar: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestDigital_LaClaveSeGuardaHasheada(t *testing.T) {
 	// volver a teclearla.
 	if _, err := svc.GuardarConfigDigital(empDemo, actorA, origenTst, application.EntradaConfigDigital{
 		Activa: true, PorPOS: true, PorVentas: true, Usuario: "u@x.com", Password: "",
-		SerieStrongID: "serie-1", SucursalStrongID: "suc-1",
+		SerieStrongID: "serie-1", CorreoRespaldo: "facturas@mornix.tech",
 	}); err != nil {
 		t.Fatalf("editar sin clave: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestDigital_ElTokenPublicoNoEsPredecible(t *testing.T) {
 	svc.ConFacturacionDigital(st.ConfigDigital, st.EmisionesDigitales)
 	if _, err := svc.GuardarConfigDigital(empDemo, actorA, origenTst, application.EntradaConfigDigital{
 		Activa: true, PorPOS: true, Usuario: "u@x.com", Password: "clave",
-		SerieStrongID: "serie-1", SucursalStrongID: "suc-1",
+		SerieStrongID: "serie-1", CorreoRespaldo: "facturas@mornix.tech",
 	}); err != nil {
 		t.Fatalf("guardar: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestDigital_NoSeEncolaDosVeces(t *testing.T) {
 	svc.ConFacturacionDigital(st.ConfigDigital, st.EmisionesDigitales)
 	if _, err := svc.GuardarConfigDigital(empDemo, actorA, origenTst, application.EntradaConfigDigital{
 		Activa: true, PorVentas: true, Usuario: "u@x.com", Password: "clave",
-		SerieStrongID: "serie-1", SucursalStrongID: "suc-1",
+		SerieStrongID: "serie-1", CorreoRespaldo: "facturas@mornix.tech",
 	}); err != nil {
 		t.Fatalf("guardar: %v", err)
 	}

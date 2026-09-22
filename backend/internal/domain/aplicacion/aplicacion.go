@@ -26,6 +26,11 @@ const (
 	ModAsistenteIA = "asistente-ia"
 	ModRestaurante = "restaurante"
 	ModDelivery    = "delivery"
+	// ModFacturacionDigital es la imprenta digital (UniDigital). Va como módulo y
+	// no como una casilla de Configuración porque cambia QUIÉN emite el documento
+	// fiscal: encendido, la factura la firma la imprenta y la caja imprime un
+	// comprobante NO fiscal. Eso se decide, no se configura de pasada.
+	ModFacturacionDigital = "facturacion-digital"
 )
 
 // Modulo es una entrada del catálogo estático (misma para todas las empresas).
@@ -94,6 +99,9 @@ func Catalogo() []Modulo {
 		{ID: ModDelivery, Nombre: "Pedidos y delivery", Descripcion: "Bandeja de pedidos, despacho, repartidores y seguimiento del cliente.", Categoria: CategoriaOperacion, Core: false,
 			Detalle:          "Administra el pedido para llevar de punta a punta, venga de donde venga: lo arma el mostrador por teléfono, lo publica tu tienda web por API o lo manda una app de pedidos. Los tres caen en la MISMA BANDEJA y se atienden igual — como el tablero de comandas, pero para delivery. Al confirmar se valida la zona, se calcula el envío y se fija la promesa de entrega; al quedar listo se emite el número de envío con su etiqueta y el enlace público que el cliente abre sin clave. El reparto sale por tu flota (con vista móvil para el repartidor, cobro en la puerta y prueba de entrega), por una app de envío contratada, o lo hace la misma app que trajo el pedido. Funciona en cualquier negocio: si lo pedido se produce —un plato con su receta— la comanda va al tablero de cocina de siempre; si sale del estante, quien arma el pedido lo marca listo. Es el mismo flujo, no dos.",
 			AvisoDesinstalar: "Se ocultarán la bandeja de pedidos, el despacho y el seguimiento. Tus pedidos, zonas y repartidores NO se borran: vuelven al reactivar el módulo."},
+		{ID: ModFacturacionDigital, Nombre: "Facturación digital (imprenta autorizada)", Descripcion: "Emite la factura fiscal a través de una imprenta digital autorizada por el SENIAT, sin impresora fiscal.", Categoria: CategoriaOperacion, Core: false,
+			Detalle:          "Conecta ElERP con una imprenta digital autorizada (UniDigital): la factura fiscal la emite y firma la imprenta, y el cliente la recibe por correo y por una página pública que abre escaneando el QR del ticket. Se enciende por canal —mostrador, módulo de ventas o ambos— y la caja pasa a imprimir un COMPROBANTE NO FISCAL con ese QR: nunca dos documentos fiscales por una venta. El envío es a prueba de caídas: la venta se cobra siempre, el documento entra a una cola y sale cuando la imprenta responde; el número de control llega minutos después y ElERP lo va a buscar solo. El correlativo lo lleva ElERP y el punto de partida lo da la imprenta, así una cuenta que ya facturó desde otro sistema no arranca en 1.",
+			AvisoDesinstalar: "Las facturas volverán a emitirse como hasta ahora (impresora fiscal o forma libre). Lo ya emitido por la imprenta NO se toca: sigue siendo fiscal y sus páginas públicas siguen abriendo."},
 		{ID: ModAsistenteIA, Nombre: "Asistente IA", Descripcion: "Asistente conversacional flotante: responde sobre tus datos y guía el uso de ElERP.", Categoria: CategoriaGestion, Core: false,
 			Detalle:          "Un asistente flotante en toda la app. Responde MECÁNICAMENTE (100% local, sin enviar datos a nadie) las consultas de tus datos —ventas del mes, cartera vencida, stock de un producto, cuentas por pagar, si el libro cuadra— y las dudas de uso del producto (¿qué es el IGTF?, ¿cómo transfiero stock?), acotado a tu rol. Opcionalmente puede habilitarse una capa de IA (opt-in, en Configuración › Asistente) para las preguntas abiertas: esa capa responde SOLO con el contexto de tu instancia y no navega internet.",
 			AvisoDesinstalar: "Se ocultará el asistente flotante en toda la app. Tu configuración de IA se conserva y vuelve al reactivar el módulo."},

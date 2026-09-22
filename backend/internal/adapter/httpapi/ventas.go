@@ -2,10 +2,12 @@ package httpapi
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/mornix/elerp/internal/application"
+	"github.com/mornix/elerp/internal/domain/facturaciondigital"
 	"github.com/mornix/elerp/internal/domain/usuario"
 )
 
@@ -194,6 +196,19 @@ func (s *Server) handleFacturarCotizacion(c *fiber.Ctx) error {
 		}
 		ent.LineasExtra = append(ent.LineasExtra, linea)
 	}
+	/* Misma regla que el mostrador: con la imprenta encendida, sin cliente
+	 * identificado no se emite. El cliente sale de la cotización salvo que quien
+	 * factura lo corrija acá. */
+	clienteID := in.ClienteID
+	if strings.TrimSpace(clienteID) == "" {
+		if ct, ok := s.svc.Cotizacion(empresaIDOf(c), c.Params("id")); ok {
+			clienteID = ct.ClienteID
+		}
+	}
+	if motivo := s.svc.FaltaClienteParaImprenta(empresaIDOf(c), facturaciondigital.CanalVentas, clienteID); motivo != "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": motivo, "codigo": "cliente_requerido_imprenta"})
+	}
+
 	ct, doc, err := s.svc.FacturarCotizacion(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c), ent)
 	if err != nil {
 		if errors.Is(err, application.ErrCotizacionNoExiste) {

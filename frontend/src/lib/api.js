@@ -524,6 +524,13 @@ export const api = {
     { method: 'POST', body: JSON.stringify({ disponible }) }),
   // Cotiza el envío de una dirección ANTES de cobrar: a qué zona cae, cuánto
   // cuesta y si queda fuera. «Fuera de zona» descubierto tarde es el caso peor.
+  /* FACTURACIÓN DIGITAL (imprenta autorizada). La contraseña viaja al probar y al
+     guardar, y nunca vuelve: el servidor devuelve `tieneClave` en vez del valor. */
+  configDigital: () => request('/api/facturacion-digital/config'),
+  guardarConfigDigital: (body) => request('/api/facturacion-digital/config', { method: 'PUT', body: JSON.stringify(body) }),
+  probarDigital: (body) => request('/api/facturacion-digital/probar', { method: 'POST', body: JSON.stringify(body) }),
+  emisionesDigitales: () => request('/api/facturacion-digital/emisiones'),
+
   cotizarEnvio: (body) => request('/api/pedidos/cotizar-envio', { method: 'POST', body: JSON.stringify(body) }),
   canalesPedido: () => request('/api/pedidos/config/canales'),
   guardarCanalPedido: (body) => request('/api/pedidos/config/canales', { method: 'PUT', body: JSON.stringify(body) }),

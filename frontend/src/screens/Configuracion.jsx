@@ -17,6 +17,7 @@ import { fechaCortaVE, explicarFallo } from '../components/tasa.jsx'
 import { monedaLabel, monedaNombre, monedaSimbolo, permiteFuenteBcv } from '../lib/precio.js'
 import { Promociones } from './Promociones.jsx'
 import { FormatosDocumento } from './FormatosDocumento.jsx'
+import { FacturacionDigital } from './FacturacionDigital.jsx'
 
 /* Configuración — las pestañas del prototipo, más la de Moneda que exige la
  * arquitectura (R9 + R10).
@@ -41,6 +42,7 @@ const TABS = [
   { id: 'formatos', label: 'Formatos de documento', grupo: 'Fiscal', icon: <Icon.FileText size={15} /> },
   { id: 'moneda', label: 'Moneda y tasa', grupo: 'Fiscal', icon: <Icon.Banknote size={15} /> },
   { id: 'dispositivos', label: 'Dispositivos fiscales', grupo: 'Fiscal', icon: <Icon.Printer size={15} /> },
+  { id: 'facturacion-digital', label: 'Facturación digital', grupo: 'Fiscal', icon: <Icon.Globe size={15} /> },
   { id: 'cajas', label: 'Cajas y sesiones', grupo: 'Punto de venta', icon: <Icon.Wallet size={15} /> },
   { id: 'punto-venta', label: 'Punto de venta', grupo: 'Punto de venta', icon: <Icon.Cart size={15} /> },
   { id: 'metodos', label: 'Métodos de pago', grupo: 'Punto de venta', icon: <Icon.Wallet size={15} /> },
@@ -96,6 +98,12 @@ export function Configuracion({ route }) {
       {tab === 'formatos' ? <FormatosDocumento /> : null}
       {tab === 'moneda' ? <MonedaYTasa /> : null}
       {tab === 'dispositivos' ? <Dispositivos /> : null}
+      {/* La imprenta digital se gatea por el módulo: apagado, ElERP factura como
+          siempre y esta pestaña no tiene sentido. */}
+      {tab === 'facturacion-digital' ? ((db.MODULOS || []).includes('facturacion-digital') ? <FacturacionDigital /> : (
+        <Empty icon={<Icon.Globe size={22} />} title="La facturación digital no está activa"
+          body="Actívala en Aplicaciones para emitir tus facturas a través de una imprenta digital autorizada por el SENIAT, sin impresora fiscal." />
+      )) : null}
       {tab === 'cajas' ? <CajasYSesiones /> : null}
       {tab === 'punto-venta' ? <PuntoVenta /> : null}
       {tab === 'metodos' ? <MetodosPago /> : null}

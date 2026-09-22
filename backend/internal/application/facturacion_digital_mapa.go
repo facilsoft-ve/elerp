@@ -251,7 +251,36 @@ func CuerpoImprenta(doc fiscal.Documento, cfg facturaciondigital.Config, numero 
 	}
 	cuerpo["EmailTo"] = c
 
+	/* EL RECEPTOR TIENE QUE ESTAR IDENTIFICADO, y esto es lo que más cambia la
+	 * operación del mostrador: la imprenta exige cédula/RIF y dirección en TODA
+	 * factura, también en la venta a consumidor final. Una bodega que hoy factura
+	 * sin preguntar nada tiene que empezar a pedir la cédula.
+	 *
+	 * Se detecta acá, con nombre y apellido, en vez de dejar que la imprenta
+	 * conteste «'Fiscal Registry' no debería estar vacío» — ese mensaje manda a
+	 * buscar el problema en la integración y el problema está en el mostrador. */
+	if falta := ReceptorIncompleto(doc); len(falta) > 0 {
+		return nil, fmt.Errorf("la imprenta exige identificar al cliente: falta %s", strings.Join(falta, " y "))
+	}
+
 	return cuerpo, nil
+}
+
+/* ReceptorIncompleto enumera qué le falta al cliente del documento para que la
+ * imprenta lo acepte. Vacío = está completo.
+ *
+ * Vive acá y no dentro del mapeo porque se consulta DOS veces: al mapear (por si
+ * algo se coló) y ANTES de emitir, que es donde sirve de verdad — una vez
+ * emitida la factura ya no se puede pedir la cédula. */
+func ReceptorIncompleto(doc fiscal.Documento) []string {
+	falta := []string{}
+	if numeroRIF(doc.ClienteDocumento) == "" {
+		falta = append(falta, "la cédula o el RIF")
+	}
+	if strings.TrimSpace(doc.ClienteDireccion) == "" {
+		falta = append(falta, "la dirección")
+	}
+	return falta
 }
 
 /* LAS ALÍCUOTAS DE LEY.

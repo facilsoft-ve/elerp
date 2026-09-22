@@ -187,6 +187,7 @@ export const NAV = [
       { id: 'formatos', label: 'Formatos de documento', grupo: 'Fiscal' },
       { id: 'moneda', label: 'Moneda y tasa', grupo: 'Fiscal' },
       { id: 'dispositivos', label: 'Dispositivos fiscales', grupo: 'Fiscal' },
+      { id: 'facturacion-digital', label: 'Facturación digital', grupo: 'Fiscal', modulo: 'facturacion-digital' },
       { id: 'cajas', label: 'Cajas y sesiones', grupo: 'Punto de venta' },
       { id: 'punto-venta', label: 'Punto de venta', grupo: 'Punto de venta' },
       { id: 'metodos', label: 'Métodos de pago', grupo: 'Punto de venta' },
