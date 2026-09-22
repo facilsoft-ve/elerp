@@ -62,6 +62,9 @@ func main() {
 		svc.ConLegal(st.Legal)
 		svc.ConNotasCompra(st.NotasCompra)
 		svc.ConSolicitudesCompra(st.Solicitudes)
+		// COPIA EFÍMERA DE LA DEMO: solo con persistencia. En memoria cada
+		// arranque ya empieza limpio, así que la demo compartida es inofensiva.
+		svc.ConCopiaDemo(mongo.NuevaCopiaDemo(db))
 		tenancy = application.NewTenancy(st.Organizaciones, st.Empresas, st.Sedes, st.Usuarios, st.Membresias, st.Credenciales, st.Audit)
 		sessions = mongo.NewSessionStore(db)
 		log.Printf("Persistencia: MongoDB (%s)", cfg.MongoDB)
@@ -143,6 +146,10 @@ func main() {
 	// control. Corre siempre que el módulo esté cableado; si ninguna empresa lo
 	// tiene activo, cada vuelta no hace nada y no cuesta nada.
 	go lazoFacturacionDigital(svc)
+	// Limpieza de las copias de demostración vencidas. Que sea automática es
+	// parte del diseño: una demo que hay que acordarse de borrar termina siendo
+	// una base con doscientas copias abandonadas.
+	go lazoDemoEfimera(svc)
 
 	hb := hubmy.New(cfg.HubmyAPIBase, cfg.HubmyAPIKey)
 	// Capa IA del asistente (opt-in por empresa): solo se cablea si Hubmy está
@@ -189,6 +196,22 @@ func lazoFacturacionDigital(svc *application.Service) {
 			svc.ProcesarEmisiones(ctx, 20)
 		}()
 		time.Sleep(20 * time.Second)
+	}
+}
+
+// lazoDemoEfimera barre las copias de demostración vencidas. Despierta cada
+// media hora: las copias viven tres horas, así que nada se acumula más de eso.
+func lazoDemoEfimera(svc *application.Service) {
+	for {
+		time.Sleep(30 * time.Minute)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("demo efímera: pánico en la limpieza: %v", r)
+				}
+			}()
+			svc.BarrerDemosVencidas()
+		}()
 	}
 }
 

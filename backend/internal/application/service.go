@@ -180,6 +180,9 @@ type Service struct {
 	// justo lo que lo hace un módulo y no una bifurcación del motor fiscal.
 	// pedidos es el módulo de DELIVERY (pedidos para llevar). Se cablea con
 	// ConPedidos; sin él, ElERP se comporta como si el módulo no existiera.
+	// copiaDemo hace las copias efímeras de la demostración. Sin ella, el modo
+	// demo entra al tenant compartido (el comportamiento anterior).
+	copiaDemo          CopiaDemo
 	pedidos            pedido.Repository
 	canalesPedido      pedido.CanalRepository
 	zonasPedido        pedido.ZonaRepository

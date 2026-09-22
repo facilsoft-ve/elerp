@@ -98,11 +98,29 @@ func (s *Server) handleLogin(c *fiber.Ctx) error {
 }
 
 // handleDevLogin crea una sesión demo sin Hubmy (solo si DEV_LOGIN=true).
+//
+// CADA VISITANTE RECIBE SU PROPIA COPIA de los datos demo. Antes todos entraban
+// al mismo tenant: quien llegaba veía —y pisaba— lo que había hecho el anterior,
+// y quien estaba presentando no podía tocar nada sin arruinarle la sesión a otro.
+// Ahora se clonan las empresas demo, el visitante entra a las suyas y la copia se
+// borra sola a las tres horas.
+//
+// Si la copia no está disponible (instancia sin persistencia, o el clonado falla)
+// se cae al tenant demo compartido: es preferible una demostración compartida a
+// una puerta que no abre.
 func (s *Server) handleDevLogin(c *fiber.Ctx) error {
 	if !s.cfg.DevLogin {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "modo demo deshabilitado"})
 	}
 	p := authn.Principal{UserID: application.DemoUserID, Nombre: application.DemoNombre, Email: application.DemoEmail}
+	if s.svc.HayDemoEfimera() {
+		if sesion, err := s.svc.CrearSesionDemo(s.tenancy, s.tenancy.BasesDemo(), "demo", origen(c)); err == nil {
+			p = authn.Principal{UserID: sesion.UsuarioID, Nombre: sesion.Nombre, Email: sesion.Email}
+			log.Printf("demo: copia privada creada (%d documentos, %d empresas)", sesion.Copiados, len(sesion.Empresas))
+		} else {
+			log.Printf("demo: no se pudo crear la copia privada, se usa la compartida: %v", err)
+		}
+	}
 	s.issueSession(c, p, "")
 	return c.Redirect("/app/", fiber.StatusFound)
 }
