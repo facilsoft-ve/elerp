@@ -713,7 +713,13 @@ func (s *Service) arqueoDe(empresaID string, ses caja.Sesion) caja.Arqueo {
 		for _, vp := range partesDeVuelto(d) {
 			esEfectivo := vp.Metodo == "" || vp.Metodo == fiscal.VueltoEfectivo
 			if !esEfectivo {
-				continue // pago móvil: no sale de la gaveta ni del efectivo contado.
+				/* Pago móvil: no sale de la gaveta, pero SÍ salió de la empresa. Se
+				 * informa aparte y se descuenta del neto cobrado — si no, una venta de
+				 * 890 cobrada con un billete de 1.000 aparecía como 1.000 cobrados y
+				 * los 110 transferidos no figuraban en ningún lado. */
+				arqueo.VueltoOtrosBs = round2(arqueo.VueltoOtrosBs + vp.MontoBs)
+				arqueo.TotalCobradoBs = round2(arqueo.TotalCobradoBs - vp.MontoBs)
+				continue
 			}
 			if vp.Moneda == "" || vp.Moneda == empresa.MonedaVES {
 				arqueo.VueltoEfectivoBs = round2(arqueo.VueltoEfectivoBs + vp.MontoBs)

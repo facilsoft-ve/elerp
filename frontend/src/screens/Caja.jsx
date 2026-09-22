@@ -374,6 +374,16 @@ export function ArqueoModal({ open, sesion, onClose, onCerrada, avisoCarrito = f
                 <span>Efectivo Bs esperado</span>
                 <span className="num">{fmtCurrency(esperadoBs, 'VES')}</span>
               </div>
+              {/* EL VUELTO POR OTRO MEDIO no toca la gaveta, pero SÍ salió de la
+                  empresa. Se muestra acá abajo, fuera del cuadre del efectivo,
+                  porque no informarlo dejaba al cajero viendo «cobré 1.000» en una
+                  venta de 890 sin rastro de los 110 que él mismo transfirió. */}
+              {arqueo.vueltoOtrosBs > 0 ? (
+                <div className="flex items-center justify-between pt-1.5 text-[12.5px] text-slate-500">
+                  <span>Vuelto entregado por pago móvil <span className="text-slate-400">(no sale de la gaveta)</span></span>
+                  <span className="num">{fmtCurrency(arqueo.vueltoOtrosBs, 'VES')}</span>
+                </div>
+              ) : null}
             </div>
             <div className="mt-3">
               <Field label="Efectivo Bs contado en la gaveta" required>

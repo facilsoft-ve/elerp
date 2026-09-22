@@ -427,6 +427,9 @@ func (s *Service) ProcesarEmisiones(ctx context.Context, limite int) int {
 		switch e.Estado {
 		case fd.EstadoPendiente, fd.EstadoErrorTemporal:
 			s.enviarEmision(ctx, cli, cfg, e)
+		case fd.EstadoFiscal:
+			// Ya es fiscal: solo falta con qué mostrárselo al cliente.
+			s.completarEnlaces(ctx, cli, e)
 		case fd.EstadoEnviado:
 			s.consultarEmision(ctx, cli, e)
 		}
@@ -500,6 +503,46 @@ func (s *Service) consultarEmision(ctx context.Context, cli *unidigital.Cliente,
 	s.emisionesDigitales.Update(e)
 	s.audit.Append(evento(e.EmpresaID, "sistema", "imprenta_digital", "facturaciondigital.control",
 		e.DocumentoID, e.NumeroControl))
+}
+
+/* completarEnlaces busca la URL y el código corto de un documento YA fiscal.
+ *
+ * Existe porque las dos cosas llegan por consultas aparte y pueden fallar
+ * después de que el documento quedó fiscal —la de la URL falló mucho tiempo por
+ * un error de contrato, y esas facturas quedaron sin enlace—. Reintentarlo acá
+ * las repara solas en vez de dejarlas así para siempre.
+ *
+ * Se abandona a las 24 horas: si a esa altura la imprenta no dio el enlace, no
+ * lo va a dar, y seguir preguntando es ruido eterno contra su API.
+ */
+func (s *Service) completarEnlaces(ctx context.Context, cli *unidigital.Cliente, e fd.Emision) {
+	if !e.FaltaEnlace() {
+		return
+	}
+	if t, err := time.Parse(time.RFC3339, e.Creada); err == nil && time.Since(t) > 24*time.Hour {
+		// Se deja de insistir marcando el próximo intento muy lejos: el documento
+		// es fiscal igual, que es lo que importa.
+		e.ProximoIntento = time.Now().Add(365 * 24 * time.Hour).Format(time.RFC3339)
+		s.emisionesDigitales.Update(e)
+		return
+	}
+	if e.CodigoCorto == "" {
+		if c, err := cli.CodigoCorto(ctx, e.StrongID); err == nil {
+			e.CodigoCorto = c
+		}
+	}
+	if e.URLDocumento == "" {
+		if u, err := cli.URLDocumento(ctx, e.StrongID); err == nil {
+			e.URLDocumento = u
+		}
+	}
+	if e.FaltaEnlace() {
+		e.ProximoIntento = time.Now().Add(5 * time.Minute).Format(time.RFC3339)
+	} else {
+		e.ProximoIntento = ""
+	}
+	e.Actualizada = ahora()
+	s.emisionesDigitales.Update(e)
 }
 
 // registrarFallo anota el intento y decide si se reintenta. Un 400 NO se

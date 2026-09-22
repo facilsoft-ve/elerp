@@ -402,13 +402,20 @@ func (c *Cliente) CodigoCorto(ctx context.Context, strongID string) (string, err
 }
 
 // URLDocumento pide la URL de visualización del documento.
+//
+// `result` es un OBJETO {url}, no el texto de la URL —a diferencia del código
+// corto, que sí viene pelado—. Leerlo como texto fallaba en silencio: el
+// documento quedaba fiscal y sin enlace, y la página pública del cliente perdía
+// el botón para ver y descargar su factura, que es a lo que fue.
 func (c *Cliente) URLDocumento(ctx context.Context, strongID string) (string, error) {
-	var out string
+	var out struct {
+		URL string `json:"url"`
+	}
 	ruta := "/documents/view/?documentStrongId=" + url.QueryEscape(strongID)
 	if err := c.llamar(ctx, http.MethodPost, ruta, nil, &out); err != nil {
 		return "", err
 	}
-	return out, nil
+	return out.URL, nil
 }
 
 // Anular anula un documento POR SU NÚMERO DE CONTROL, no por su id. Es como lo

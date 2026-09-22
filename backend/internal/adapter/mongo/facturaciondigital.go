@@ -74,8 +74,18 @@ func (r *EmisionDigitalRepo) List(empresaID string) []fd.Emision {
 
 // Pendientes recorre TODAS las empresas: el trabajador corre por instancia.
 func (r *EmisionDigitalRepo) Pendientes(limite int) []fd.Emision {
-	todas := r.c.all(map[string]any{"estado": map[string]any{
-		"$in": []string{fd.EstadoPendiente, fd.EstadoEnviado, fd.EstadoErrorTemporal},
+	// Las FISCALES SIN ENLACE también entran: ya tienen número de control, pero
+	// les falta la URL con la que el cliente ve su factura, y eso se pide aparte.
+	todas := r.c.all(map[string]any{"$or": []any{
+		map[string]any{"estado": map[string]any{
+			"$in": []string{fd.EstadoPendiente, fd.EstadoEnviado, fd.EstadoErrorTemporal},
+		}},
+		map[string]any{"estado": fd.EstadoFiscal, "$or": []any{
+			map[string]any{"urldocumento": ""},
+			map[string]any{"urldocumento": map[string]any{"$exists": false}},
+			map[string]any{"codigocorto": ""},
+			map[string]any{"codigocorto": map[string]any{"$exists": false}},
+		}},
 	}})
 	if len(todas) > limite {
 		todas = todas[:limite]

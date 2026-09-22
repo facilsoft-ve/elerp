@@ -209,6 +209,15 @@ type Arqueo struct {
 	CobrosEfectivoBs   float64 `json:"cobrosEfectivoBs" bson:"cobrosefectivobs"`
 	VueltoEfectivoBs   float64 `json:"vueltoEfectivoBs" bson:"vueltoefectivobs"`
 	EfectivoEsperadoBs float64 `json:"efectivoEsperadoBs" bson:"efectivoesperadobs"`
+	/* VueltoOtrosBs es el vuelto entregado POR OTRO MEDIO —pago móvil, sobre
+	 * todo—. No sale de la gaveta, así que no toca el efectivo esperado, pero SÍ
+	 * salió de la empresa: son bolívares que se transfirieron desde una cuenta.
+	 *
+	 * Se informa aparte porque no informarlo era el peor de los dos mundos: el
+	 * cajero veía «recibiste 1.000» en una venta de 890, sin rastro de los 110 que
+	 * él mismo envió, y no tenía cómo cuadrar lo que hizo con lo que la pantalla
+	 * decía. */
+	VueltoOtrosBs float64 `json:"vueltoOtrosBs" bson:"vueltootrosbs"`
 	// TotalCobradoBs es todo lo cobrado del turno en bolívares (neto de vuelto);
 	// Documentos es cuántas facturas se plegaron.
 	TotalCobradoBs float64 `json:"totalCobradoBs" bson:"totalcobradobs"`

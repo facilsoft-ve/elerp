@@ -106,7 +106,19 @@ func (e Emision) EsFiscal() bool { return strings.TrimSpace(e.NumeroControl) != 
 
 // Terminada indica si ya no hay nada más que hacer con esta emisión.
 func (e Emision) Terminada() bool {
-	return e.Estado == EstadoFiscal || e.Estado == EstadoRechazado || e.Estado == EstadoAnulado
+	if e.Estado == EstadoFiscal {
+		// Fiscal PERO sin enlace todavía tiene trabajo: la URL con la que el
+		// cliente ve y descarga su factura llega por una consulta aparte, y sin
+		// ella la página pública se queda sin el botón al que el cliente fue.
+		return !e.FaltaEnlace()
+	}
+	return e.Estado == EstadoRechazado || e.Estado == EstadoAnulado
+}
+
+// FaltaEnlace indica que el documento ya es fiscal pero todavía no tiene con qué
+// mostrárselo al cliente.
+func (e Emision) FaltaEnlace() bool {
+	return e.Estado == EstadoFiscal && (e.URLDocumento == "" || e.CodigoCorto == "")
 }
 
 /* CONFIGURACIÓN POR EMPRESA.

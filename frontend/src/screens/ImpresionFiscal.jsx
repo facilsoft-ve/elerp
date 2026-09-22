@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Icon } from '../components/Icon.jsx'
 import { Button, Modal } from '../components/primitives.jsx'
 import { fmtCurrency } from '../lib/format.js'
+import { useData } from '../context/DataContext.jsx'
 
 /* ENTORNO DE IMPRESORA FISCAL (POS).
  *
@@ -116,6 +117,22 @@ export async function enviarAImpresoraFiscal(doc, dispositivo, simular = 'ok') {
  * cliente ya mostró su «gracias» al emitir). No interfiere con esos eventos. */
 export function ImpresionFiscalModal({ open, doc, dispositivo, onCerrar, canal = 'ventas' }) {
   const esCaja = canal === 'caja'
+  /* IMPRESORA SIMULADA EN LA DEMOSTRACIÓN.
+   *
+   * Una empresa de demostración no tiene hardware, y frenar ahí deja el recorrido
+   * a medias justo en el paso final: se cobra, se emite, y el ciclo termina en
+   * «no hay impresora conectada» sin comprobante ni pantalla de cierre. Quien
+   * prueba el producto se queda sin ver cómo termina una venta.
+   *
+   * Se simula SOLO en sandbox y SE DICE que es simulada. Nunca en una empresa
+   * real: ahí «no hay impresora» es información que el cajero necesita, no un
+   * estorbo que convenga esconder. */
+  const { db } = useData()
+  const esDemo = !!db?.EMPRESA?.sandbox
+  const simulada = !dispositivo && esDemo
+  const equipo = dispositivo || (simulada
+    ? { id: 'demo', nombre: 'Impresora fiscal simulada', serie: 'DEMO-0001' }
+    : null)
   // fase: 'enviando' | 'impresa' | 'error' | 'no_config'
   const [fase, setFase] = useState('enviando')
   const [codigo, setCodigo] = useState('')
@@ -128,30 +145,30 @@ export function ImpresionFiscalModal({ open, doc, dispositivo, onCerrar, canal =
   const enviar = useCallback(async (sim) => {
     setFase('enviando'); setCodigo('')
     try {
-      await enviarAImpresoraFiscal(doc, dispositivo, sim)
+      await enviarAImpresoraFiscal(doc, equipo, sim)
       setFase('impresa')
     } catch (e) {
       setCodigo(e?.codigo || 'error')
       setFase('error')
     }
-  }, [doc, dispositivo])
+  }, [doc, equipo])
 
   // Al abrir: si no hay impresora activa de la sede, estado «no configurada»; si
   // la hay, se dispara UN envío automático (siempre intenta imprimir de verdad,
   // sim='ok'). El simulador solo afecta reimpresiones/reintentos manuales.
   useEffect(() => {
     if (!open) { iniciado.current = false; return }
-    if (!dispositivo) { setFase('no_config'); return }
+    if (!equipo) { setFase('no_config'); return }
     if (iniciado.current) return
     iniciado.current = true
     setSimular('ok')
     enviar('ok')
-  }, [open, dispositivo, enviar])
+  }, [open, equipo, enviar])
 
   if (!open) return null
 
-  const destino = dispositivo
-    ? [dispositivo.nombre, dispositivo.serie ? `serie ${dispositivo.serie}` : '']
+  const destino = equipo
+    ? [equipo.nombre, equipo.serie ? `serie ${equipo.serie}` : '', simulada ? 'demostración' : '']
         .filter(Boolean).join(' · ')
     : ''
   const err = fase === 'error' ? (ERRORES_IMPRESORA[codigo] || ERRORES_IMPRESORA.error) : null
@@ -190,6 +207,14 @@ export function ImpresionFiscalModal({ open, doc, dispositivo, onCerrar, canal =
     <Modal open={open} onClose={onCerrar} size="sm" icon={<Icon.Printer size={18} />}
       title="Impresión fiscal" sub={destino || 'Dispositivo fiscal de la sede'} footer={footer}>
       <div className="py-2 text-center">
+
+        {simulada ? (
+          <div className="mb-3 rounded-lg px-3 py-2 text-[12px] text-left"
+            style={{ background: '#EDF2F9', border: '1px solid #C9D6EA', color: '#1D3477' }}>
+            <strong>Impresora simulada.</strong> Esta es una empresa de demostración: no hay hardware
+            detrás. En una instalación real, acá imprime la impresora fiscal de la sede.
+          </div>
+        ) : null}
 
         {/* ENVIANDO */}
         {fase === 'enviando' ? (

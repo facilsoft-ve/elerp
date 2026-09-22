@@ -1249,3 +1249,66 @@ func TestAbrirCajaConFondo_SigueSiendoBolivares(t *testing.T) {
 		t.Errorf("el fondo debe quedar en bolívares: %v / %+v", ses.FondoInicial, ses.Fondos)
 	}
 }
+
+/* EL VUELTO POR PAGO MÓVIL no sale de la gaveta pero SÍ sale de la empresa.
+ *
+ * Es el caso que dejaba al cajero sin poder cuadrar: cobró con un billete de
+ * 1.000 una venta de 890 y transfirió 110, y el cierre le decía «recibiste
+ * 1.000» sin rastro de los 110. El efectivo esperado está bien —la gaveta
+ * conserva el billete—; lo que faltaba era DECIRLO.
+ */
+func TestArqueo_ElVueltoPorPagoMovilSeInformaYNoTocaLaGaveta(t *testing.T) {
+	svc, _ := nuevoServicio(t)
+	ses, err := svc.AbrirCajaConFondo(empDemo, actorA, origenTst, caja1, "OP-001", inmem.PinDemo, 100)
+	if err != nil {
+		t.Fatalf("abrir: %v", err)
+	}
+
+	// REF-2L a 890 gravado ⇒ total 1032,40. Para que las cuentas queden redondas
+	// se cobra con 1000 y se devuelven 110 por pago móvil sobre una venta exenta.
+	if _, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas: []application.LineaEntrada{{SKU: skuExentoDemo(t, svc), Cantidad: 1, PrecioUnitario: 890}},
+		Pagos:  []application.PagoEntrada{{Metodo: "efectivo_bs", Monto: 1000, Moneda: "VES"}},
+		VueltoPartes: []application.VueltoParteEntrada{
+			{Moneda: "VES", Metodo: "pago_movil", Monto: 110, Banco: "0102", Cedula: "12345678", Telefono: "04141234567"},
+		},
+	}); err != nil {
+		t.Fatalf("emitir: %v", err)
+	}
+
+	arq, err := svc.ArqueoDeSesion(empDemo, ses.ID)
+	if err != nil {
+		t.Fatalf("arqueo: %v", err)
+	}
+	// La gaveta conserva el billete: el vuelto salió por transferencia.
+	if arq.VueltoEfectivoBs != 0 {
+		t.Fatalf("el vuelto por pago móvil no sale de la gaveta: %v", arq.VueltoEfectivoBs)
+	}
+	if arq.EfectivoEsperadoBs != 1100 {
+		t.Fatalf("efectivo esperado = %v, debería ser 1100 (100 de fondo + 1000 cobrados)", arq.EfectivoEsperadoBs)
+	}
+	// Pero SÍ se informa, y se descuenta del neto: la empresa cobró 890, no 1.000.
+	if arq.VueltoOtrosBs != 110 {
+		t.Fatalf("el vuelto por otro medio tiene que quedar a la vista: %v", arq.VueltoOtrosBs)
+	}
+	if arq.TotalCobradoBs != 890 {
+		t.Fatalf("el neto cobrado = %v, debería ser 890: se recibieron 1000 y se devolvieron 110", arq.TotalCobradoBs)
+	}
+	if arq.Documentos != 1 {
+		t.Fatalf("la venta tiene que figurar en el cierre: %d documento(s)", arq.Documentos)
+	}
+}
+
+// skuExentoDemo devuelve un producto EXENTO del catálogo demo. La prueba del
+// vuelto necesita que el total sea redondo: con IVA, 890 son 1032,40 y el vuelto
+// deja de ser el número del que habla el caso.
+func skuExentoDemo(t *testing.T, svc *application.Service) string {
+	t.Helper()
+	for _, p := range svc.Productos(empDemo) {
+		if p.ExentoIVA && p.Activo {
+			return p.SKU
+		}
+	}
+	t.Fatal("el catálogo demo no trae ningún producto exento")
+	return ""
+}
