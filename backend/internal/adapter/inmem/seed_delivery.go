@@ -2,6 +2,7 @@ package inmem
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/mornix/elerp/internal/domain/inventario"
@@ -297,8 +298,54 @@ func (s *Store) seedDelivery(empID, sedeID string, conCocina bool) {
 	}, []paso{{pedido.EstadoNuevo, 190}, {pedido.EstadoConfirmado, 189}, {pedido.EstadoEnPreparacion, 188},
 		{pedido.EstadoListo, 175}, {pedido.EstadoAsignado, 173}, {pedido.EstadoEnRuta, 170}, {pedido.EstadoEntregaFallida, 160}})
 
+	/* 11 y 12. DOS ENTREGAS COBRADAS EN LA PUERTA, sin liquidar: es lo que el
+	 *          repartidor trae en el bolsillo cuando vuelve.
+	 *
+	 *          Van sembradas porque «Cierre de repartidor» sin nada que recibir no
+	 *          enseña nada, y el cierre de turno es justamente la parte del módulo
+	 *          donde la plata se pierde si nadie la cuenta. Una cobra exacto y la
+	 *          otra de menos —al cliente no le alcanzó el efectivo—, que es el
+	 *          caso que hay que saber leer: ese faltante es del pedido y no del
+	 *          repartidor. */
+	it11 := []pedido.Item{item(1, 1), item(4, 1)}
+	p11 := pedido.Pedido{
+		Origen: pedido.OrigenManual, ClienteNombre: "Yolanda Pérez",
+		Destino: pedido.Destino{
+			Direccion: "Av. Andrés Bello, Res. El Parque, apto 3-B", Telefono: "0414-5551122",
+			ZonaNombre: "Cercanías",
+		},
+		Items: it11, Total: total(it11), CostoEnvio: 30, FormaPago: pedido.PagoContraEntrega,
+		ModoEnvio: pedido.EnvioPropio, Tracking: "DLV-2609-0038",
+		RepartidorID: rafa.ID, RepartidorNombre: rafa.Nombre,
+		PruebaEntrega: "recibió la señora Yolanda", Cerrado: hace(55),
+	}
+	p11.CobradoBs = p11.Total
+	crear(p11, []paso{{pedido.EstadoNuevo, 90}, {pedido.EstadoConfirmado, 89}, {pedido.EstadoEnPreparacion, 88},
+		{pedido.EstadoListo, 75}, {pedido.EstadoAsignado, 72}, {pedido.EstadoEnRuta, 68}, {pedido.EstadoEntregado, 55}})
+
+	it12 := []pedido.Item{item(0, 1), item(2, 2)}
+	p12 := pedido.Pedido{
+		Origen: pedido.OrigenManual, ClienteNombre: "Jesús Colmenares",
+		Destino: pedido.Destino{
+			Direccion: "Calle Sucre, casa 18", Telefono: "0426-3334455", ZonaNombre: "Cercanías",
+		},
+		Items: it12, Total: total(it12), CostoEnvio: 30, FormaPago: pedido.PagoContraEntrega,
+		ModoEnvio: pedido.EnvioPropio, Tracking: "DLV-2609-0039",
+		RepartidorID: rafa.ID, RepartidorNombre: rafa.Nombre,
+		PruebaEntrega: "recibió el señor Jesús", Cerrado: hace(35),
+	}
+	// Pagó de menos: no tenía todo el efectivo. Queda a la vista en el cierre.
+	p12.CobradoBs = round2Seed(p12.Total - 40)
+	crear(p12, []paso{{pedido.EstadoNuevo, 70}, {pedido.EstadoConfirmado, 69}, {pedido.EstadoEnPreparacion, 68},
+		{pedido.EstadoListo, 55}, {pedido.EstadoAsignado, 52}, {pedido.EstadoEnRuta, 48}, {pedido.EstadoEntregado, 35}})
+
 	// El contador arranca por encima de lo sembrado: el primer pedido real del
 	// prospecto no puede repetir un número que ya está en la bandeja.
 	s.Numerador.Fijar(empID, sedeID, "PED", num)
 	s.Numerador.Fijar(empID, sedeID, "DLV", 41)
 }
+
+// round2Seed redondea al centavo. Propia del sembrado: los datos de demostración
+// no pueden traer un total con catorce decimales, que es lo que delata que la
+// pantalla muestra un número inventado.
+func round2Seed(v float64) float64 { return math.Round(v*100) / 100 }

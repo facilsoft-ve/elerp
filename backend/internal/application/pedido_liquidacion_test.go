@@ -20,6 +20,18 @@ func servicioLiquidacion(t *testing.T) (*application.Service, string) {
 	svc.ConPedidos(st.Pedidos, st.CanalesPedido, st.ZonasPedido, st.Repartidores)
 	svc.ConCuentas(st.Cuentas)
 	svc.ConLiquidaciones(st.LiquidacionesPedido)
+	// La semilla deja entregas cobradas sin liquidar a propósito (la demo tiene que
+	// mostrar un turno por recibir). Se cierran acá para que cada prueba mida lo
+	// que ella misma sembró: si no, lo que se estaría probando es la demo.
+	for _, r := range svc.Repartidores(empDemo, sede1) {
+		res, err := svc.PendienteDeLiquidar(empDemo, sede1, r.ID)
+		if err != nil || len(res.Entregas) == 0 {
+			continue
+		}
+		if _, err := svc.LiquidarRepartidor(empDemo, sede1, r.ID, actorA, origenTst, res.EsperadoBs, ""); err != nil {
+			t.Fatalf("cerrar lo sembrado: %v", err)
+		}
+	}
 	return svc, empDemo
 }
 
