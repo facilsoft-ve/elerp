@@ -244,6 +244,11 @@ type EntradaFacturacion struct {
 	// de la mesa de restaurante: el mesonero manda la solicitud sin datos y el
 	// cajero pregunta el RIF al cobrar. Vacío ⇒ se respeta el de la cotización.
 	ClienteID string
+	// LineasExtra son renglones que aparecen AL FACTURAR y no estaban cotizados.
+	// Hoy es el flete: el envío se decide al cobrar («me lo mandan»), y cobrar por
+	// llevar es un servicio gravado que tiene que salir en la factura y en el IVA.
+	// Van al final, después de la mercancía.
+	LineasExtra []LineaEntrada
 }
 
 // FacturarCotizacion emite la factura forma libre de una cotización confirmada.
@@ -289,6 +294,7 @@ func (s *Service) FacturarCotizacion(empresaID, id, actor, origen string, in Ent
 		neto := round2(l.PrecioUnitario * (1 - l.Descuento/100))
 		ent.Lineas = append(ent.Lineas, LineaEntrada{SKU: l.SKU, Cantidad: l.Cantidad, PrecioUnitario: neto})
 	}
+	ent.Lineas = append(ent.Lineas, in.LineasExtra...)
 	doc, err := s.EmitirFactura(empresaID, c.SedeID, empresa.ModalidadFormaLibre, actor, origen, ent)
 	if err != nil {
 		return cotizacion.Cotizacion{}, fiscal.Documento{}, err

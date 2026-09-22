@@ -161,6 +161,10 @@ func (s *Server) handleFacturarCotizacion(c *fiber.Ctx) error {
 		// ClienteID: quien factura identifica al cliente si la cotización venía sin
 		// él (mesa de restaurante prefacturada sin datos).
 		ClienteID string `json:"clienteId"`
+		/* ENVÍO A DOMICILIO, igual que en el mostrador. El envío se decide al
+		 * cobrar y no al cotizar: el cliente dice «me lo mandan» cuando va a
+		 * pagar, no cuando pide el presupuesto. */
+		Envio *envioReq `json:"envio"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
@@ -177,6 +181,19 @@ func (s *Server) handleFacturarCotizacion(c *fiber.Ctx) error {
 			Metodo: p.Metodo, CuentaID: p.CuentaID, Monto: p.Monto, Moneda: p.Moneda, Referencia: p.Referencia,
 		})
 	}
+	if in.Envio.pide() {
+		// La base del pedido mínimo sale de la cotización, que es donde está la
+		// mercancía: acá el cuerpo solo trae el cobro.
+		base := 0.0
+		if ct, ok := s.svc.Cotizacion(empresaIDOf(c), c.Params("id")); ok {
+			base = ct.Total
+		}
+		linea, err := s.lineaEnvio(c, in.Envio, base)
+		if err != nil {
+			return err
+		}
+		ent.LineasExtra = append(ent.LineasExtra, linea)
+	}
 	ct, doc, err := s.svc.FacturarCotizacion(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c), ent)
 	if err != nil {
 		if errors.Is(err, application.ErrCotizacionNoExiste) {
@@ -184,7 +201,11 @@ func (s *Server) handleFacturarCotizacion(c *fiber.Ctx) error {
 		}
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"cotizacion": ct, "documento": doc})
+	resp := fiber.Map{"cotizacion": ct, "documento": doc}
+	if in.Envio.pide() {
+		resp["pedido"] = s.pedidoDeVenta(c, in.Envio, doc)
+	}
+	return c.Status(fiber.StatusCreated).JSON(resp)
 }
 
 func (s *Server) handleCancelarCotizacion(c *fiber.Ctx) error {

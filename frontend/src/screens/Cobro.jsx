@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { Icon } from '../components/Icon.jsx'
-import { Button, Modal, Select, useToast } from '../components/primitives.jsx'
+import { Button, Modal, Select, useToast, Toggle, Input, Field } from '../components/primitives.jsx'
 import { fmtCurrency, fmtNum } from '../lib/format.js'
 import { calcularTotales, totalPagosEnBs, excedenteBs, vueltoDefaultMoneda, IVA_TASA, IGTF_TASA } from '../lib/fiscal.js'
 import { monedaLabel } from '../lib/precio.js'
@@ -124,7 +124,30 @@ const PLAZOS = [15, 30, 45, 60]
 // Redondeo a dos decimales para el preview del vuelto (el servidor recalcula).
 const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100
 
-export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, contingencia, onEmitida, canal = 'caja', onCobrar, cuponCodigo = '' }) {
+export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, contingencia, onEmitida, canal = 'caja', onCobrar, cuponCodigo = '', permiteEnvio = true }) {
+  /* ENVÍO A DOMICILIO. Va en el cobro y no en una pantalla aparte porque es ahí
+   * donde se decide: el cliente está al teléfono o en el mostrador y dice «me lo
+   * mandan». Obligar a facturar primero y cargar el pedido después significa
+   * teclear la dirección dos veces, que es como se manda un pedido a la dirección
+   * del cliente anterior. */
+  const [envio, setEnvio] = useState(null) // null = retira en el local
+  const [cotEnvio, setCotEnvio] = useState(null)
+  // El costo NO se teclea: sale de la zona configurada. Si quien factura pudiera
+  // escribirlo, cada cajero cobraría un flete distinto por la misma dirección.
+  // Base de la venta SIN impuestos: es contra esto que la zona evalúa su pedido
+  // mínimo, igual que en el servidor. Pasar cero haría pasar por bueno un pedido
+  // que la zona rechaza, y el rechazo aparecería recién al cobrar.
+  const baseVenta = useMemo(
+    () => (lineas || []).reduce((a, l) => a + (Number(l.cantidad) || 0) * (Number(l.precioUnitario) || 0), 0),
+    [lineas])
+  useEffect(() => {
+    if (!envio) { setCotEnvio(null); return }
+    let vivo = true
+    api.cotizarEnvio({ lat: envio.lat || 0, lon: envio.lon || 0, total: baseVenta })
+      .then((r) => { if (vivo) setCotEnvio(r) })
+      .catch(() => { if (vivo) setCotEnvio(null) })
+    return () => { vivo = false }
+  }, [envio?.lat, envio?.lon, !!envio, baseVenta]) // eslint-disable-line react-hooks/exhaustive-deps
   const { db, tasaDe } = useData()
   const tasa = useTasa()
   const toast = useToast()
@@ -218,7 +241,17 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
   // Totales con las reglas del servidor (IVA solo sobre lo gravado, IGTF solo
   // sobre la porción de la factura pagada en divisas). Cada pago se convierte con
   // la tasa de SU divisa: por eso se pasa el resolutor `tasaDe`, no una tasa única.
-  const totales = useMemo(() => calcularTotales(lineas, pagos, tasaDe), [lineas, pagos, tasaDe])
+  /* EL FLETE SE COBRA. El servidor agrega el renglón del envío antes de emitir,
+   * así que el preview tiene que contarlo igual o el cajero cobraría de menos y
+   * la factura saldría con saldo pendiente. Se usa el costo que devolvió la
+   * cotización — el mismo que el servidor va a recalcular. */
+  const costoEnvio = envio && cotEnvio?.cubierta && envio.cobraEnvio !== false ? Number(cotEnvio.costo) || 0 : 0
+  const lineasCobro = useMemo(
+    () => (costoEnvio > 0
+      ? [...(lineas || []), { sku: 'SRV-ENVIO', nombre: 'Envío a domicilio', cantidad: 1, precioUnitario: costoEnvio }]
+      : lineas),
+    [lineas, costoEnvio])
+  const totales = useMemo(() => calcularTotales(lineasCobro, pagos, tasaDe), [lineasCobro, pagos, tasaDe])
   const cobrado = totalPagosEnBs(pagos, tasaDe)
   const falta = totales.total - cobrado
   // ¿Aún falta por cubrir? (con la misma tolerancia que la validación). Gobierna
@@ -424,6 +457,11 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
     ? `Aún falta repartir ${fmtCurrency(faltaVuelto, 'VES')} del vuelto.`
     : `Te pasaste del vuelto por ${fmtCurrency(-faltaVuelto, 'VES')}.`
   else if (vueltoBloquea) error = 'Procesa el vuelto por pago móvil antes de emitir la factura.'
+  // El envío se valida ACÁ y no al volver del servidor: una factura emitida no se
+  // deshace, y descubrir al cobrar que la dirección está fuera de zona deja la
+  // venta hecha y a nadie que pueda llevarla.
+  else if (envio && !(envio.direccion || '').trim()) error = 'Escribe la dirección de entrega.'
+  else if (envio && cotEnvio && !cotEnvio.cubierta) error = cotEnvio.motivo || 'Esa dirección está fuera de las zonas de reparto.'
 
   const emitir = async () => {
     if (error) return
@@ -444,6 +482,15 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
         // Cupón aplicado: el precio de las líneas ya viene descontado; el código se
         // envía sólo para que el servidor CONSUMA el uso del cupón (tope UsosMax).
         ...(cuponCodigo ? { cuponCodigo } : {}),
+        // ENVÍO: presente = esta venta se lleva. El servidor agrega el renglón del
+        // flete con el costo de la zona y crea el pedido después de emitir.
+        ...(envio && (envio.direccion || '').trim() ? {
+          envio: {
+            direccion: envio.direccion.trim(), referencia: envio.referencia || '',
+            telefono: envio.telefono || '', instruccion: envio.instruccion || '',
+            lat: envio.lat || 0, lon: envio.lon || 0, cobraEnvio: envio.cobraEnvio !== false,
+          },
+        } : {}),
         // Vuelto declarado por la caja como PARTES (moneda + medio + monto en esa
         // moneda). Solo se manda cuando hay excedente; sin él el servidor no calcula
         // vuelto y el cobro se comporta igual que siempre. El servidor valida que la
@@ -457,7 +504,23 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
           })),
         } : {}),
       }
-      const doc = onCobrar ? await onCobrar(cobro) : await api.emitirDocumento(cobro)
+      const resp = onCobrar ? await onCobrar(cobro) : await api.emitirDocumento(cobro)
+      /* La respuesta trae el documento SOLO o envuelto junto con lo que la venta
+       * haya generado además —el pedido de envío, la emisión digital—. Se
+       * desenvuelve acá y no en cada pantalla: quien llamó espera un documento, y
+       * hacer que cada una se acuerde de mirar dentro es cómo una se olvida y
+       * muestra una factura en blanco. */
+      const doc = resp?.documento || resp
+      if (resp?.pedido?.numero) {
+        toast({ title: `Pedido de envío #${resp.pedido.numero}`, body: 'Ya está en la bandeja de pedidos.' })
+      } else if (resp?.pedido?.error) {
+        // La factura SÍ salió; lo que falló es el pedido. Decirlo en vez de
+        // callarlo: si nadie se entera, la venta se cobró y nunca se despacha.
+        toast({
+          title: 'La factura salió, el pedido no',
+          body: `${resp.pedido.error}. Cárgalo a mano en Pedidos.`, kind: 'error',
+        })
+      }
       onEmitida(doc)
     } catch (e) {
       toast({ title: 'No se pudo emitir', body: e?.message || 'Error', kind: 'error' })
@@ -493,6 +556,70 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
       <div className="grid lg:grid-cols-[1.4fr_1fr] gap-4 lg:gap-5">
         {/* Columna izquierda — cómo paga el cliente + los totales del documento. */}
         <div className="space-y-4">
+        {/* 0 · ¿Se lo lleva o se lo llevamos?
+            Va ARRIBA del método de pago a propósito: el envío cambia el total —le
+            suma el flete—, así que decidirlo después de haber contado la plata
+            obliga a recontarla. */}
+        <div className={`rounded-xl border border-slate-200 dark:border-slate-700 p-3 ${permiteEnvio ? '' : 'hidden'}`}>
+          <Toggle checked={!!envio}
+            onChange={(v) => setEnvio(v ? { direccion: '', referencia: '', telefono: '', cobraEnvio: true } : null)}
+            label="Enviar a domicilio"
+            sub="Se agrega el flete a la factura y el pedido entra a la bandeja de despacho." />
+          {envio ? (
+            <div className="mt-3 space-y-2.5">
+              <Field label="Dirección de entrega" required>
+                <Input value={envio.direccion} autoFocus placeholder="Av. Principal, casa 4"
+                  onChange={(e) => setEnvio((x) => ({ ...x, direccion: e.target.value }))} />
+              </Field>
+              <div className="grid grid-cols-2 gap-2.5">
+                {/* La referencia no es un adorno: media Venezuela dicta su
+                    dirección por referencia y no por número de casa. */}
+                <Field label="Punto de referencia" hint="al lado de…">
+                  <Input value={envio.referencia} placeholder="Frente a la panadería"
+                    onChange={(e) => setEnvio((x) => ({ ...x, referencia: e.target.value }))} />
+                </Field>
+                <Field label="Teléfono">
+                  <Input value={envio.telefono} placeholder="0414…"
+                    onChange={(e) => setEnvio((x) => ({ ...x, telefono: e.target.value }))} />
+                </Field>
+              </div>
+
+              {/* LO QUE CUESTA LLEVARLO, resuelto por la zona. No se teclea: si
+                  cada cajero pudiera escribirlo, la misma dirección costaría
+                  distinto según quién cobre. */}
+              {cotEnvio ? (
+                cotEnvio.cubierta ? (
+                  <div className="rounded-lg px-3 py-2 text-[12.5px] bg-slate-50 dark:bg-slate-800/60">
+                    {cotEnvio.sinZonas ? (
+                      <span className="text-slate-500">Todavía no configuraste zonas de reparto: el envío va sin costo automático.</span>
+                    ) : (
+                      <>
+                        <span className="text-slate-500">{cotEnvio.zonaNombre}</span>
+                        <span className="num font-semibold"> · {fmtCurrency(cotEnvio.costo, 'VES')}</span>
+                        {cotEnvio.minutos > 0 ? <span className="text-slate-500"> · {cotEnvio.minutos} min</span> : null}
+                        {cotEnvio.motivo ? <div className="text-slate-500 mt-0.5">{cotEnvio.motivo}</div> : null}
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  /* FUERA DE ZONA, dicho ANTES de cobrar. Descubrirlo después es el
+                     caso peor: la venta ya se cobró y nadie puede llevarla. */
+                  <div className="rounded-lg px-3 py-2 text-[12.5px]"
+                    style={{ background: '#FBEDEB', border: '1px solid #ECC8C4', color: '#B3362C' }}>
+                    {cotEnvio.motivo}
+                  </div>
+                )
+              ) : null}
+
+              {cotEnvio?.cubierta && !cotEnvio?.sinZonas ? (
+                <Toggle checked={envio.cobraEnvio !== false}
+                  onChange={(v) => setEnvio((x) => ({ ...x, cobraEnvio: v }))}
+                  label="Cobrar el envío" sub="Apágalo para regalarlo en esta venta." />
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
         {/* 1 · Método */}
         <div>
           <div className="text-[14px] font-semibold mb-2.5">¿Cómo te van a pagar?</div>

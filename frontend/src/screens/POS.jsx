@@ -210,12 +210,12 @@ export function POS({ onModoCaja }) {
         onElegir={tomarMesa} onClose={() => setVerMesas(false)} />
       <CobroModal open={cobrando} onClose={() => setCobrando(false)}
         lineas={cart} clienteId={clienteId} clienteNombre={clienteNombre} contingencia={contingencia}
+        permiteEnvio={!mesaSel}
         onCobrar={mesaSel ? async (cobro) => {
           // Misma ruta fiscal que el mostrador (FacturarCotizacion → EmitirFactura),
           // y además enlaza la factura con la mesa y la cierra cuando ya no queda
           // nada por cobrar. El cliente puede ponerlo el cajero si vino sin datos.
-          const res = await api.facturarCotizacion(mesaSel.id, { ...cobro, clienteId })
-          return res?.documento || res
+          return await api.facturarCotizacion(mesaSel.id, { ...cobro, clienteId })
         } : undefined}
         onEmitida={async (doc) => {
           setCobrando(false)

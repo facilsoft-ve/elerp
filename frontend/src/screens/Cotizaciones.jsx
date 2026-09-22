@@ -1074,10 +1074,11 @@ function FacturarModal({ cot, onClose, onSaved, toast }) {
   return (
     <CobroModal open onClose={onClose} canal="ventas"
       lineas={lineasCobro} clienteId={cot.clienteId} clienteNombre={cot.clienteNombre} contingencia={false}
-      onCobrar={async (cobro) => {
-        const res = await api.facturarCotizacion(cot.id, cobro)
-        return res?.documento || res
-      }}
+      onCobrar={async (cobro) => (
+        // La respuesta COMPLETA: si la venta se lleva a domicilio trae también el
+        // pedido, y quedarse solo con el documento lo perdería en silencio.
+        api.facturarCotizacion(cot.id, cobro)
+      )}
       onEmitida={(doc) => {
         setEmitida(doc || null)
         toast({ title: 'Factura emitida', body: doc?.numeroCompleto || cot.numeroCompleto })

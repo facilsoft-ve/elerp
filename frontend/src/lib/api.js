@@ -522,6 +522,9 @@ export const api = {
   misEntregas: () => request('/api/pedidos/mis-entregas'),
   marcarDisponibilidad: (disponible) => request('/api/pedidos/disponibilidad',
     { method: 'POST', body: JSON.stringify({ disponible }) }),
+  // Cotiza el envío de una dirección ANTES de cobrar: a qué zona cae, cuánto
+  // cuesta y si queda fuera. «Fuera de zona» descubierto tarde es el caso peor.
+  cotizarEnvio: (body) => request('/api/pedidos/cotizar-envio', { method: 'POST', body: JSON.stringify(body) }),
   canalesPedido: () => request('/api/pedidos/config/canales'),
   guardarCanalPedido: (body) => request('/api/pedidos/config/canales', { method: 'PUT', body: JSON.stringify(body) }),
   // Genera el token del canal y lo devuelve EN CLARO una sola vez: no se puede

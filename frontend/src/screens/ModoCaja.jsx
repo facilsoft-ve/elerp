@@ -856,6 +856,7 @@ export function ModoCaja({ onSalir }) {
       <CobroModal open={cobrando} onClose={() => setCobrando(false)}
         lineas={cart} clienteId={cliente?.id || ''} clienteNombre={cliente?.nombre || 'Consumidor final'} contingencia={false}
         cuponCodigo={cupon?.codigo || ''}
+        permiteEnvio={!mesaSel}
         onCobrar={mesaSel ? async (cobro) => {
           const res = await api.facturarCotizacion(mesaSel.id, { ...cobro, clienteId: cliente?.id || '' })
           return res?.documento || res

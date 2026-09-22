@@ -13,7 +13,6 @@ import (
 	"github.com/mornix/elerp/internal/domain/empresa"
 	"github.com/mornix/elerp/internal/domain/facturaciondigital"
 	"github.com/mornix/elerp/internal/domain/fiscal"
-	"github.com/mornix/elerp/internal/domain/pedido"
 	"github.com/mornix/elerp/internal/domain/usuario"
 	"github.com/mornix/elerp/internal/domain/venta"
 )
@@ -409,18 +408,7 @@ func (s *Server) handleEmitir(c *fiber.Ctx) error {
 		/* ENVÍO A DOMICILIO. Presente = esta venta se lleva: se le agrega el
 		 * renglón del flete (con el costo de su zona) y, al emitir, se crea el
 		 * pedido. Ausente = venta de mostrador, como siempre. */
-		Envio *struct {
-			Direccion   string  `json:"direccion"`
-			Referencia  string  `json:"referencia"`
-			Telefono    string  `json:"telefono"`
-			Contacto    string  `json:"contacto"`
-			Instruccion string  `json:"instruccion"`
-			Lat         float64 `json:"lat"`
-			Lon         float64 `json:"lon"`
-			// CobraEnvio en false factura el flete en cero: es «envío gratis», que
-			// el local decide y tiene que poder aplicar sin falsear la zona.
-			CobraEnvio bool `json:"cobraEnvio"`
-		} `json:"envio"`
+		Envio *envioReq `json:"envio"`
 		// Venta a crédito: lo que no se cobró queda por cobrar en Tesorería.
 		Credito     bool `json:"credito"`
 		DiasCredito int  `json:"diasCredito"`
@@ -467,26 +455,12 @@ func (s *Server) handleEmitir(c *fiber.Ctx) error {
 	 * zona configurada, o cada cajero cobraría un flete distinto por la misma
 	 * dirección.
 	 */
-	var cotEnvio application.CotizacionEnvio
-	if in.Envio != nil && strings.TrimSpace(in.Envio.Direccion) != "" {
-		if _, err := s.svc.AsegurarServicioEnvio(empresaIDOf(c), principalOf(c).UserID, origen(c)); err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "no se pudo preparar el servicio de envío: " + err.Error()})
+	if in.Envio.pide() {
+		linea, err := s.lineaEnvio(c, in.Envio, baseDeLineas(ent.Lineas))
+		if err != nil {
+			return err
 		}
-		total := 0.0
-		for _, l := range in.Lineas {
-			total += l.PrecioUnitario * l.Cantidad
-		}
-		cotEnvio = s.svc.CotizarEnvio(empresaIDOf(c), sedeIDOf(c), in.Envio.Lat, in.Envio.Lon, total)
-		if !cotEnvio.Cubierta {
-			// Se rechaza ANTES de emitir: aceptar y después no poder llevar deja
-			// una factura hecha y un cliente esperando.
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": cotEnvio.Motivo})
-		}
-		costo := cotEnvio.Costo
-		if !in.Envio.CobraEnvio {
-			costo = 0 // envío gratis: lo decide el local, y tiene que poder hacerlo
-		}
-		ent.Lineas = append(ent.Lineas, application.LineaDeEnvio(costo, cotEnvio.ZonaNombre))
+		ent.Lineas = append(ent.Lineas, linea)
 	}
 
 	emp, _ := c.Locals("empresa").(empresa.Empresa)
@@ -506,50 +480,33 @@ func (s *Server) handleEmitir(c *fiber.Ctx) error {
 	/* El PEDIDO se crea DESPUÉS de emitir y nunca antes: la factura es el hecho
 	 * fiscal y no puede depender de que el módulo de envío esté sano. Si esto
 	 * falla, la venta igual quedó cobrada — y el pedido se carga a mano. */
-	var pedidoCreado any
-	if in.Envio != nil && strings.TrimSpace(in.Envio.Direccion) != "" {
-		items := make([]pedido.Item, 0, len(out.Lineas))
-		for _, l := range out.Lineas {
-			if l.SKU == application.SKUServicioEnvio {
-				continue // el envío no es algo que el repartidor lleve: es el flete
-			}
-			items = append(items, pedido.Item{
-				SKU: l.SKU, Nombre: l.Nombre, Cantidad: l.Cantidad, PrecioUnitario: l.PrecioUnitario,
-			})
-		}
-		// Pagado = se cobró completo en el mostrador. Una venta a crédito deja
-		// saldo, y ahí el repartidor sí cobra en la puerta.
-		p, err := s.svc.CrearPedidoDeVenta(empresaIDOf(c), sedeIDOf(c), out.ID,
-			principalOf(c).UserID, origen(c),
-			application.EnvioDeVenta{
-				Direccion: in.Envio.Direccion, Referencia: in.Envio.Referencia,
-				Telefono: in.Envio.Telefono, Contacto: in.Envio.Contacto,
-				Instruccion: in.Envio.Instruccion, Lat: in.Envio.Lat, Lon: in.Envio.Lon,
-				CobraEnvio: in.Envio.CobraEnvio,
-			}, items, out.Total, !out.Credito)
-		if err == nil {
-			pedidoCreado = fiber.Map{"id": p.ID, "numero": p.Numero, "estado": p.Estado,
-				"seguimiento": s.urlSeguimiento(p.TokenPublico)}
-		} else {
-			pedidoCreado = fiber.Map{"error": err.Error()}
+	var pedidoCreado fiber.Map
+	if in.Envio.pide() {
+		pedidoCreado = s.pedidoDeVenta(c, in.Envio, out)
+	}
+	/* Una venta con envío TAMBIÉN se factura digitalmente. Encolar acá y no en
+	 * una rama aparte: llevar el pedido a domicilio no cambia en nada el hecho
+	 * fiscal, y separarlo dejaba las ventas con envío fuera de la imprenta. */
+	respuesta := fiber.Map{}
+	if emi, encolada := s.svc.EncolarEmision(empresaIDOf(c), canalDeVenta(c), out); encolada {
+		// La emisión viaja con el documento para que el POS pueda imprimir el
+		// ticket con su QR sin una segunda vuelta al servidor.
+		respuesta["facturaDigital"] = fiber.Map{
+			"token":  emi.Token,
+			"estado": emi.Estado,
+			"url":    s.urlPublicaFactura(emi.Token),
 		}
 	}
 	if pedidoCreado != nil {
-		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"documento": out, "pedido": pedidoCreado})
+		respuesta["pedido"] = pedidoCreado
 	}
-	if emi, encolada := s.svc.EncolarEmision(empresaIDOf(c), canalDeVenta(c), out); encolada {
-		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-			"documento": out,
-			// La emisión viaja con el documento para que el POS pueda imprimir el
-			// ticket con su QR sin una segunda vuelta al servidor.
-			"facturaDigital": fiber.Map{
-				"token":  emi.Token,
-				"estado": emi.Estado,
-				"url":    s.urlPublicaFactura(emi.Token),
-			},
-		})
+	if len(respuesta) == 0 {
+		// Sin envío ni imprenta se devuelve el documento pelado: es el contrato
+		// viejo, y hay pantallas que todavía leen la respuesta así.
+		return c.Status(fiber.StatusCreated).JSON(out)
 	}
-	return c.Status(fiber.StatusCreated).JSON(out)
+	respuesta["documento"] = out
+	return c.Status(fiber.StatusCreated).JSON(respuesta)
 }
 
 // canalDeVenta distingue el mostrador del módulo de ventas. El POS lo declara
