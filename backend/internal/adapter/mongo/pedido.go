@@ -12,6 +12,7 @@ func (st *Store) attachPedidos(db *gomongo.Database) {
 	st.CanalesPedido = &CanalPedidoRepo{coll[pedido.Canal]{db.Collection("canalespedido")}}
 	st.ZonasPedido = &ZonaPedidoRepo{coll[pedido.Zona]{db.Collection("zonaspedido")}}
 	st.Repartidores = &RepartidorRepo{coll[pedido.Repartidor]{db.Collection("repartidores")}}
+	st.LiquidacionesPedido = &LiquidacionRepo{coll[pedido.Liquidacion]{db.Collection("liquidacionespedido")}}
 }
 
 // PedidoRepo persiste los pedidos con filtro empresaid obligatorio (Mongo no
@@ -153,4 +154,28 @@ func (r *RepartidorRepo) Upsert(x pedido.Repartidor) pedido.Repartidor {
 	_, _ = r.c.c.ReplaceOne(ctx, map[string]any{"empresaid": x.EmpresaID, "id": x.ID}, x,
 		options.Replace().SetUpsert(true))
 	return x
+}
+
+// LiquidacionRepo guarda las actas de cierre del repartidor. Append-only, como
+// todo lo que cuenta plata: un acta que se puede editar no prueba nada.
+type LiquidacionRepo struct{ c coll[pedido.Liquidacion] }
+
+func (r *LiquidacionRepo) Append(l pedido.Liquidacion) pedido.Liquidacion {
+	if l.ID == "" {
+		l.ID = newID("liq_")
+	}
+	r.c.insert(l)
+	return l
+}
+
+func (r *LiquidacionRepo) List(empresaID, sedeID string) []pedido.Liquidacion {
+	f := map[string]any{"empresaid": empresaID}
+	if sedeID != "" {
+		f["sedeid"] = sedeID
+	}
+	return r.c.all(f)
+}
+
+func (r *LiquidacionRepo) ByID(empresaID, id string) (pedido.Liquidacion, bool) {
+	return r.c.one(map[string]any{"empresaid": empresaID, "id": id})
 }

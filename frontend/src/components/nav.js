@@ -42,6 +42,9 @@ export const NAV = [
       // para todos los roles porque quien reparte puede no tener rol de oficina,
       // y lo que la acota es el usuario de la sesión: solo devuelve lo suyo.
       { id: 'mis-entregas', label: 'Mis entregas', grupo: 'Operación' },
+      // CERRAR EL TURNO: recibirle la plata al repartidor que cobró en la puerta.
+      // Es acto de caja, así que va con quien responde por ella.
+      { id: 'liquidacion', label: 'Cierre de repartidor', grupo: 'Operación', roles: [...ADMIN, 'cajero'] },
       { id: 'canales', label: 'Canales conectados', grupo: 'Configuración', roles: ADMIN },
       { id: 'zonas', label: 'Zonas de reparto', grupo: 'Configuración', roles: ADMIN },
       { id: 'repartidores', label: 'Repartidores', grupo: 'Configuración', roles: ADMIN },

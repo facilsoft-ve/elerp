@@ -462,6 +462,12 @@ func (s *Service) MarcarEntregado(empresaID, pedidoID, actor, origen string, in 
 		return pedido.Pedido{}, ErrTransicion
 	}
 	p.PruebaEntrega = strings.TrimSpace(in.Prueba)
+	// Lo cobrado se guarda ACÁ, en la puerta, y no al volver: preguntarle al
+	// repartidor al final del turno cuánto cobró en cada una de once puertas es
+	// pedirle que se acuerde. Sin declaración se asume el total del pedido.
+	if in.CobradoBs > 0 {
+		p.CobradoBs = round2(in.CobradoBs)
+	}
 	p.Cerrado = ahora()
 	p = s.marcar(p, pedido.EstadoEntregado, actor, origen, "")
 	s.pedidos.Update(p)

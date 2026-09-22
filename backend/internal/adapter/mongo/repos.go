@@ -69,6 +69,7 @@ type Store struct {
 	CanalesPedido       *CanalPedidoRepo
 	ZonasPedido         *ZonaPedidoRepo
 	Repartidores        *RepartidorRepo
+	LiquidacionesPedido *LiquidacionRepo
 	EmisionesDigitales  *EmisionDigitalRepo
 	ConceptosISLR       *ConceptoISLRRepo
 	UnidadesTributarias *UnidadTributariaRepo

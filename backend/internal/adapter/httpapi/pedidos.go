@@ -51,6 +51,16 @@ func (s *Server) registerPedidos(api fiber.Router) {
 	// llama quien cobra, así que va con el gate de la operación.
 	g.Post("/cotizar-envio", s.handleCotizarEnvio)
 
+	/* LIQUIDACIÓN DEL REPARTIDOR: recibirle la plata al volver.
+	 *
+	 * Lo pendiente lo puede consultar cualquiera de la operación —incluido el
+	 * propio repartidor, que tiene derecho a ver qué se le va a pedir—, pero
+	 * RECIBIR la plata es acto de caja: lo cierra quien responde por ella. */
+	g.Get("/liquidaciones", s.handleLiquidaciones)
+	g.Get("/liquidaciones/pendiente/:repartidorId", s.handlePendienteDeLiquidar)
+	g.Post("/liquidaciones", s.requireRoles(usuario.RolDueno, usuario.RolDesarrollador, usuario.RolCajero),
+		s.handleLiquidarRepartidor)
+
 	// Maestros del módulo.
 	g.Get("/config/canales", admin, s.handleCanalesPedido)
 	// El token se genera y se muestra UNA vez: si se pudiera volver a leer,
@@ -576,4 +586,43 @@ func (s *Server) urlSeguimiento(token string) string {
 		return "/t/" + token
 	}
 	return base + "/t/" + token
+}
+
+/* LIQUIDACIÓN DEL REPARTIDOR — la parte HTTP.
+ *
+ * Lo que NO hay acá es un endpoint para editar un acta. Es a propósito: una
+ * liquidación es plata contada por dos personas, y lo que se puede corregir a
+ * mano después no prueba nada. Si aparece un billete, se levanta otra acta.
+ */
+
+func (s *Server) handleLiquidaciones(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"liquidaciones": s.svc.LiquidacionesDe(empresaIDOf(c), sedeIDOf(c))})
+}
+
+func (s *Server) handlePendienteDeLiquidar(c *fiber.Ctx) error {
+	out, err := s.svc.PendienteDeLiquidar(empresaIDOf(c), sedeIDOf(c), c.Params("repartidorId"))
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleLiquidarRepartidor(c *fiber.Ctx) error {
+	var in struct {
+		RepartidorID string `json:"repartidorId"`
+		// DeclaradoBs es lo que el repartidor puso sobre el mostrador. Se acepta
+		// aunque no cuadre: una liquidación que solo admite el número correcto no
+		// encuentra faltantes, los esconde.
+		DeclaradoBs float64 `json:"declaradoBs"`
+		Nota        string  `json:"nota"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	l, err := s.svc.LiquidarRepartidor(empresaIDOf(c), sedeIDOf(c), in.RepartidorID,
+		principalOf(c).UserID, origen(c), in.DeclaradoBs, in.Nota)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(l)
 }

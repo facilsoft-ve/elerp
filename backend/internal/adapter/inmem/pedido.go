@@ -280,3 +280,50 @@ func (r *RepartidorRepo) Upsert(x pedido.Repartidor) pedido.Repartidor {
 	r.items = append(r.items, x)
 	return x
 }
+
+// --- Liquidaciones del repartidor ---
+//
+// Solo Append: un acta de plata contada no se edita. Si al día siguiente aparece
+// un billete, se levanta otra acta — así queda la traza de las dos.
+
+type LiquidacionRepo struct {
+	mu    sync.RWMutex
+	items []pedido.Liquidacion
+	seq   int
+}
+
+func NewLiquidacionRepo() *LiquidacionRepo { return &LiquidacionRepo{} }
+
+func (r *LiquidacionRepo) Append(l pedido.Liquidacion) pedido.Liquidacion {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seq++
+	if l.ID == "" {
+		l.ID = fmt.Sprintf("liq_%d", r.seq)
+	}
+	r.items = append(r.items, l)
+	return l
+}
+
+func (r *LiquidacionRepo) List(empresaID, sedeID string) []pedido.Liquidacion {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := []pedido.Liquidacion{}
+	for _, x := range r.items {
+		if x.EmpresaID == empresaID && (sedeID == "" || x.SedeID == sedeID) {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+func (r *LiquidacionRepo) ByID(empresaID, id string) (pedido.Liquidacion, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, x := range r.items {
+		if x.EmpresaID == empresaID && x.ID == id {
+			return x, true
+		}
+	}
+	return pedido.Liquidacion{}, false
+}

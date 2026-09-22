@@ -200,6 +200,18 @@ type Pedido struct {
 	FormaPago string  `json:"formaPago" bson:"formapago"`
 	Total     float64 `json:"total" bson:"total"`
 
+	/* LO QUE EL REPARTIDOR TRAE.
+	 *
+	 * CobradoBs es lo que declaró haber recibido en la puerta, y se guarda apenas
+	 * cierra la entrega, no al final del turno: preguntarle al volver cuánto cobró
+	 * en cada una de once puertas es preguntarle que se acuerde.
+	 *
+	 * LiquidacionID es el acta donde esa plata se entregó. Es lo que impide
+	 * contarla dos veces: un pedido ya liquidado no vuelve a aparecer pendiente,
+	 * por más veces que se abra la pantalla. */
+	CobradoBs     float64 `json:"cobradoBs,omitempty" bson:"cobradobs,omitempty"`
+	LiquidacionID string  `json:"liquidacionId,omitempty" bson:"liquidacionid,omitempty"`
+
 	// PromesaEntrega (RFC3339) es a qué hora se prometió. Vencida, el pedido se
 	// marca demorado igual que una comanda demorada en cocina.
 	PromesaEntrega string `json:"promesaEntrega,omitempty" bson:"promesaentrega,omitempty"`
@@ -315,6 +327,49 @@ func (p Pedido) DespachaElLocal() bool { return p.ModoEnvio != EnvioCanal }
 func (p Pedido) CobraElRepartidor() bool {
 	return p.FormaPago == PagoContraEntrega && p.ModoEnvio == EnvioPropio
 }
+
+/* LIQUIDACIÓN DEL REPARTIDOR — el turno se cierra con plata contada.
+ *
+ * El repartidor sale con pedidos que se cobran en la puerta y vuelve con
+ * efectivo ajeno en el bolsillo. Eso no es un detalle operativo: hasta que no
+ * entrega y alguien cuenta, la empresa tiene plata afuera y no sabe cuánta.
+ *
+ * El acta es INMUTABLE, como el resto de lo que toca dinero: si al día siguiente
+ * aparece un billete, se hace otra liquidación, no se edita esta. Lo que se
+ * corrige a mano no se puede auditar.
+ */
+type Liquidacion struct {
+	ID        string `json:"id" bson:"id"`
+	EmpresaID string `json:"empresaId" bson:"empresaid"`
+	SedeID    string `json:"sedeId" bson:"sedeid"`
+
+	RepartidorID     string `json:"repartidorId" bson:"repartidorid"`
+	RepartidorNombre string `json:"repartidorNombre" bson:"repartidornombre"`
+
+	// PedidoIDs son las entregas que esta acta salda. Van explícitas y no por
+	// rango de fechas: el acta tiene que poder releerse dentro de un año y decir
+	// exactamente qué cubrió.
+	PedidoIDs []string `json:"pedidoIds" bson:"pedidoids"`
+
+	// Esperado es lo que el repartidor debía traer según las entregas; Declarado,
+	// lo que puso sobre el mostrador. La diferencia se guarda calculada porque es
+	// el número por el que se conversa, y no se deja para que cada pantalla lo
+	// vuelva a sacar.
+	EsperadoBs   float64 `json:"esperadoBs" bson:"esperadobs"`
+	DeclaradoBs  float64 `json:"declaradoBs" bson:"declaradobs"`
+	DiferenciaBs float64 `json:"diferenciaBs" bson:"diferenciabs"`
+
+	// Nota explica la diferencia cuando la hay. Un faltante sin explicación no
+	// sirve para decidir nada.
+	Nota string `json:"nota,omitempty" bson:"nota,omitempty"`
+
+	Actor  string `json:"actor" bson:"actor"`
+	Creada string `json:"creada" bson:"creada"`
+}
+
+// Cuadra indica si lo declarado coincide con lo esperado, con la tolerancia del
+// centavo que impone la aritmética de punto flotante.
+func (l Liquidacion) Cuadra() bool { return l.DiferenciaBs > -0.005 && l.DiferenciaBs < 0.005 }
 
 // OrigenValido acota el origen.
 func OrigenValido(o string) bool {

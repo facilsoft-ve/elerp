@@ -28,6 +28,7 @@ export function Pedidos({ route }) {
       {sub === 'bandeja' ? <Bandeja /> : null}
       {sub === 'despacho' ? <Despacho /> : null}
       {sub === 'mis-entregas' ? <MisEntregas /> : null}
+      {sub === 'liquidacion' ? <LiquidacionRepartidor /> : null}
       {sub === 'canales' ? <Canales /> : null}
       {sub === 'zonas' ? <Zonas /> : null}
       {sub === 'repartidores' ? <Repartidores /> : null}
@@ -990,6 +991,10 @@ function EntregaModal({ p, ccy, onClose, onAccion }) {
   const [prueba, setPrueba] = useState('')
   const [motivo, setMotivo] = useState('')
   const pago = pagoDelPedido(p)
+  // Solo se pregunta cuánto cobró si hay algo que cobrar. Preguntárselo en un
+  // pedido ya pagado es invitarlo a cobrar dos veces.
+  const cobraAqui = pago.cobra
+  const [cobrado, setCobrado] = useState(() => (cobraAqui ? String(p.total ?? '') : ''))
   const tel = (p.destino?.telefono || '').replace(/[^0-9+]/g, '')
 
   return (
@@ -1045,7 +1050,19 @@ function EntregaModal({ p, ccy, onClose, onAccion }) {
             <Field label="¿Quién recibió?" hint="queda como prueba de entrega">
               <Input value={prueba} onChange={(e) => setPrueba(e.target.value)} placeholder="Nombre de quien recibió" />
             </Field>
-            <Button className="w-full" onClick={() => onAccion('entregado', { prueba })}>Entregado</Button>
+            {/* LO QUE COBRÓ EN ESTA PUERTA. Se pregunta acá, en la puerta, y no al
+                volver: pedirle al final del turno que se acuerde de cuánto cobró en
+                cada una de once casas es pedirle que invente. Viene con el total
+                puesto, que es el caso normal; se cambia cuando el cliente no tenía
+                todo el efectivo. */}
+            {cobraAqui ? (
+              <Field label="¿Cuánto cobraste?" hint="se te recibe esto al cerrar el turno">
+                <Input type="number" inputMode="decimal" step="0.01" value={cobrado}
+                  onChange={(e) => setCobrado(e.target.value)} />
+              </Field>
+            ) : null}
+            <Button className="w-full" onClick={() => onAccion('entregado',
+              cobraAqui ? { prueba, cobradoBs: Number(cobrado) || 0 } : { prueba })}>Entregado</Button>
             <Field label="¿No se pudo entregar?" hint="explica qué pasó">
               <Input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Nadie atendió, dirección errada…" />
             </Field>
@@ -1055,5 +1072,208 @@ function EntregaModal({ p, ccy, onClose, onAccion }) {
         ) : null}
       </div>
     </Modal>
+  )
+}
+
+/* --- Cierre del repartidor ------------------------------------------------- */
+
+/* RECIBIRLE LA PLATA AL QUE VUELVE.
+ *
+ * El repartidor sale con pedidos que se cobran en la puerta y vuelve con
+ * efectivo ajeno en el bolsillo. Hasta que alguien cuente, la empresa tiene
+ * plata afuera y no sabe cuánta.
+ *
+ * La pantalla hace UNA cosa y la hace en orden: se elige quién volvió, sale lo
+ * que debe traer —derivado de sus entregas, nunca tecleado— y se escribe lo que
+ * puso sobre el mostrador. La diferencia aparece mientras se escribe, no al
+ * guardar: descubrir el faltante después de cerrar es descubrirlo tarde.
+ */
+function LiquidacionRepartidor() {
+  const toast = useToast()
+  const [repartidores, setRepartidores] = useState(null)
+  const [repId, setRepId] = useState('')
+  const [resumen, setResumen] = useState(null)
+  const [actas, setActas] = useState([])
+  const [declarado, setDeclarado] = useState('')
+  const [nota, setNota] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const cargarActas = useCallback(() => {
+    api.liquidaciones().then((r) => setActas(r?.liquidaciones || [])).catch(() => setActas([]))
+  }, [])
+
+  useEffect(() => {
+    api.repartidores()
+      .then((r) => {
+        const ls = (r?.repartidores || []).filter((x) => x.activo)
+        setRepartidores(ls)
+        if (ls.length === 1) setRepId(ls[0].id)
+      })
+      .catch((e) => { setRepartidores([]); setError(e?.message || 'No se pudieron cargar los repartidores.') })
+    cargarActas()
+  }, [cargarActas])
+
+  const cargarPendiente = useCallback(() => {
+    if (!repId) { setResumen(null); return }
+    api.pendienteLiquidar(repId)
+      .then((r) => { setResumen(r); setError('') })
+      .catch((e) => { setResumen(null); setError(e?.message || 'No se pudo consultar lo pendiente.') })
+  }, [repId])
+  useEffect(() => { cargarPendiente(); setDeclarado(''); setNota('') }, [cargarPendiente])
+
+  const esperado = Number(resumen?.esperadoBs) || 0
+  const puesto = declarado === '' ? null : Number(declarado) || 0
+  // La diferencia se muestra MIENTRAS se escribe: es el número por el que se
+  // conversa, y verlo al guardar es verlo cuando ya no se puede preguntar nada.
+  const diferencia = puesto === null ? 0 : Math.round((puesto - esperado) * 100) / 100
+  const cuadra = Math.abs(diferencia) < 0.005
+  const faltaNota = !cuadra && !nota.trim()
+
+  const cerrar = async () => {
+    if (busy || puesto === null || faltaNota) return
+    setBusy(true)
+    try {
+      const l = await api.liquidarRepartidor({ repartidorId: repId, declaradoBs: puesto, nota: nota.trim() })
+      toast({
+        title: `Turno cerrado · ${l.repartidorNombre}`,
+        body: l.diferenciaBs === 0
+          ? `${l.pedidoIds?.length || 0} entregas, cuadró exacto.`
+          : `${l.pedidoIds?.length || 0} entregas · diferencia ${fmtCurrency(l.diferenciaBs, 'VES')}.`,
+      })
+      setDeclarado(''); setNota('')
+      cargarPendiente(); cargarActas()
+    } catch (e) {
+      toast({ title: 'No se pudo cerrar', body: e?.message || 'Error', kind: 'error' })
+    }
+    setBusy(false)
+  }
+
+  if (repartidores === null) {
+    return <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4"><TableSkeleton rows={4} cols={3} /></div>
+  }
+  if (!repartidores.length) {
+    return <Empty icon={<Icon.Truck size={22} />} title="Todavía no hay repartidores"
+      body="El cierre de turno recibe la plata que el repartidor cobró en la puerta. Da de alta tu flota en «Repartidores»." />
+  }
+
+  const entregas = resumen?.entregas || []
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4">
+        <div className="text-[14px] font-semibold mb-1">¿Quién volvió?</div>
+        <div className="text-[12.5px] text-slate-500 mb-3">
+          Se le recibe solo lo que cobró en la puerta. Lo que ya venía pagado por la app no pasó por sus manos.
+        </div>
+        <Select value={repId} onChange={(e) => setRepId(e.target.value)} className="max-w-xs">
+          <option value="">Elige un repartidor…</option>
+          {repartidores.map((r) => <option key={r.id} value={r.id}>{r.codigo ? `${r.codigo} · ` : ''}{r.nombre}</option>)}
+        </Select>
+        {error ? <div className="mt-3 text-[12.5px] text-[#B3362C] dark:text-red-400">{error}</div> : null}
+      </div>
+
+      {repId && resumen ? (
+        entregas.length === 0 ? (
+          <Empty icon={<Icon.Check size={22} />} title="No trae nada pendiente"
+            body={`${resumen.repartidorNombre} no tiene entregas cobradas sin liquidar.`} />
+        ) : (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 text-[14px] font-semibold">
+              {entregas.length} entrega{entregas.length > 1 ? 's' : ''} por rendir
+            </div>
+            <table className="w-full text-[13px]">
+              <thead className="text-left text-slate-500 bg-slate-50 dark:bg-slate-800/60">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Pedido</th>
+                  <th className="px-4 py-2 font-medium">Dirección</th>
+                  <th className="px-4 py-2 font-medium text-right">Total</th>
+                  <th className="px-4 py-2 font-medium text-right">Cobró</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entregas.map((e) => (
+                  <tr key={e.pedidoId} className="border-t border-slate-100 dark:border-slate-800">
+                    <td className="px-4 py-2 font-medium">#{e.numero}</td>
+                    <td className="px-4 py-2 text-slate-500">{e.direccion || '—'}</td>
+                    <td className="px-4 py-2 text-right num private-mask">{fmtCurrency(e.total, 'VES')}</td>
+                    {/* Lo cobrado en la puerta puede ser menos que el total: ese
+                        faltante es del pedido, no del repartidor, y esconderlo acá
+                        se lo cargaría a él. */}
+                    <td className={`px-4 py-2 text-right num private-mask ${e.cobradoBs && e.cobradoBs < e.total ? 'text-amber-700 dark:text-amber-400 font-semibold' : ''}`}>
+                      {fmtCurrency(e.cobradoBs || e.total, 'VES')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="flex items-center justify-between text-[14px]">
+                <span className="text-slate-500">Debe traer</span>
+                <span className="num font-semibold private-mask">{fmtCurrency(esperado, 'VES')}</span>
+              </div>
+              <Field label="¿Cuánto puso sobre el mostrador?" required>
+                <Input type="number" inputMode="decimal" step="0.01" value={declarado} autoFocus
+                  placeholder={String(esperado)} onChange={(e) => setDeclarado(e.target.value)} />
+              </Field>
+              {puesto !== null && !cuadra ? (
+                <div className="rounded-lg px-3 py-2 text-[12.5px]"
+                  style={diferencia < 0
+                    ? { background: '#FBEDEB', border: '1px solid #ECC8C4', color: '#B3362C' }
+                    : { background: '#FFF7E8', border: '1px solid #EEDCB4', color: '#92600A' }}>
+                  {diferencia < 0
+                    ? `Faltan ${fmtCurrency(-diferencia, 'VES')}.`
+                    : `Sobran ${fmtCurrency(diferencia, 'VES')}.`} Hace falta una nota que lo explique.
+                </div>
+              ) : null}
+              {puesto !== null && !cuadra ? (
+                <Field label="¿Qué pasó?" required>
+                  <Input value={nota} placeholder="Se le quedó un billete al cliente, lo trae mañana"
+                    onChange={(e) => setNota(e.target.value)} />
+                </Field>
+              ) : null}
+              <div className="flex justify-end">
+                <Button onClick={cerrar} loading={busy} disabled={puesto === null || faltaNota}
+                  icon={<Icon.Check size={15} />}>Recibir y cerrar turno</Button>
+              </div>
+            </div>
+          </div>
+        )
+      ) : null}
+
+      {actas.length ? (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 text-[14px] font-semibold">Cierres anteriores</div>
+          <table className="w-full text-[13px]">
+            <thead className="text-left text-slate-500 bg-slate-50 dark:bg-slate-800/60">
+              <tr>
+                <th className="px-4 py-2 font-medium">Repartidor</th>
+                <th className="px-4 py-2 font-medium">Entregas</th>
+                <th className="px-4 py-2 font-medium text-right">Esperado</th>
+                <th className="px-4 py-2 font-medium text-right">Entregó</th>
+                <th className="px-4 py-2 font-medium">Diferencia</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...actas].reverse().map((l) => (
+                <tr key={l.id} className="border-t border-slate-100 dark:border-slate-800 align-top">
+                  <td className="px-4 py-2 font-medium">{l.repartidorNombre}</td>
+                  <td className="px-4 py-2 text-slate-500">{l.pedidoIds?.length || 0}</td>
+                  <td className="px-4 py-2 text-right num private-mask">{fmtCurrency(l.esperadoBs, 'VES')}</td>
+                  <td className="px-4 py-2 text-right num private-mask">{fmtCurrency(l.declaradoBs, 'VES')}</td>
+                  <td className="px-4 py-2">
+                    {Math.abs(l.diferenciaBs) < 0.005
+                      ? <Badge color="green">Cuadró</Badge>
+                      : <><Badge color={l.diferenciaBs < 0 ? 'red' : 'amber'}>{fmtCurrency(l.diferenciaBs, 'VES')}</Badge>
+                        {l.nota ? <div className="text-[12px] text-slate-500 mt-1">{l.nota}</div> : null}</>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </div>
   )
 }

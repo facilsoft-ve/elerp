@@ -179,3 +179,12 @@ type RepartidorRepository interface {
 	ByUsuario(empresaID, usuarioID string) (Repartidor, bool)
 	Upsert(r Repartidor) Repartidor
 }
+
+// LiquidacionRepository guarda las actas de cierre del repartidor. Solo Append y
+// lectura: un acta de plata contada no se edita — si algo cambió, se levanta
+// otra.
+type LiquidacionRepository interface {
+	Append(l Liquidacion) Liquidacion
+	List(empresaID, sedeID string) []Liquidacion
+	ByID(empresaID, id string) (Liquidacion, bool)
+}

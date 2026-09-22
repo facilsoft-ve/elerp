@@ -182,11 +182,14 @@ type Service struct {
 	// ConPedidos; sin él, ElERP se comporta como si el módulo no existiera.
 	// copiaDemo hace las copias efímeras de la demostración. Sin ella, el modo
 	// demo entra al tenant compartido (el comportamiento anterior).
-	copiaDemo          CopiaDemo
-	pedidos            pedido.Repository
-	canalesPedido      pedido.CanalRepository
-	zonasPedido        pedido.ZonaRepository
-	repartidores       pedido.RepartidorRepository
+	copiaDemo     CopiaDemo
+	pedidos       pedido.Repository
+	canalesPedido pedido.CanalRepository
+	zonasPedido   pedido.ZonaRepository
+	repartidores  pedido.RepartidorRepository
+	// liquidaciones son las actas de cierre del repartidor: opcional, porque un
+	// local sin flota propia nunca recibe plata de vuelta.
+	liquidaciones      pedido.LiquidacionRepository
 	configDigital      facturaciondigital.ConfigRepository
 	emisionesDigitales facturaciondigital.EmisionRepository
 	// conceptosISLR es el maestro de conceptos retenibles de ISLR con su tarifa y

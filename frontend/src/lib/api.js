@@ -530,6 +530,11 @@ export const api = {
   // Genera el token del canal y lo devuelve EN CLARO una sola vez: no se puede
   // volver a leer, así que la pantalla tiene que mostrarlo en ese momento.
   tokenCanalPedido: (id) => request(`/api/pedidos/config/canales/${encodeURIComponent(id)}/token`, { method: 'POST' }),
+  // LIQUIDACIÓN DEL REPARTIDOR. Lo pendiente se deriva de sus entregas: el
+  // servidor no acepta que se le diga cuánto debe traer.
+  pendienteLiquidar: (repartidorId) => request(`/api/pedidos/liquidaciones/pendiente/${encodeURIComponent(repartidorId)}`),
+  liquidaciones: () => request('/api/pedidos/liquidaciones'),
+  liquidarRepartidor: (body) => request('/api/pedidos/liquidaciones', { method: 'POST', body: JSON.stringify(body) }),
   zonasPedido: () => request('/api/pedidos/config/zonas'),
   guardarZonaPedido: (body) => request('/api/pedidos/config/zonas', { method: 'PUT', body: JSON.stringify(body) }),
   repartidores: () => request('/api/pedidos/config/repartidores'),
