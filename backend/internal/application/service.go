@@ -22,6 +22,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/listaprecio"
 	"github.com/mornix/elerp/internal/domain/mesa"
 	"github.com/mornix/elerp/internal/domain/mesonero"
+	"github.com/mornix/elerp/internal/domain/pedido"
 	"github.com/mornix/elerp/internal/domain/plantilla"
 	"github.com/mornix/elerp/internal/domain/promocion"
 	"github.com/mornix/elerp/internal/domain/proveedor"
@@ -177,6 +178,12 @@ type Service struct {
 	// (imprenta digital autorizada). Se cablean con ConFacturacionDigital; sin
 	// ellos, ElERP factura exactamente como antes y el módulo no existe — que es
 	// justo lo que lo hace un módulo y no una bifurcación del motor fiscal.
+	// pedidos es el módulo de DELIVERY (pedidos para llevar). Se cablea con
+	// ConPedidos; sin él, ElERP se comporta como si el módulo no existiera.
+	pedidos            pedido.Repository
+	canalesPedido      pedido.CanalRepository
+	zonasPedido        pedido.ZonaRepository
+	repartidores       pedido.RepartidorRepository
 	configDigital      facturaciondigital.ConfigRepository
 	emisionesDigitales facturaciondigital.EmisionRepository
 	// conceptosISLR es el maestro de conceptos retenibles de ISLR con su tarifa y

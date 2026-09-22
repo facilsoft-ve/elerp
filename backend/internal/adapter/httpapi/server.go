@@ -82,6 +82,9 @@ func NewServer(cfg config.Config, svc *application.Service, tenancy *application
 	// tiene cuenta en ElERP. La protege el token, que es aleatorio.
 	app.Get("/f/:token", s.handleFacturaPublica)
 	app.Get("/f/:token/qr.png", s.handleQRFactura)
+	// SEGUIMIENTO PÚBLICO del pedido: lo abre el cliente con el enlace que
+	// recibió, sin cuenta y sin pasar por la aplicación.
+	app.Get("/t/:token", s.handleSeguimientoPublico)
 	app.Get("/api/health", s.handleHealth)
 	app.Get("/api/auth/login", authLimiter, s.handleLogin)
 	app.Get("/api/auth/dev-login", authLimiter, s.handleDevLogin)
@@ -156,6 +159,7 @@ func NewServer(cfg config.Config, svc *application.Service, tenancy *application
 	s.registerCajas(data)
 	s.registerPresenciaConfig(data)
 	s.rutasFacturacionDigital(data)
+	s.registerPedidos(data)
 	s.registerTasa(data)
 	s.registerTesoreria(data)
 	s.registerContabilidad(data)

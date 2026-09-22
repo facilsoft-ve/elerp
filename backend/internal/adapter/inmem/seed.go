@@ -90,6 +90,10 @@ type Store struct {
 	Alicuotas           *AlicuotaRepo
 	Series              *SerieRepo
 	ConfigDigital       *ConfigDigitalRepo
+	Pedidos             *PedidoRepo
+	CanalesPedido       *CanalPedidoRepo
+	ZonasPedido         *ZonaPedidoRepo
+	Repartidores        *RepartidorRepo
 	EmisionesDigitales  *EmisionDigitalRepo
 	ConceptosISLR       *ConceptoISLRRepo
 	UnidadesTributarias *UnidadTributariaRepo
@@ -145,6 +149,10 @@ func New() *Store {
 		Alicuotas:           NewAlicuotaRepo(),
 		Series:              NewSerieRepo(),
 		ConfigDigital:       NewConfigDigitalRepo(),
+		Pedidos:             NewPedidoRepo(),
+		CanalesPedido:       NewCanalPedidoRepo(),
+		ZonasPedido:         NewZonaPedidoRepo(),
+		Repartidores:        NewRepartidorRepo(),
 		EmisionesDigitales:  NewEmisionDigitalRepo(),
 		ConceptosISLR:       NewConceptoISLRRepo(),
 		UnidadesTributarias: NewUnidadTributariaRepo(),

@@ -322,6 +322,12 @@ func (s *Service) MarcarItem(empresaID, cuentaID, itemID, estado, actor, origen 
 	if !ok {
 		return cuenta.Cuenta{}, ErrCuentaMesaNoExiste
 	}
+	// Si esta cuenta es la producción de un PEDIDO PARA LLEVAR, terminar el último
+	// renglón lo deja listo para despachar. El cocinero no tiene que saber que
+	// existe el módulo de delivery: hace el mismo gesto de siempre y el pedido
+	// avanza solo. Es el mismo paso a «listo» que en una tienda dispara quien
+	// arma el pedido — dos disparadores del mismo camino, no dos caminos.
+	s.avisarProduccionLista(empresaID, out, actor, origen)
 	return out, nil
 }
 

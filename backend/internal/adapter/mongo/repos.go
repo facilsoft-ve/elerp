@@ -65,6 +65,10 @@ type Store struct {
 	Alicuotas           *AlicuotaRepo
 	Series              *SerieRepo
 	ConfigDigital       *ConfigDigitalRepo
+	Pedidos             *PedidoRepo
+	CanalesPedido       *CanalPedidoRepo
+	ZonasPedido         *ZonaPedidoRepo
+	Repartidores        *RepartidorRepo
 	EmisionesDigitales  *EmisionDigitalRepo
 	ConceptosISLR       *ConceptoISLRRepo
 	UnidadesTributarias *UnidadTributariaRepo
@@ -108,6 +112,7 @@ func New(db *gomongo.Database) *Store {
 	st.attachAlicuotas(db)
 	st.attachSeries(db)
 	st.attachFacturacionDigital(db)
+	st.attachPedidos(db)
 	st.attachConceptosISLR(db)
 	st.attachUnidadesTributarias(db)
 	st.attachCostosEnDestino(db)

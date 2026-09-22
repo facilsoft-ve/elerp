@@ -95,6 +95,26 @@ type Cuenta struct {
 	// DocumentoID es la factura emitida al cerrar (fase fiscal); vacío mientras
 	// tanto.
 	DocumentoID string `json:"documentoId" bson:"documentoid"`
+	/* ORIGEN DE UN PEDIDO PARA LLEVAR.
+	 *
+	 * Una cuenta de delivery no tiene mesa, así que sin esto la comanda llegaría a
+	 * cocina sin nada que la identifique. Y no alcanza con decir «delivery»: la
+	 * empresa puede estar publicada en Yummy, PedidosYa y su propia tienda a la
+	 * vez, y cuando el courier de una de ellas llega al mostrador preguntando por
+	 * un número, ese número es el DE LA APP, no el nuestro.
+	 *
+	 * Por eso se guardan los dos, que son numeraciones distintas y ninguna
+	 * reemplaza a la otra: `PedidoNumero` es el correlativo interno de ElERP
+	 * —el que el local canta en voz alta— y `PedidoReferencia` es el número con
+	 * el que ese pedido existe en la aplicación de origen.
+	 */
+	PedidoID string `json:"pedidoId,omitempty" bson:"pedidoid,omitempty"`
+	// PedidoOrigen es el nombre del canal concreto ("Yummy", "Tienda web"), no su
+	// tipo: el tipo no le sirve a nadie en el mostrador.
+	PedidoOrigen     string `json:"pedidoOrigen,omitempty" bson:"pedidoorigen,omitempty"`
+	PedidoNumero     int    `json:"pedidoNumero,omitempty" bson:"pedidonumero,omitempty"`
+	PedidoReferencia string `json:"pedidoReferencia,omitempty" bson:"pedidoreferencia,omitempty"`
+
 	// TurnoID es el turno del mesonero que abrió la cuenta (mesonero.Turno).
 	// Se estampa al abrir y no cambia — igual que la sesión de caja se estampa en
 	// el documento fiscal. Es lo que permite PLEGAR el resumen del turno al
