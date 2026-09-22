@@ -178,25 +178,43 @@ type bucket struct {
 //     vez más fiel, en vez de dejar un resto indefinido creciendo para siempre.
 //
 // `almacenID` acota la búsqueda a un almacén; vacío mira toda la sede.
+//
+// LO APARTADO NO SURTE. Se descuenta aquí, y aquí es donde tenía que ir: este es
+// el único camino por el que sale mercancía, así que descontándolo una vez lo
+// respetan todas las salidas —el punto de venta, la facturación, las
+// transferencias— sin que ninguna sepa que los apartados existen. Restarlo en cada
+// sitio que vende habría bastado con que uno se olvidara para vender lo apartado,
+// y eso no falla: solo deja sin mercancía al cliente que la esperaba.
+// Un apartado deja de contar en cuanto se marca despachado, y por eso el despacho
+// lo marca ANTES de emitir sus salidas: si no, cada línea competiría con la propia
+// reserva que la respalda y no podría surtirse.
 func (s *Service) bucketsDe(empresaID, sedeID, almacenID, productoID string) []bucket {
 	movs := s.movimientos.List(empresaID, inventario.FiltroMovimiento{
 		SedeID: sedeID, AlmacenID: almacenID, ProductoID: productoID,
 	})
 	hoy := time.Now().UTC().Format("2006-01-02")
 
-	type clave struct{ Lote, Almacen, Ubicacion string }
+	type clave = claveCasilla
 	suma := map[clave]float64{}
 	for _, m := range movs {
 		if m.Tipo == inventario.MovRevaluacion {
 			continue // no mueve unidades: no ocupa casilla
 		}
-		suma[clave{m.Lote, m.AlmacenID, m.UbicacionID}] += m.Cantidad
+		suma[clave{Lote: m.Lote, Almacen: m.AlmacenID, Ubicacion: m.UbicacionID}] += m.Cantidad
+	}
+	for k, comprometido := range s.apartadoPorCasilla(empresaID, sedeID, productoID, "") {
+		if _, existe := suma[k]; existe {
+			suma[k] -= comprometido
+		}
+		// Un apartado sobre una casilla que ya no tiene movimientos no resta de
+		// ninguna otra: restarlo del total repartiéndolo por ahí dejaría sin surtir
+		// una casilla que sí tiene mercancía libre.
 	}
 
 	out := []bucket{}
 	for k, cant := range suma {
 		if cant <= 0.0001 {
-			continue // agotada o en negativo: no puede surtir nada
+			continue // agotada, comprometida o en negativo: no puede surtir nada
 		}
 		b := bucket{Lote: k.Lote, AlmacenID: k.Almacen, UbicacionID: k.Ubicacion, Cantidad: round2(cant)}
 		b.Vencimiento = vencimientoDeLote(movs, k.Lote)

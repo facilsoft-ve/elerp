@@ -102,6 +102,7 @@ type Store struct {
 	CostosEnDestino     *CostoEnDestinoRepo
 	Ubicaciones         *UbicacionRepo
 	TiposOperacion      *TipoOperacionRepo
+	Apartados           *ApartadoRepo
 	Horarios            *HorarioRepo
 }
 
@@ -163,6 +164,7 @@ func New() *Store {
 		CostosEnDestino:     NewCostoEnDestinoRepo(),
 		Ubicaciones:         NewUbicacionRepo(),
 		TiposOperacion:      NewTipoOperacionRepo(),
+		Apartados:           NewApartadoRepo(),
 		Horarios:            NewHorarioRepo(),
 	}
 	s.seedDemo()

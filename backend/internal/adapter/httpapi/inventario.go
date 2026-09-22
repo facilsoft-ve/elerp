@@ -1,8 +1,10 @@
 package httpapi
 
 import (
-	"github.com/gofiber/fiber/v2"
+	"errors"
 	"net/url"
+
+	"github.com/gofiber/fiber/v2"
 
 	"github.com/mornix/elerp/internal/application"
 
@@ -30,6 +32,13 @@ func (s *Server) registerInventario(r fiber.Router) {
 	g.Get("/productos/:sku/ubicaciones", s.handleExistenciaPorUbicacion)
 	g.Post("/productos/:sku/trasladar", s.escribirInventario, s.handleTrasladar)
 	g.Get("/pendiente-de-ubicar", s.handlePendienteDeUbicar)
+
+	// APARTADOS: mercancía comprometida que todavía no salió. Crear y despachar
+	// tocan el inventario; listar, no.
+	g.Get("/apartados", s.handleApartados)
+	g.Post("/apartados", s.escribirInventario, s.handleCrearApartado)
+	g.Post("/apartados/:id/despachar", s.escribirInventario, s.handleDespacharApartado)
+	g.Post("/apartados/:id/liberar", s.escribirInventario, s.handleLiberarApartado)
 	// EL RASTRO de un lote: «¿a quién le vendí el lote X?». Es la consulta que
 	// justifica la trazabilidad; sin ella el dato está guardado pero no sirve.
 	g.Get("/productos/:sku/lotes/historico", s.handleLotesHistoricos)
@@ -347,6 +356,68 @@ func (s *Server) handleExistenciaPorUbicacion(c *fiber.Ctx) error {
 // normal y no es un error.
 func (s *Server) handlePendienteDeUbicar(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"pendientes": s.svc.PendienteDeUbicar(empresaIDOf(c), s.sedeParam(c))})
+}
+
+func (s *Server) handleApartados(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"apartados": s.svc.Apartados(empresaIDOf(c), s.sedeParam(c))})
+}
+
+func (s *Server) handleCrearApartado(c *fiber.Ctx) error {
+	var in struct {
+		Motivo    string `json:"motivo"`
+		AlmacenID string `json:"almacenId"`
+		RefTipo   string `json:"refTipo"`
+		RefID     string `json:"refId"`
+		Lineas    []struct {
+			SKU         string  `json:"sku"`
+			Cantidad    float64 `json:"cantidad"`
+			UbicacionID string  `json:"ubicacionId"`
+			Lote        string  `json:"lote"`
+		} `json:"lineas"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	lineas := make([]inventario.LineaApartado, 0, len(in.Lineas))
+	for _, l := range in.Lineas {
+		lineas = append(lineas, inventario.LineaApartado{
+			SKU: l.SKU, Cantidad: l.Cantidad, UbicacionID: l.UbicacionID, Lote: l.Lote,
+		})
+	}
+	out, err := s.svc.CrearApartado(empresaIDOf(c), principalOf(c).UserID, origen(c), inventario.Apartado{
+		SedeID: s.sedeParam(c), AlmacenID: in.AlmacenID, Motivo: in.Motivo,
+		RefTipo: in.RefTipo, RefID: in.RefID, Lineas: lineas,
+	})
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+func (s *Server) handleDespacharApartado(c *fiber.Ctx) error {
+	out, err := s.svc.DespacharApartado(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c))
+	return respuestaApartado(c, out, err)
+}
+
+func (s *Server) handleLiberarApartado(c *fiber.Ctx) error {
+	out, err := s.svc.LiberarApartado(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c))
+	return respuestaApartado(c, out, err)
+}
+
+// respuestaApartado distingue «no existe» de «no se puede»: un 404 manda a buscar
+// el apartado y un 409 dice que el apartado está, pero ya cerrado.
+func respuestaApartado(c *fiber.Ctx, out inventario.Apartado, err error) error {
+	if err == nil {
+		return c.JSON(out)
+	}
+	estado := fiber.StatusBadRequest
+	switch {
+	case errors.Is(err, application.ErrApartadoNoExiste):
+		estado = fiber.StatusNotFound
+	case errors.Is(err, application.ErrApartadoCerrado):
+		estado = fiber.StatusConflict
+	}
+	return c.Status(estado).JSON(fiber.Map{"error": err.Error()})
 }
 
 func (s *Server) handleTrasladar(c *fiber.Ctx) error {

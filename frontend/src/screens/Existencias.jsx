@@ -60,6 +60,72 @@ function AvisoVencimientos() {
   )
 }
 
+/* APARTADOS ABIERTOS: mercancía comprometida que todavía no ha salido.
+ *
+ * Se muestra arriba, con lo pendiente de ubicar, porque las dos responden a la
+ * misma pregunta —«¿qué hay aquí que no está donde parece?»— y las dos se olvidan
+ * si no se ven: la existencia no las delata, porque las unidades están.
+ */
+function ApartadosAbiertos({ recarga, puedeEditar, toast, onCambio }) {
+  const [rows, setRows] = useState([])
+  const [ocupado, setOcupado] = useState('')
+  useEffect(() => {
+    let vivo = true
+    api.apartados()
+      .then((r) => { if (vivo) setRows((r?.apartados || []).filter((a) => a.estado === 'abierto')) })
+      .catch(() => { if (vivo) setRows([]) })
+    return () => { vivo = false }
+  }, [recarga])
+  if (rows.length === 0) return null
+
+  const accion = async (a, cual) => {
+    setOcupado(a.id)
+    try {
+      if (cual === 'despachar') await api.despacharApartado(a.id)
+      else await api.liberarApartado(a.id)
+      toast({
+        title: cual === 'despachar' ? 'Apartado despachado' : 'Apartado liberado',
+        body: cual === 'despachar'
+          ? 'La mercancía salió del inventario.'
+          : 'La mercancía vuelve a estar disponible. No se movió nada.',
+      })
+      onCambio()
+    } catch (e) {
+      toast({ title: 'No se pudo', body: e?.message || 'Error', kind: 'error' })
+    } finally { setOcupado('') }
+  }
+
+  return (
+    <div className="mb-3 rounded-xl bg-violet-50 dark:bg-violet-900/25 border border-violet-200 dark:border-violet-900/40 px-3 py-2.5">
+      <div className="flex items-start gap-2.5">
+        <Icon.Boxes size={15} className="mt-0.5 shrink-0 text-violet-700 dark:text-violet-400" />
+        <div className="text-[12.5px] text-violet-900 dark:text-violet-200 min-w-0 flex-1">
+          <strong>{rows.length} apartado(s) abierto(s)</strong> — mercancía comprometida que sigue en el almacén y no se puede vender.
+          <div className="mt-1 space-y-1">
+            {rows.slice(0, 6).map((a) => (
+              <div key={a.id} className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-[11.5px] font-medium">{a.motivo || 'sin motivo'}</span>
+                <span className="text-[11.5px] opacity-80">
+                  {(a.lineas || []).map((l) => `${l.sku} ×${fmtNum(l.cantidad)}`).join(', ')}
+                </span>
+                {puedeEditar ? (
+                  <>
+                    <button disabled={ocupado === a.id} onClick={() => accion(a, 'despachar')}
+                      className="text-[11.5px] underline disabled:opacity-50">despachar</button>
+                    <button disabled={ocupado === a.id} onClick={() => accion(a, 'liberar')}
+                      className="text-[11.5px] underline disabled:opacity-50">liberar</button>
+                  </>
+                ) : null}
+              </div>
+            ))}
+            {rows.length > 6 ? <div className="text-[11.5px] opacity-80">…y {rows.length - 6} más.</div> : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* PENDIENTE DE UBICAR: el segundo paso de una recepción en dos pasos.
  *
  * Existe porque si no se viera, la mercancía se quedaría en el muelle sin que nadie
@@ -255,6 +321,7 @@ export function Existencias({ onKardex }) {
   const [q, setQ] = useState('')
   const [soloBajo, setSoloBajo] = useState('todos')
   const [ajuste, setAjuste] = useState(null)
+  const [apartando, setApartando] = useState(null)
   // Qué SKU tiene desplegado su desglose por ubicación. Uno a la vez: la pregunta
   // «¿dónde está esto?» es de un producto concreto, no de la lista entera.
   const [dondeEsta, setDondeEsta] = useState('')
@@ -305,6 +372,8 @@ export function Existencias({ onKardex }) {
     <div>
       <AvisoVencimientos />
       <PendienteDeUbicar recarga={pendRecarga} />
+      <ApartadosAbiertos recarga={pendRecarga} puedeEditar={editable} toast={toast}
+        onCambio={() => { setPendRecarga((n) => n + 1); recargar() }} />
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <Input className="w-64" icon={<Icon.Search size={15} />} placeholder="Buscar por nombre o SKU…"
           value={q} onChange={(e) => setQ(e.target.value)} />
@@ -345,13 +414,22 @@ export function Existencias({ onKardex }) {
               </thead>
               <tbody>
                 {rows.map((e) => {
-                  const bajo = (Number(e.cantidad) || 0) <= LOW_STOCK
+                  // El stock bajo se mide sobre lo DISPONIBLE, no sobre la existencia:
+                  // 20 unidades con 18 apartadas son 2 para quien viene a comprar.
+                  const libre = e.disponible === undefined ? Number(e.cantidad) || 0 : Number(e.disponible)
+                  const apartado = Number(e.apartado) || 0
+                  const bajo = libre <= LOW_STOCK
                   return (
                     <tr key={e.productoId || e.sku} className={`border-b border-slate-100 dark:border-slate-800/70 row-hover ${bajo ? 'bg-amber-50/40 dark:bg-amber-900/10' : ''}`}>
                       <td className={`${pad} pr-3 num text-[12.5px] text-slate-500`}>{e.sku}</td>
                       <td className={`${pad} pr-3 font-medium text-[13px]`}>{e.nombre}</td>
                       <td className={`${pad} pr-3 text-right num font-medium ${bajo ? 'text-amber-700 dark:text-amber-400' : ''}`}>
                         {fmtNum(e.cantidad)} {bajo ? <Icon.CircleAlert size={13} className="inline ml-1 -mt-0.5" /> : null}
+                        {apartado > 0 ? (
+                          <div className={`text-[11px] font-normal ${libre < 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-400'}`}>
+                            {fmtNum(apartado)} apartada(s) · {fmtNum(libre)} libre(s)
+                          </div>
+                        ) : null}
                       </td>
                       <td className={`${pad} pr-3 text-right num text-slate-500 private-mask`}>{fmtCurrency(e.costoPromedio, ui.ccy)}</td>
                       <td className={`${pad} pr-3 text-right num font-medium private-mask`}>{fmtCurrency(e.valor, ui.ccy)}</td>
@@ -364,6 +442,12 @@ export function Existencias({ onKardex }) {
                           className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
                           <Icon.History size={15} />
                         </button>
+                        {editable ? (
+                          <button onClick={() => setApartando(e)} title="Apartar para un cliente"
+                            className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+                            <Icon.Boxes size={15} />
+                          </button>
+                        ) : null}
                         {editable ? (
                           <button onClick={() => setAjuste(e)} title="Ajustar existencia"
                             className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
@@ -385,6 +469,11 @@ export function Existencias({ onKardex }) {
       </div>
       {rows.length ? <div className="mt-2 text-[11.5px] text-slate-400">{fmtNum(rows.length, 0)} producto(s){soloBajo === 'bajo' ? ' con stock bajo' : ''}</div> : null}
 
+      {apartando ? (
+        <ApartarModal existencia={apartando} almacenId={almacenSel} toast={toast}
+          onClose={() => setApartando(null)}
+          onSaved={() => { setApartando(null); setPendRecarga((n) => n + 1); recargar() }} />
+      ) : null}
       {ajuste ? <AjustarModal existencia={ajuste} sedeNombre={activeSede?.nombre}
         almacenId={almacenSel} almacenNombre={almacenes.find((a) => a.id === almacenSel)?.nombre}
         onClose={() => setAjuste(null)} onSaved={recargar} toast={toast} /> : null}
@@ -447,6 +536,55 @@ function AjustarModal({ existencia, sedeNombre, almacenId, almacenNombre, onClos
             <span className="num font-semibold text-elerp-700 dark:text-elerp-100">{fmtNum(nuevoSaldo)}</span>
           </div>
         ) : null}
+      </div>
+    </Modal>
+  )
+}
+
+/* APARTAR: comprometer mercancía para alguien.
+ *
+ * Pide un motivo obligatorio y no por burocracia: lo apartado deja de poder
+ * venderse, así que quien se encuentre el bloqueo tiene que poder leer para quién
+ * es y decidir si lo libera. Un apartado sin motivo es un bloqueo sin dueño.
+ */
+function ApartarModal({ existencia, almacenId, onClose, onSaved, toast }) {
+  const [cantidad, setCantidad] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const libre = existencia.disponible === undefined ? Number(existencia.cantidad) || 0 : Number(existencia.disponible)
+
+  const guardar = async () => {
+    const cant = Number(cantidad)
+    if (!(cant > 0)) return toast({ title: 'Indica cuánto vas a apartar', kind: 'error' })
+    if (!motivo.trim()) return toast({ title: 'Indica para quién', body: 'Quien se encuentre el bloqueo necesita saber de quién es.', kind: 'error' })
+    setGuardando(true)
+    try {
+      await api.crearApartado({ motivo: motivo.trim(), almacenId: almacenId || '', lineas: [{ sku: existencia.sku, cantidad: cant }] })
+      toast({ title: 'Mercancía apartada', body: `${fmtNum(cant)} de ${existencia.nombre}. Sigue en el almacén, pero ya no se puede vender.` })
+      onSaved()
+    } catch (e) {
+      toast({ title: 'No se pudo apartar', body: e?.message || 'Error', kind: 'error' })
+    } finally { setGuardando(false) }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Apartar · ${existencia.nombre}`}>
+      <div className="space-y-3">
+        <div className="text-[12.5px] text-slate-500 dark:text-slate-400">
+          Hay <strong>{fmtNum(existencia.cantidad)}</strong> en la sede y <strong>{fmtNum(libre)}</strong> sin comprometer.
+          Apartar no mueve la mercancía: sigue en el almacén, pero deja de poder venderse.
+        </div>
+        <Field label="Cantidad a apartar">
+          <Input type="number" min="0" step="any" value={cantidad} autoFocus
+            onChange={(e) => setCantidad(e.target.value)} placeholder={`máximo ${fmtNum(libre)}`} />
+        </Field>
+        <Field label="¿Para quién?" hint="Lo lee quien se encuentre el bloqueo y tenga que decidir si lo libera.">
+          <Input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Pedido de…" />
+        </Field>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button onClick={guardar} disabled={guardando}>{guardando ? 'Apartando…' : 'Apartar'}</Button>
+        </div>
       </div>
     </Modal>
   )
