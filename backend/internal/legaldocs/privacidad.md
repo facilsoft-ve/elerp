@@ -3,7 +3,7 @@
 **Versión:** 1.0 (borrador)
 **Fecha de vigencia:** [pendiente de definir — no publicar hasta revisión legal]
 **Última actualización del borrador:** 2026-08-25
-**Responsable de la plataforma:** Mornix, C.A. («Mornix») — RIF [PENDIENTE], domicilio [PENDIENTE], República Bolivariana de Venezuela.
+**Responsable de la plataforma:** MORNIX CORPORATION, C.A. («Mornix») — RIF J-507759733, domicilio [PENDIENTE], República Bolivariana de Venezuela.
 **Contacto de privacidad:** [correo de contacto de privacidad — PENDIENTE]
 
 ---

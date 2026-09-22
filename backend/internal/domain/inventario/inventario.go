@@ -144,6 +144,16 @@ type Producto struct {
 	// cantidad por plato (p. ej. 0.12 kg de pasta, 0.05 kg de queso). Cada insumo es
 	// un producto normal del catálogo. Solo tiene sentido cuando EsPlato.
 	Receta []ComboComponente `json:"receta" bson:"receta"`
+	/* EsServicio marca algo que SE VENDE PERO NO SE STOCKEA: un envío a
+	 * domicilio, una instalación, una hora de mano de obra.
+	 *
+	 * Es distinto de un plato —que tampoco se stockea pero sí consume insumos— y
+	 * de un insumo, que se stockea y no se vende. Un servicio no mueve el Kardex
+	 * en absoluto: facturarlo sin esta marca lo dejaría con existencia negativa
+	 * creciendo para siempre y ensuciaría la valorización del inventario con algo
+	 * que no es mercancía.
+	 */
+	EsServicio bool `json:"esServicio" bson:"esservicio"`
 	// EsInsumo marca una MATERIA PRIMA: se compra y se stockea (participa del Kardex y
 	// del costo promedio) pero NO se vende directamente — se consume por la receta de
 	// un plato. Un restaurante vende platos, bebidas y productos de reventa; no vende

@@ -46,6 +46,11 @@ func (s *Server) registerPedidos(api fiber.Router) {
 	g.Get("/mis-entregas", s.handleMisEntregas)
 	g.Post("/disponibilidad", s.handleDisponibilidadRepartidor)
 
+	// COTIZAR EL ENVÍO antes de facturar: lo usan el punto de venta y el módulo
+	// de ventas para mostrar el costo y avisar si la dirección queda fuera. Lo
+	// llama quien cobra, así que va con el gate de la operación.
+	g.Post("/cotizar-envio", s.handleCotizarEnvio)
+
 	// Maestros del módulo.
 	g.Get("/config/canales", admin, s.handleCanalesPedido)
 	// El token se genera y se muestra UNA vez: si se pudiera volver a leer,
@@ -197,6 +202,21 @@ func (s *Server) handleFallidaPedido(c *fiber.Ctx) error {
 func (s *Server) handleCancelarPedido(c *fiber.Ctx) error {
 	p, err := s.svc.CancelarPedido(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c), conMotivo(c))
 	return s.responder(c, p, err)
+}
+
+// handleCotizarEnvio resuelve a qué zona cae una dirección y cuánto cuesta
+// llevarla, ANTES de cobrar.
+//
+// Antes de cobrar y no después: «fuera de zona» descubierto tarde es el caso
+// peor — la venta ya se cobró, la comida ya se hizo y nadie puede llevarla.
+func (s *Server) handleCotizarEnvio(c *fiber.Ctx) error {
+	var in struct {
+		Lat   float64 `json:"lat"`
+		Lon   float64 `json:"lon"`
+		Total float64 `json:"total"`
+	}
+	_ = c.BodyParser(&in)
+	return c.JSON(s.svc.CotizarEnvio(empresaIDOf(c), sedeIDOf(c), in.Lat, in.Lon, in.Total))
 }
 
 /* --- Maestros ------------------------------------------------------------- */

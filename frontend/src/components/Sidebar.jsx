@@ -257,6 +257,14 @@ export function Sidebar({ route, setRoute, drawerOpen = false, onCloseDrawer }) 
       <div className="text-[10.5px] text-white/50 truncate mono">
         {activeEmpresa?.rif || ''}{activeSede ? ' · ' + activeSede.nombre : ''}
       </div>
+      {/* AUTORÍA DEL SISTEMA, con razón social y RIF. ElERP es un producto
+          fiscal: quien lo audita —una contadora, el SENIAT— necesita saber a qué
+          contribuyente responde el software, y tenerlo a la vista evita que haya
+          que buscarlo en los términos de uso. */}
+      <div className="mt-1.5 pt-1.5 border-t border-white/10 text-[9.5px] leading-tight text-white/35">
+        ElERP · desarrollado por<br />MORNIX CORPORATION, C.A.<br />
+        <span className="mono">J-507759733</span>
+      </div>
     </div>
   )
 

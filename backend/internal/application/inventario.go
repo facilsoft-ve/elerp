@@ -35,7 +35,10 @@ var (
 	ErrPlatoSinInsumos         = errors.New("un plato necesita al menos un insumo en su receta")
 	ErrPlatoInsumoInvalido     = errors.New("insumo de plato inválido: el SKU debe existir, estar activo y llevar cantidad mayor que cero")
 	ErrPlatoAnidado            = errors.New("un insumo de plato no puede ser otro plato ni un combo (sin anidar)")
-	ErrInsumoNoVendible        = errors.New("un insumo no se vende directamente: no puede ser a la vez un plato ni un combo")
+	// ErrServicioNoStockeable: un servicio no puede ser además insumo, plato o
+	// combo — esas son formas de mercancía, y un servicio no lo es.
+	ErrServicioNoStockeable = errors.New("un servicio no puede ser además insumo, plato o combo")
+	ErrInsumoNoVendible     = errors.New("un insumo no se vende directamente: no puede ser a la vez un plato ni un combo")
 )
 
 // validarCombo valida y normaliza la receta de un producto combo. Un combo:
@@ -121,6 +124,20 @@ func (s *Service) validarPlato(empresaID string, p *inventario.Producto) error {
 // NO se vende: por eso no puede ser a la vez un plato o un combo (que son formas de
 // VENDER), y su precio de venta se pone en cero — dejarle un precio sugeriría en el
 // catálogo que se puede vender, que es justo lo que la marca niega.
+// validarServicio acota la marca de SERVICIO. Un servicio se vende y no se
+// stockea, así que no puede ser a la vez un insumo (que se stockea y no se
+// vende) ni un plato o un combo, que son formas de armar mercancía.
+func validarServicio(p *inventario.Producto) error {
+	if !p.EsServicio {
+		return nil
+	}
+	if p.EsInsumo || p.EsPlato || p.EsCombo {
+		return ErrServicioNoStockeable
+	}
+	p.TipoVenta = inventario.TipoVentaUnidad
+	return nil
+}
+
 func validarInsumo(p *inventario.Producto) error {
 	if !p.EsInsumo {
 		return nil
@@ -283,6 +300,9 @@ func (s *Service) CrearProducto(empresaID, actor, origen string, p inventario.Pr
 		p.Receta = []inventario.ComboComponente{}
 	}
 	// Insumo (materia prima): no se vende, así que no lleva precio de venta.
+	if err := validarServicio(&p); err != nil {
+		return inventario.Producto{}, err
+	}
 	if err := validarInsumo(&p); err != nil {
 		return inventario.Producto{}, err
 	}

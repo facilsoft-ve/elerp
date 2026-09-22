@@ -3,7 +3,7 @@
 **Versión:** 1.0 (borrador)
 **Fecha de vigencia:** [pendiente de definir — no publicar hasta revisión legal]
 **Última actualización del borrador:** 2026-08-25
-**Prestador del servicio:** Mornix, C.A. (en adelante, «Mornix» o «el Prestador») — RIF [PENDIENTE], domicilio fiscal [PENDIENTE], República Bolivariana de Venezuela.
+**Prestador del servicio:** MORNIX CORPORATION, C.A. (en adelante, «Mornix» o «el Prestador») — RIF J-507759733, domicilio fiscal [PENDIENTE], República Bolivariana de Venezuela.
 **Producto:** ElERP — plataforma SaaS de gestión empresarial (ERP) multiempresa.
 
 ---
@@ -20,7 +20,7 @@ A los efectos de estos Términos y Condiciones (los «Términos»):
 
 1.1. **«ElERP»** o **«la Plataforma»**: el software de gestión empresarial (ERP) ofrecido bajo modalidad SaaS (*Software as a Service*) por Mornix, incluyendo su aplicación web (PWA), API, agente fiscal local, portales de verificación, documentación y servicios asociados.
 
-1.2. **«Mornix»** o **«el Prestador»**: Mornix, C.A., titular y desarrollador de ElERP.
+1.2. **«Mornix»** o **«el Prestador»**: MORNIX CORPORATION, C.A., RIF J-507759733, titular y desarrollador de ElERP.
 
 1.3. **«Cliente»**: la persona natural o jurídica que contrata o utiliza la Plataforma, identificada mediante su RIF y datos de registro. El Cliente es el **contribuyente** y titular de la cuenta.
 

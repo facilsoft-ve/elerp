@@ -13,6 +13,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/empresa"
 	"github.com/mornix/elerp/internal/domain/facturaciondigital"
 	"github.com/mornix/elerp/internal/domain/fiscal"
+	"github.com/mornix/elerp/internal/domain/pedido"
 	"github.com/mornix/elerp/internal/domain/usuario"
 	"github.com/mornix/elerp/internal/domain/venta"
 )
@@ -405,6 +406,21 @@ func (s *Server) handleEmitir(c *fiber.Ctx) error {
 		} `json:"pagos"`
 		Moneda       string `json:"moneda"`
 		Contingencia bool   `json:"contingencia"`
+		/* ENVÍO A DOMICILIO. Presente = esta venta se lleva: se le agrega el
+		 * renglón del flete (con el costo de su zona) y, al emitir, se crea el
+		 * pedido. Ausente = venta de mostrador, como siempre. */
+		Envio *struct {
+			Direccion   string  `json:"direccion"`
+			Referencia  string  `json:"referencia"`
+			Telefono    string  `json:"telefono"`
+			Contacto    string  `json:"contacto"`
+			Instruccion string  `json:"instruccion"`
+			Lat         float64 `json:"lat"`
+			Lon         float64 `json:"lon"`
+			// CobraEnvio en false factura el flete en cero: es «envío gratis», que
+			// el local decide y tiene que poder aplicar sin falsear la zona.
+			CobraEnvio bool `json:"cobraEnvio"`
+		} `json:"envio"`
 		// Venta a crédito: lo que no se cobró queda por cobrar en Tesorería.
 		Credito     bool `json:"credito"`
 		DiasCredito int  `json:"diasCredito"`
@@ -443,6 +459,36 @@ func (s *Server) handleEmitir(c *fiber.Ctx) error {
 			Metodo: p.Metodo, CuentaID: p.CuentaID, Monto: p.Monto, Moneda: p.Moneda, Referencia: p.Referencia,
 		})
 	}
+	/* ENVÍO A DOMICILIO desde el punto de venta o el módulo de ventas.
+	 *
+	 * El renglón del envío se agrega ACÁ, antes de emitir, porque cobrar por
+	 * llevar es un servicio gravado: tiene que salir en la factura, en el libro
+	 * de ventas y en el IVA. Y el costo NO lo teclea quien factura — sale de la
+	 * zona configurada, o cada cajero cobraría un flete distinto por la misma
+	 * dirección.
+	 */
+	var cotEnvio application.CotizacionEnvio
+	if in.Envio != nil && strings.TrimSpace(in.Envio.Direccion) != "" {
+		if _, err := s.svc.AsegurarServicioEnvio(empresaIDOf(c), principalOf(c).UserID, origen(c)); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "no se pudo preparar el servicio de envío: " + err.Error()})
+		}
+		total := 0.0
+		for _, l := range in.Lineas {
+			total += l.PrecioUnitario * l.Cantidad
+		}
+		cotEnvio = s.svc.CotizarEnvio(empresaIDOf(c), sedeIDOf(c), in.Envio.Lat, in.Envio.Lon, total)
+		if !cotEnvio.Cubierta {
+			// Se rechaza ANTES de emitir: aceptar y después no poder llevar deja
+			// una factura hecha y un cliente esperando.
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": cotEnvio.Motivo})
+		}
+		costo := cotEnvio.Costo
+		if !in.Envio.CobraEnvio {
+			costo = 0 // envío gratis: lo decide el local, y tiene que poder hacerlo
+		}
+		ent.Lineas = append(ent.Lineas, application.LineaDeEnvio(costo, cotEnvio.ZonaNombre))
+	}
+
 	emp, _ := c.Locals("empresa").(empresa.Empresa)
 	out, err := s.svc.EmitirFactura(empresaIDOf(c), sedeIDOf(c), emp.Modalidad, principalOf(c).UserID, origen(c), ent)
 	if err != nil {
@@ -457,6 +503,40 @@ func (s *Server) handleEmitir(c *fiber.Ctx) error {
 	 *
 	 * El canal sale de dónde vino la venta: el mostrador y el módulo de ventas se
 	 * activan por separado. */
+	/* El PEDIDO se crea DESPUÉS de emitir y nunca antes: la factura es el hecho
+	 * fiscal y no puede depender de que el módulo de envío esté sano. Si esto
+	 * falla, la venta igual quedó cobrada — y el pedido se carga a mano. */
+	var pedidoCreado any
+	if in.Envio != nil && strings.TrimSpace(in.Envio.Direccion) != "" {
+		items := make([]pedido.Item, 0, len(out.Lineas))
+		for _, l := range out.Lineas {
+			if l.SKU == application.SKUServicioEnvio {
+				continue // el envío no es algo que el repartidor lleve: es el flete
+			}
+			items = append(items, pedido.Item{
+				SKU: l.SKU, Nombre: l.Nombre, Cantidad: l.Cantidad, PrecioUnitario: l.PrecioUnitario,
+			})
+		}
+		// Pagado = se cobró completo en el mostrador. Una venta a crédito deja
+		// saldo, y ahí el repartidor sí cobra en la puerta.
+		p, err := s.svc.CrearPedidoDeVenta(empresaIDOf(c), sedeIDOf(c), out.ID,
+			principalOf(c).UserID, origen(c),
+			application.EnvioDeVenta{
+				Direccion: in.Envio.Direccion, Referencia: in.Envio.Referencia,
+				Telefono: in.Envio.Telefono, Contacto: in.Envio.Contacto,
+				Instruccion: in.Envio.Instruccion, Lat: in.Envio.Lat, Lon: in.Envio.Lon,
+				CobraEnvio: in.Envio.CobraEnvio,
+			}, items, out.Total, !out.Credito)
+		if err == nil {
+			pedidoCreado = fiber.Map{"id": p.ID, "numero": p.Numero, "estado": p.Estado,
+				"seguimiento": s.urlSeguimiento(p.TokenPublico)}
+		} else {
+			pedidoCreado = fiber.Map{"error": err.Error()}
+		}
+	}
+	if pedidoCreado != nil {
+		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"documento": out, "pedido": pedidoCreado})
+	}
 	if emi, encolada := s.svc.EncolarEmision(empresaIDOf(c), canalDeVenta(c), out); encolada {
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 			"documento": out,

@@ -38,6 +38,12 @@ func (s *Service) recetaSnapshot(empresaID string, p inventario.Producto) []fisc
 // Se usa idéntico al emitir (salida), anular y en la nota de crédito (reingreso),
 // para que el stock siempre cuadre.
 func consumosDeLinea(l fiscal.Linea, cantidad float64) []consumoInventario {
+	// Un SERVICIO no mueve inventario: no hay nada que sacar del estante. Va
+	// primero porque un servicio nunca tiene insumos ni SKU que descontar, y
+	// dejarlo caer al caso general lo mandaría a stock negativo permanente.
+	if l.SinInventario {
+		return nil
+	}
 	if len(l.Insumos) > 0 {
 		out := make([]consumoInventario, 0, len(l.Insumos))
 		for _, in := range l.Insumos {

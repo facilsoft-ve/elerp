@@ -125,8 +125,13 @@ export function Login() {
 
         {/* Estaba en #8D5FF0 → 3,53:1, por debajo del 4,5:1 que exige AA para texto
             chico (regla del proyecto). #B295F4 da 5,96:1. */}
+        {/* La autoría va con la razón social y el RIF completos: ElERP es un
+            producto fiscal venezolano, y quien lo evalúa —una contadora, el
+            SENIAT— necesita saber a qué contribuyente responde el sistema, no
+            solo una marca. */}
         <div className="relative text-[12.5px]" style={{ color: '#B295F4' }}>
-          ERP web multi-empresa para Venezuela · por Mornix
+          ERP web multi-empresa para Venezuela
+          <div className="mt-0.5">Desarrollado por MORNIX CORPORATION, C.A. · J-507759733</div>
         </div>
       </div>
 

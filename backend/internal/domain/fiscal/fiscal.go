@@ -59,6 +59,11 @@ type Linea struct {
 	Cantidad       float64 `json:"cantidad" bson:"cantidad"`
 	PrecioUnitario float64 `json:"precioUnitario" bson:"preciounitario"`
 	Total          float64 `json:"total" bson:"total"`
+	// SinInventario sella que este renglón NO mueve stock: es un servicio (envío,
+	// instalación, mano de obra). Se copia del producto al emitir, igual que
+	// `Exento`, para que anular o acreditar el documento dentro de un año no
+	// reingrese mercancía que nunca salió.
+	SinInventario bool `json:"sinInventario,omitempty" bson:"sininventario,omitempty"`
 	// Exento marca el renglón como NO gravado con IVA. En Venezuela buena parte
 	// de la cesta básica lo está (harina de maíz, arroz), y la factura tiene que
 	// separar base imponible de base exenta: el IVA se calcula solo sobre la

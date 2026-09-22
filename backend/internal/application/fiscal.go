@@ -336,6 +336,10 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 			Cantidad: l.Cantidad, PrecioUnitario: precio, Total: total,
 			Exento:         !al.Grava(),
 			AlicuotaCodigo: al.Codigo, Alicuota: al.Porcentaje, AlicuotaAdicional: al.Adicional,
+			// Un SERVICIO (envío, instalación, mano de obra) no mueve stock. Se
+			// sella en la línea y no se mira el catálogo después, para que anular o
+			// acreditar dentro de un año no reingrese mercancía que nunca salió.
+			SinInventario: p.EsServicio,
 			// Snapshot de la receta si es un plato: el inventario descontará sus
 			// insumos, no el plato. Vacío para un producto normal.
 			Insumos: s.recetaSnapshot(empresaID, p),
