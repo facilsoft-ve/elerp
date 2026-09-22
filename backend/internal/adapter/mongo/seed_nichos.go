@@ -264,6 +264,25 @@ func sembrarNichos(st *Store, semilla *inmem.Store, refrescar bool) {
 			}
 		}
 
+		// PEDIDOS: canales, zonas, repartidores y el tablero vivo. Sin esto la
+		// bandeja arranca vacía en una base con Mongo, y el módulo se ve como una
+		// pantalla sin usar en vez de un local trabajando.
+		if len(snap.Pedidos) > 0 && len(st.Pedidos.List(n.EmpresaID, "")) == 0 {
+			for _, c := range snap.CanalesPedido {
+				st.CanalesPedido.Upsert(c)
+			}
+			for _, z := range snap.ZonasPedido {
+				st.ZonasPedido.Upsert(z)
+			}
+			for _, r := range snap.Repartidores {
+				st.Repartidores.Upsert(r)
+			}
+			for _, p := range snap.Pedidos {
+				st.Pedidos.Append(p)
+			}
+			log.Printf("Mongo: %s → %d pedidos de delivery", n.Giro, len(snap.Pedidos))
+		}
+
 		// Salón: grilla + mesas (solo el restaurante).
 		if snap.TienePlano {
 			// El plano es CONFIGURACIÓN, no ledger: cuando la demo se regenera se

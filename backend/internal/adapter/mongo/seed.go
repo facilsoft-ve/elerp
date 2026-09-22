@@ -109,7 +109,12 @@ import (
 // v32: el salón del restaurante trae sus ÁREAS (Salón, Terraza) y sus
 // MOSTRADORES (caja, barra, postres), que antes eran celdas bloqueadas — el
 // plano decía «acá no va nada» donde hay una barra con su nombre.
-const versionSeedDemo = 33
+const versionSeedDemo = 34
+
+// v34: la demo trae el MÓDULO DE PEDIDOS configurado y trabajando —canales,
+// zonas, repartidores y un tablero con pedidos en todos los estados—. Un módulo
+// vacío no se puede mostrar: la bandeja sin pedidos enseña un estado vacío, no
+// cómo se trabaja.
 
 // Seed siembra la base con los datos demo (misma fuente que in-memory), de
 // forma idempotente: si ya hay empresas, no hace nada.
@@ -462,6 +467,11 @@ func limpiarDemo(st *Store, demoID string) {
 	// con los valores de hoy. Un maestro de impuestos sembrado antes de que
 	// existiera la alícuota suntuaria se quedaría sin ella para siempre.
 	n += st.Alicuotas.c.delMany(f) + st.ConceptosISLR.c.delMany(f)
+	// El módulo de pedidos también: sin limpiarlo, una base ya sembrada nunca
+	// vería el tablero nuevo y la demo quedaría con los pedidos de la versión
+	// anterior.
+	n += st.Pedidos.c.delMany(f) + st.CanalesPedido.c.delMany(f) +
+		st.ZonasPedido.c.delMany(f) + st.Repartidores.c.delMany(f)
 	// El numerador fiscal también se reinicia para que la siembra lo deje otra vez
 	// adelantado sobre los folios nuevos. Va con la colección cruda porque el
 	// numerador no usa el envoltorio genérico; y su filtro es por PREFIJO del id

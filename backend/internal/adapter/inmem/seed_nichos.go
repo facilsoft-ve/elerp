@@ -18,6 +18,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/mesa"
 	"github.com/mornix/elerp/internal/domain/mesonero"
 	"github.com/mornix/elerp/internal/domain/organizacion"
+	"github.com/mornix/elerp/internal/domain/pedido"
 	"github.com/mornix/elerp/internal/domain/proveedor"
 	"github.com/mornix/elerp/internal/domain/sede"
 	"github.com/mornix/elerp/internal/domain/usuario"
@@ -339,6 +340,13 @@ type SnapshotEmpresa struct {
 	Horarios    []mesonero.Horario
 	ConfigSalon mesa.ConfigSalon
 	TieneConfig bool
+	// El módulo de PEDIDOS: sus canales, zonas, repartidores y el tablero vivo.
+	// Sin esto, en una base con Mongo la bandeja arranca vacía y el módulo se ve
+	// como una pantalla sin usar en vez de un local trabajando.
+	Pedidos       []pedido.Pedido
+	CanalesPedido []pedido.Canal
+	ZonasPedido   []pedido.Zona
+	Repartidores  []pedido.Repartidor
 	// Contadores es el estado del numerador fiscal de ESTA empresa tras sembrar
 	// ("empresa|sede|serie" → último folio). Sin ellos, la primera factura real del
 	// prospecto reiniciaría en 1 y colisionaría con un folio sembrado.
@@ -398,8 +406,13 @@ func (s *Store) SnapshotNicho(n NichoDemo) SnapshotEmpresa {
 		Asignaciones: s.Asignaciones.List(n.EmpresaID, n.SedeID),
 		Comanderas:   s.Impresoras.List(n.EmpresaID, n.SedeID),
 		Mesoneros:    s.Mesoneros.List(n.EmpresaID),
-		Horarios:     s.Horarios.List(n.EmpresaID, n.SedeID),
-		ConfigSalon:  cfgSalon, TieneConfig: tieneCfg,
+
+		Pedidos:       s.Pedidos.List(n.EmpresaID, ""),
+		CanalesPedido: s.CanalesPedido.List(n.EmpresaID),
+		ZonasPedido:   s.ZonasPedido.List(n.EmpresaID, ""),
+		Repartidores:  s.Repartidores.List(n.EmpresaID, ""),
+		Horarios:      s.Horarios.List(n.EmpresaID, n.SedeID),
+		ConfigSalon:   cfgSalon, TieneConfig: tieneCfg,
 		Contadores: contadores,
 	}
 }

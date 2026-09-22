@@ -163,6 +163,12 @@ func New() *Store {
 	s.seedDemo()
 	// Demos por RUBRO (restaurante, ferretería, farmacia): ver seed_nichos.go.
 	s.seedNichos()
+	// El módulo de PEDIDOS se siembra en las dos demos que reparten: la bodega
+	// (sin cocina, el pedido se empaca) y el restaurante (con cocina, la comanda
+	// va al tablero). Es el mismo flujo, y mostrarlo en los dos es la mitad del
+	// argumento del módulo.
+	s.seedDelivery(demoEmpID, demoSede1ID, false)
+	s.seedDelivery("emp_demo_rest", "sede_demo_rest", true)
 	return s
 }
 

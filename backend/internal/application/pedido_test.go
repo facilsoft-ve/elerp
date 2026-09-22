@@ -232,8 +232,16 @@ func TestPedido_VariasAppsALaVez(t *testing.T) {
 		Nombre: "Tienda web", Origen: pedido.OrigenEcommerce, Activo: true,
 		ConfirmacionAutomatica: true,
 	})
-	if len(svc.CanalesPedido(emp)) != 3 {
-		t.Fatalf("se esperaban 3 canales configurados, hay %d", len(svc.CanalesPedido(emp)))
+	// Se comprueba que los TRES convivan, no el total: la demo ya siembra canales
+	// propios, y contar el total ataría la prueba a cuántos trae la demo.
+	vistos := map[string]bool{}
+	for _, c := range svc.CanalesPedido(emp) {
+		vistos[c.ID] = true
+	}
+	for _, id := range []string{yummy.ID, pedidosya.ID, tienda.ID} {
+		if !vistos[id] {
+			t.Fatalf("falta el canal %s en la lista", id)
+		}
 	}
 
 	// DOS APPS PUEDEN USAR EL MISMO NÚMERO DE PEDIDO sin pisarse: la referencia
