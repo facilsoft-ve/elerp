@@ -109,7 +109,7 @@ import (
 // v32: el salón del restaurante trae sus ÁREAS (Salón, Terraza) y sus
 // MOSTRADORES (caja, barra, postres), que antes eran celdas bloqueadas — el
 // plano decía «acá no va nada» donde hay una barra con su nombre.
-const versionSeedDemo = 34
+const versionSeedDemo = 35
 
 // v34: la demo trae el MÓDULO DE PEDIDOS configurado y trabajando —canales,
 // zonas, repartidores y un tablero con pedidos en todos los estados—. Un módulo
@@ -409,6 +409,24 @@ func Seed(db *gomongo.Database) {
 	// empresa: los guards de arriba miran solo el tenant demo (emp_demo), así que en una
 	// base ya sembrada nunca entrarían. No toca emp_demo ni exige subir versionSeedDemo
 	// (que regeneraría la bodega demo).
+	// PEDIDOS de la empresa demo principal (la bodega). Los rubros llevan el suyo
+	// dentro de sembrarNichos.
+	if demoID != "" && len(snap.Pedidos) > 0 && len(st.Pedidos.List(demoID, "")) == 0 {
+		for _, c := range snap.CanalesPedido {
+			st.CanalesPedido.Upsert(c)
+		}
+		for _, z := range snap.ZonasPedido {
+			st.ZonasPedido.Upsert(z)
+		}
+		for _, r := range snap.Repartidores {
+			st.Repartidores.Upsert(r)
+		}
+		for _, p := range snap.Pedidos {
+			st.Pedidos.Append(p)
+		}
+		log.Printf("Mongo: sembrados %d pedidos de delivery en la demo", len(snap.Pedidos))
+	}
+
 	sembrarNichos(st, semilla, refrescar)
 }
 

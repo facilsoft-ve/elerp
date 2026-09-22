@@ -20,6 +20,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/listaprecio"
 	"github.com/mornix/elerp/internal/domain/mesa"
 	"github.com/mornix/elerp/internal/domain/organizacion"
+	"github.com/mornix/elerp/internal/domain/pedido"
 	"github.com/mornix/elerp/internal/domain/plantilla"
 	"github.com/mornix/elerp/internal/domain/promocion"
 	"github.com/mornix/elerp/internal/domain/proveedor"
@@ -1164,6 +1165,12 @@ type Snapshot struct {
 	Plantillas     []plantilla.Plantilla
 	Mesas          []mesa.Mesa
 	Tasas          []tasa.Tasa
+	// El módulo de PEDIDOS de la empresa demo principal. Los rubros llevan el
+	// suyo en SnapshotNicho; esta es la bodega, que se siembra por otro camino.
+	Pedidos       []pedido.Pedido
+	CanalesPedido []pedido.Canal
+	ZonasPedido   []pedido.Zona
+	Repartidores  []pedido.Repartidor
 	// Contadores: estado del numerador fiscal tras sembrar (clave
 	// "empresaID|sedeID|serie" → último folio). El adaptador Mongo lo usa para
 	// arrancar su colección de contadores adelantada, y no reiniciar en 1.
@@ -1202,8 +1209,13 @@ func (s *Store) Snapshot() Snapshot {
 		Cajeros:        s.Cajeros.List(demoEmpID),
 		// Ámbito de plataforma (empresaID vacío): la tasa oficial no es de un
 		// tenant.
-		Tasas:      s.Tasas.Historial("", 0),
-		Contadores: s.Numerador.Estado(),
+		Tasas: s.Tasas.Historial("", 0),
+
+		Pedidos:       s.Pedidos.List(demoEmpID, ""),
+		CanalesPedido: s.CanalesPedido.List(demoEmpID),
+		ZonasPedido:   s.ZonasPedido.List(demoEmpID, ""),
+		Repartidores:  s.Repartidores.List(demoEmpID, ""),
+		Contadores:    s.Numerador.Estado(),
 	}
 }
 
