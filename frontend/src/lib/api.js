@@ -506,6 +506,23 @@ export const api = {
   asignarFormato: (body) => request('/api/config/formatos/asignar', { method: 'POST', body: JSON.stringify(body) }),
 
   // ---- Módulo Restaurante: mesas del salón + impresora de comandas ----
+  // ---- Pedidos y delivery ----
+  // La bandeja: los tres orígenes (mostrador, tienda web, app) caen en la misma
+  // lista y se atienden igual.
+  pedidos: () => request('/api/pedidos/'),
+  pedido: (id) => request(`/api/pedidos/${encodeURIComponent(id)}`),
+  crearPedido: (body) => request('/api/pedidos/', { method: 'POST', body: JSON.stringify(body) }),
+  // Las acciones del ciclo. Cada una valida la transición en el servidor: la
+  // pantalla oculta lo que no aplica, pero quien decide es el backend.
+  accionPedido: (id, accion, body) => request(`/api/pedidos/${encodeURIComponent(id)}/${accion}`,
+    { method: 'POST', body: JSON.stringify(body || {}) }),
+  canalesPedido: () => request('/api/pedidos/config/canales'),
+  guardarCanalPedido: (body) => request('/api/pedidos/config/canales', { method: 'PUT', body: JSON.stringify(body) }),
+  zonasPedido: () => request('/api/pedidos/config/zonas'),
+  guardarZonaPedido: (body) => request('/api/pedidos/config/zonas', { method: 'PUT', body: JSON.stringify(body) }),
+  repartidores: () => request('/api/pedidos/config/repartidores'),
+  guardarRepartidor: (body) => request('/api/pedidos/config/repartidores', { method: 'PUT', body: JSON.stringify(body) }),
+
   mesas: () => request('/api/restaurante/mesas'),
   crearMesa: (body) => request('/api/restaurante/mesas', { method: 'POST', body: JSON.stringify(body) }),
   actualizarMesa: (id, body) => request(`/api/restaurante/mesas/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),

@@ -9,6 +9,9 @@ import { Icon } from './Icon.jsx'
  * valida por rol + empresa + sede en cada endpoint.
  */
 const TODOS = ['dueno', 'desarrollador', 'vendedor', 'cajero', 'contadora']
+// ADMIN son los roles que configuran: la operación la ve cualquiera del mostrador,
+// pero conectar un canal o fijar una zona cambia cómo entra el trabajo.
+const ADMIN = ['dueno', 'desarrollador']
 
 /* `subs` son los submódulos desplegables del acordeón del menú lateral. La ruta
  * de un submódulo es "<moduloId>:<subId>"; cada `subId` COINCIDE con el id de
@@ -26,6 +29,20 @@ export const NAV = [
 
   // Módulo Restaurante (comercializable): solo visible si está activo en la empresa
   // (`modulo` gatea el módulo del menú, igual que `modulo` gatea un sub).
+  // PEDIDOS Y DELIVERY. Va en OPERACIÓN y arriba de Restaurante porque no
+  // depende de él: sirve igual a una tienda que a un local con cocina.
+  {
+    id: 'pedidos', label: 'Pedidos', grupo: 'OPERACIÓN', glyph: Icon.Truck, roles: TODOS, ready: true, modulo: 'delivery',
+    subs: [
+      // La BANDEJA es la pantalla de trabajo del módulo: los tres orígenes caen
+      // acá y se atienden igual, como el tablero de comandas.
+      { id: 'bandeja', label: 'Atender pedidos', grupo: 'Operación' },
+      { id: 'despacho', label: 'Despacho', grupo: 'Operación' },
+      { id: 'canales', label: 'Canales conectados', grupo: 'Configuración', roles: ADMIN },
+      { id: 'zonas', label: 'Zonas de reparto', grupo: 'Configuración', roles: ADMIN },
+      { id: 'repartidores', label: 'Repartidores', grupo: 'Configuración', roles: ADMIN },
+    ],
+  },
   {
     id: 'restaurante', label: 'Restaurante', grupo: 'OPERACIÓN', glyph: Icon.Utensils, roles: [...TODOS, 'mesonero'], ready: true, modulo: 'restaurante',
     // El MESONERO alcanza el módulo pero solo la Comandera: el mapa, la cocina, las
