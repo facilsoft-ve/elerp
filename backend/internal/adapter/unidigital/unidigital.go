@@ -356,14 +356,19 @@ func (c *Cliente) CrearYAprobar(ctx context.Context, doc map[string]any) (string
 // Documento es lo que devuelve la consulta. `Status` en "Assigned" y
 // `ControlNumber` distinto de cero significan que ya es fiscal.
 type Documento struct {
-	StrongID      string  `json:"strongId"`
-	CodeName      string  `json:"codeName"`
-	Serie         string  `json:"serie"`
-	Number        int     `json:"number"`
-	ControlNumber int     `json:"controlNumber"`
-	Status        string  `json:"status"`
-	Name          string  `json:"name"`
-	GrandTotal    float64 `json:"grandTotal"`
+	StrongID      string `json:"strongId"`
+	CodeName      string `json:"codeName"`
+	Serie         string `json:"serie"`
+	Number        int    `json:"number"`
+	ControlNumber int    `json:"controlNumber"`
+	// ControlNumberFormatted es el número tal como se imprime («00-00000002») y es
+	// el que el cliente ve y reclama. El entero sirve para anular; este, para
+	// mostrar. Guardar solo el entero obligaría a re-inventar el formato acá, y el
+	// formato lo decide la imprenta.
+	ControlNumberFormatted string  `json:"controlNumberFormatted"`
+	Status                 string  `json:"status"`
+	Name                   string  `json:"name"`
+	GrandTotal             float64 `json:"grandTotal"`
 }
 
 // PorStrongID consulta un documento. Es la llamada que cierra el ciclo
@@ -385,9 +390,12 @@ func (c *Cliente) PorSystemReference(ctx context.Context, ref string) (Documento
 }
 
 // CodigoCorto pide el código corto del documento, pensado para compartirlo.
+//
+// Va por GET: con POST la API responde 405. Verificado contra el sandbox el
+// 22/09/2026 — la colección lo documentaba como POST.
 func (c *Cliente) CodigoCorto(ctx context.Context, strongID string) (string, error) {
 	var out string
-	if err := c.llamar(ctx, http.MethodPost, "/documents/short/"+url.PathEscape(strongID), nil, &out); err != nil {
+	if err := c.llamar(ctx, http.MethodGet, "/documents/short/"+url.PathEscape(strongID), nil, &out); err != nil {
 		return "", err
 	}
 	return out, nil

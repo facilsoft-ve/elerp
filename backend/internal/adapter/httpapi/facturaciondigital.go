@@ -56,6 +56,7 @@ func (s *Server) handleGuardarConfigDigital(c *fiber.Ctx) error {
 		SerieNombre      string `json:"serieNombre"`
 		SucursalStrongID string `json:"sucursalStrongId"`
 		SucursalNombre   string `json:"sucursalNombre"`
+		CorreoRespaldo   string `json:"correoRespaldo"`
 		TicketPOS        string `json:"ticketPOS"`
 	}
 	if err := c.BodyParser(&in); err != nil {
@@ -67,7 +68,7 @@ func (s *Server) handleGuardarConfigDigital(c *fiber.Ctx) error {
 			Ambiente: in.Ambiente, Usuario: in.Usuario, Password: in.Password,
 			SerieStrongID: in.SerieStrongID, SerieNombre: in.SerieNombre,
 			SucursalStrongID: in.SucursalStrongID, SucursalNombre: in.SucursalNombre,
-			TicketPOS: in.TicketPOS,
+			CorreoRespaldo: in.CorreoRespaldo, TicketPOS: in.TicketPOS,
 		})
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})

@@ -17,6 +17,9 @@ import (
 
 var cfgDigital = facturaciondigital.Config{
 	SerieStrongID: "serie-uuid", SucursalStrongID: "sucursal-uuid",
+	// La imprenta EXIGE destinatario: sin respaldo, ninguna venta a consumidor
+	// final se podría emitir (verificado contra el sandbox el 22/09/2026).
+	CorreoRespaldo: "facturas@mornix.tech",
 }
 
 func mapear(t *testing.T, doc fiscal.Documento) map[string]any {
@@ -215,11 +218,13 @@ func TestImprenta_ConversionAVES(t *testing.T) {
 	if num(t, m, "ExchangeRate") != 40 || num(t, m, "TaxBaseVES") != 4000 || num(t, m, "GrandTotalVES") != 4640 {
 		t.Fatalf("conversión mal: %v", m)
 	}
-	// En una factura en bolívares los campos VES serían una copia sin información.
+	// Una factura YA en bolívares declara su conversión igual, con tasa 1. La tasa
+	// del documento se ignora a propósito: convertir bolívares a bolívares por 40
+	// multiplicaría la factura por cuarenta.
 	enBs := mapear(t, fiscal.Documento{Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00",
 		Moneda: "VES", TasaCambio: 40, BaseImponible: 100, IVA: 16, Total: 116})
-	if _, hay := enBs["ExchangeRate"]; hay {
-		t.Fatal("una factura en Bs no debe declarar conversión")
+	if num(t, enBs, "ExchangeRate") != 1 || num(t, enBs, "TaxBaseVES") != 100 || num(t, enBs, "GrandTotalVES") != 116 {
+		t.Fatalf("la factura en Bs debe convertirse a sí misma: %v", enBs)
 	}
 }
 
@@ -231,5 +236,96 @@ func TestImprenta_LaAnulacionNoSeEnviaComoDocumento(t *testing.T) {
 		cfgDigital, 1, "x", "")
 	if err == nil {
 		t.Fatal("la anulación no se emite como documento nuevo")
+	}
+}
+
+/* LO QUE EL SANDBOX DE UNIDIGITAL DESMINTIÓ (verificado el 22/09/2026).
+ *
+ * Estas cuatro reglas no se dedujeron de la guía: se descubrieron porque la
+ * imprenta rechazó la factura con ellas en el cuerpo. Van con prueba porque son
+ * exactamente el tipo de detalle que un refactor «limpia» por parecer redundante
+ * —un porcentaje sobre una base en cero, una conversión de bolívares a
+ * bolívares— y el precio de limpiarlo son facturas rechazadas en producción con
+ * el correlativo ya quemado.
+ */
+
+// Las alícuotas se validan contra la ley y no contra la base del documento: una
+// factura sin renglones reducidos igual declara que la reducida es 8 %.
+func docSimple() fiscal.Documento {
+	return fiscal.Documento{
+		Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T14:30:00Z", Moneda: "VES",
+		ClienteNombre: "Bodega La Esquina", ClienteDocumento: "J-31122334-7",
+		BaseImponible: 100, IVA: 16, Subtotal: 100, Total: 116, AlicuotaIVA: 0.16,
+		Lineas: []fiscal.Linea{{Nombre: "Harina", Cantidad: 2, PrecioUnitario: 50, Total: 100, Alicuota: 0.16}},
+	}
+}
+
+func TestImprenta_LasAlicuotasVanConSuValorDeLey(t *testing.T) {
+	m := mapear(t, docSimple())
+	for clave, ley := range map[string]float64{
+		"TaxPercentReduced":   8,
+		"TaxPercentSumptuary": 31,
+		"IGTFPercentage":      3,
+	} {
+		if v := num(t, m, clave); v != ley {
+			t.Fatalf("%s = %v, la imprenta exige %v aunque la base sea cero", clave, v, ley)
+		}
+	}
+}
+
+// Una factura en bolívares TAMBIÉN lleva su conversión a bolívares. Parece
+// redundante; sin ella la imprenta rechaza el documento entero.
+func TestImprenta_LaFacturaEnBolivaresLlevaSuConversion(t *testing.T) {
+	m := mapear(t, docSimple())
+	if m["ConversionCurrency"] != "VES" {
+		t.Fatalf("ConversionCurrency = %v", m["ConversionCurrency"])
+	}
+	if num(t, m, "ExchangeRate") != 1 {
+		t.Fatalf("en una factura en Bs la tasa es 1, salió %v", num(t, m, "ExchangeRate"))
+	}
+	for base, espejo := range map[string]string{
+		"TaxBase": "TaxBaseVES", "TaxAmount": "TaxAmountVES",
+		"Total": "TotalVES", "GrandTotal": "GrandTotalVES",
+	} {
+		if num(t, m, base) != num(t, m, espejo) {
+			t.Fatalf("%s (%v) y %s (%v) tienen que coincidir", base, num(t, m, base), espejo, num(t, m, espejo))
+		}
+	}
+}
+
+// Sin código de operación por renglón la imprenta rechaza: «debe indicar el
+// código de operación del producto facturado».
+func TestImprenta_CadaRenglonLlevaCodigoDeOperacion(t *testing.T) {
+	m := mapear(t, docSimple())
+	ds, _ := m["Details"].([]map[string]any)
+	if len(ds) == 0 {
+		t.Fatal("el documento salió sin renglones")
+	}
+	for i, d := range ds {
+		if d["OperationCode"] != "C001" {
+			t.Fatalf("renglón %d sin código de operación: %v", i, d["OperationCode"])
+		}
+	}
+}
+
+// El correo es obligatorio. Sin el del cliente se usa el de respaldo; sin
+// ninguno de los dos NO se emite, que es preferible a emitir a una dirección
+// inventada.
+func TestImprenta_ElCorreoEsObligatorio(t *testing.T) {
+	m := mapear(t, docSimple())
+	if m["EmailTo"] != "facturas@mornix.tech" {
+		t.Fatalf("sin correo del cliente debe usarse el de respaldo, salió %v", m["EmailTo"])
+	}
+	conCliente, err := application.CuerpoImprenta(docSimple(), cfgDigital, 7, "doc_local_1", "ana@ejemplo.com")
+	if err != nil {
+		t.Fatalf("mapear: %v", err)
+	}
+	if conCliente["EmailTo"] != "ana@ejemplo.com" {
+		t.Fatalf("el correo del cliente manda sobre el respaldo, salió %v", conCliente["EmailTo"])
+	}
+	sinNada := cfgDigital
+	sinNada.CorreoRespaldo = ""
+	if _, err := application.CuerpoImprenta(docSimple(), sinNada, 7, "doc_local_1", ""); err == nil {
+		t.Fatal("sin correo ni respaldo tenía que negarse a emitir")
 	}
 }

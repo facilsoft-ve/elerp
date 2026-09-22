@@ -1,7 +1,13 @@
 # UniDigital DigitalInvoice — contrato verificado contra el sandbox
 
-Verificado el **18 de septiembre de 2026** contra `https://qa.unidigital.global/digitalinvoice-core`
-con las credenciales de integrador de Mornix.
+Verificado el **18 de septiembre de 2026** y **re-verificado el 22 de septiembre de 2026** contra
+`https://qa.unidigital.global/digitalinvoice-core` con las credenciales de integrador de Mornix.
+
+> **22/09/2026 — la cuenta quedó habilitada y se emitió de verdad.** UniDigital configuró la serie y
+> la plantilla de correo. Se emitieron dos facturas fiscales (controles `00-00000001` y
+> `00-00000002`, la segunda con el cuerpo que arma ElERP) y se anuló la primera. Lo que sigue
+> descrito abajo como bloqueante en la sección 2 quedó resuelto; la sección 2-bis dice qué cambió y
+> qué reglas nuevas aparecieron.
 
 Este documento **corrige y completa** la guía de desarrollo que teníamos, que se armó leyendo la
 colección publicada y dejaba unos diez puntos «por confirmar», tres de ellos bloqueantes. Todo lo de
@@ -43,6 +49,67 @@ para `mornix@unidigital.global`:
 1. Una **serie habilitada** para emisión (la serie `0` existe pero no está asignada).
 2. Al menos una **sucursal** (`SucursalStrongId` es obligatorio en el cuerpo).
 3. La **plantilla de correo** de la serie (el propio login avisa que falta).
+
+---
+
+## 2-bis. Lo verificado el 22/09/2026 (emisión real)
+
+### Estado de la cuenta: ya se puede emitir
+
+```
+POST /user/login   → series: [{ strongId: 1efc6b5d-…, name: "0", templateId: 4210 }]
+                     templates: [{ name: "MornixBS-USD" }]   information: []   ← sin avisos
+POST /series/list  → la serie YA aparece configurada (antes devolvía [])
+GET  /series/counters → los 6 tipos en 0
+GET  /commercialOffice → totalCount: 0  ← SIGUE sin sucursales, y ya NO hace falta:
+                                          se emitió con `SucursalStrongId` vacío.
+```
+
+**El `strongId` de la serie cambió**: era `29f1864d-…`, ahora es `1efc6b5d-f6ba-4610-8c0a-2dffdfbb6ec7`.
+Por eso se elige de la lista que devuelve la API y nunca se teclea.
+
+### Cuatro reglas que la guía no decía y que rechazan la factura entera
+
+Se descubrieron una por una, emitiendo. Las cuatro están en `CuerpoImprenta` con su prueba:
+
+| Regla | Qué pasa si falta |
+|---|---|
+| **`OperationCode` por renglón** (`C001` = venta de bienes y servicios) | 400 «Debe indicar el código de operación del producto facturado» |
+| **`EmailTo` obligatorio** | 400 «'Email To' no debería estar vacío» + «DocumentCantBeBuild» |
+| **Los campos `*VES` van SIEMPRE**, también en una factura en bolívares, con `ExchangeRate: 1` y valores iguales | 400 `DocumentOnlyVESMustBeSameTotals`: «se requiere que TaxBase (Bs 1000) y TaxBaseVES (Bs 0) tengan el mismo valor» |
+| **`TaxPercentReduced` = 8, `TaxPercentSumptuary` = 31, `IGTFPercentage` = 3 aunque la base sea cero** | 400 `TaxPercentMustBeValid`: «no puede ser diferente de 8%» |
+
+El `EmailTo` es el que más pesa en producto: la venta de mostrador a consumidor final no trae correo,
+y sin destinatario no se emite. Por eso `Config.CorreoRespaldo` — la dirección de la empresa, donde
+cae la copia cuando el cliente no da la suya.
+
+### El ciclo es asíncrono, y el número de control tarda ~1 minuto
+
+```
+POST /documents/createandapprove → 200, result: <strongId>, "creado y aprobado satisfactoriamente"
+GET  /documents?strongId=…       → status: "Approved",  controlNumberFormatted: "-1"
+                                    information: ["El documento aún no ha sido convertido a documento fiscal"]
+  … ~60 s …
+GET  /documents?strongId=…       → status: "Assigned",  controlNumberFormatted: "00-00000002"
+```
+
+**`Approved` ≠ fiscal.** Lo que decide es `controlNumber != 0`, que es lo que consulta el outbox.
+Guardar `controlNumberFormatted` (`00-00000002`) y no el entero: es el que va impreso y el que el
+cliente reclama.
+
+### Correcciones de verbo y estado
+
+| | La colección decía | Lo verificado |
+|---|---|---|
+| Código corto | `POST /documents/short/{guid}` | **`GET`** — con POST responde **405**. Devuelve p. ej. `86s23885853`. |
+| PDF | `POST /documents/view/{guid}` | Correcto, pero **el PDF se genera aparte**: hasta que existe responde 400 «El pdf no ha sido generado». La página pública no puede depender de él. |
+| Anulación | `POST /documents/anulled {"Control": n}` | **Confirmado emitiendo**: 200 «Documento anulado satisfactorimente», y el documento queda `annulled: true` conservando su control. |
+| Sucursal | `SucursalStrongId` obligatorio | **No lo es**: se emitió con el campo vacío. |
+
+### Lo que quedó respondido de la sección 5
+
+- **`OperationCode`**: `C001`. Es el único que usan todos los ejemplos y el que acepta el sandbox.
+- **Ventana de anulación**: se anuló un documento del mismo día sin restricción.
 
 ---
 

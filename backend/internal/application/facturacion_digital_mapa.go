@@ -1,6 +1,7 @@
 package application
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -155,28 +156,43 @@ func CuerpoImprenta(doc fiscal.Documento, cfg facturaciondigital.Config, numero 
 		"Discount":             0,
 		"SubtotalPlusDiscount": subtotal,
 		"TaxPercent":           r2(pctGeneral),
-		"TaxPercentReduced":    r2(pctReducida),
-		"TaxPercentSumptuary":  r2(pctAdicional),
-		"TaxAmount":            abs(ivaGeneral),
-		"TaxAmountReduced":     abs(ivaReducida),
-		"TaxAmountSumptuary":   abs(ivaAdicional),
-		"Taxes":                abs(doc.IVA),
-		"Total":                r2(total),
-		"GrandTotal":           abs(doc.Total),
+		// LAS ALÍCUOTAS VAN SIEMPRE CON SU VALOR DE LEY, aunque la base sea cero.
+		// La imprenta valida el porcentaje contra la providencia y no contra la
+		// base: mandar 0 % en la reducida porque no hubo renglones reducidos hace
+		// que rechace la factura entera («no puede ser diferente de 8%»).
+		"TaxPercentReduced":   pctReducidaDeLey(pctReducida),
+		"TaxPercentSumptuary": pctAdicionalDeLey(pctAdicional),
+		"TaxAmount":           abs(ivaGeneral),
+		"TaxAmountReduced":    abs(ivaReducida),
+		"TaxAmountSumptuary":  abs(ivaAdicional),
+		"Taxes":               abs(doc.IVA),
+		"Total":               r2(total),
+		"GrandTotal":          abs(doc.Total),
 	}
 
 	// El IGTF solo se declara si lo hubo: mandar una base en cero con un 3 % es
 	// declarar un impuesto que no se causó.
+	// El PORCENTAJE del IGTF va siempre —la imprenta lo valida contra la ley igual
+	// que las alícuotas—, pero la BASE y el MONTO solo si se causó: declarar una
+	// base en cero con su 3 % es declarar un impuesto que no ocurrió.
+	cuerpo["IGTFPercentage"] = pctIGTFDeLey(doc.AlicuotaIGTF * 100)
 	if abs(doc.IGTF) > 0 {
 		cuerpo["IGTFBaseAmount"] = r2(total)
 		cuerpo["IGTFAmount"] = abs(doc.IGTF)
-		cuerpo["IGTFPercentage"] = r2(doc.AlicuotaIGTF * 100)
 	}
 
-	// Conversión a bolívares. Solo cuando la factura se emitió en otra moneda: en
-	// una factura en Bs, los campos VES serían una copia sin información.
-	if doc.Moneda != "" && doc.Moneda != "VES" && doc.TasaCambio > 0 {
-		t := doc.TasaCambio
+	/* CONVERSIÓN A BOLÍVARES — obligatoria SIEMPRE, incluso en una factura que ya
+	 * está en bolívares.
+	 *
+	 * Parece redundante y no lo es: la imprenta valida que los montos en moneda
+	 * local coincidan con su conversión, y una factura en Bs sin los campos VES se
+	 * rechaza entera («se requiere que TaxBase y TaxBaseVES tengan el mismo
+	 * valor»). En ese caso la tasa es 1 y los valores se copian. */
+	t := doc.TasaCambio
+	if doc.Moneda == "" || doc.Moneda == "VES" || t <= 0 {
+		t = 1
+	}
+	{
 		cuerpo["ConversionCurrency"] = "VES"
 		cuerpo["ExchangeRate"] = t
 		cuerpo["ExemptAmountVES"] = r2(abs(doc.BaseExenta) * t)
@@ -214,15 +230,56 @@ func CuerpoImprenta(doc fiscal.Documento, cfg facturaciondigital.Config, numero 
 			"IsExempt":           l.Exento,
 			"TotalAmount":        r2(monto + ivaLinea),
 			"ProductType":        1,
+			// OperationCode es obligatorio por renglón: sin él la imprenta rechaza
+			// con «debe indicar el código de operación del producto facturado».
+			// C001 es venta de bienes y servicios, que es lo que factura ElERP.
+			"OperationCode": codigoOperacion,
 		})
 	}
 	cuerpo["Details"] = detalles
-	if c := strings.TrimSpace(correo); c != "" {
-		cuerpo["EmailTo"] = c
+	/* EL CORREO ES OBLIGATORIO para la imprenta, y la mayoría de las ventas de
+	 * mostrador son a consumidor final sin correo. Por eso hay un respaldo: la
+	 * dirección de la empresa, donde cae la copia cuando el cliente no dio la
+	 * suya. Sin respaldo no se puede emitir, y eso es preferible a emitir a una
+	 * dirección inventada. */
+	c := strings.TrimSpace(correo)
+	if c == "" {
+		c = strings.TrimSpace(cfg.CorreoRespaldo)
 	}
+	if c == "" {
+		return nil, errors.New("la imprenta exige un correo y el documento no trae uno: configura el correo de respaldo del módulo")
+	}
+	cuerpo["EmailTo"] = c
 
 	return cuerpo, nil
 }
+
+/* LAS ALÍCUOTAS DE LEY.
+ *
+ * La imprenta valida cada porcentaje contra la providencia, no contra la base
+ * del documento: una factura sin renglones reducidos igual tiene que declarar
+ * que la alícuota reducida es 8 %. Si el documento trae su propio porcentaje se
+ * respeta —una providencia futura puede cambiarlo y el histórico se emite con el
+ * que estaba vigente—; si viene en cero, se usa el de ley.
+ */
+const (
+	pctReducidaLey  = 8.0
+	pctAdicionalLey = 31.0
+	pctIGTFLey      = 3.0
+	// codigoOperacion C001: venta de bienes y servicios. Es lo que factura ElERP.
+	codigoOperacion = "C001"
+)
+
+func pctDeLey(pct, ley float64) float64 {
+	if pct > 0 {
+		return r2(pct)
+	}
+	return ley
+}
+
+func pctReducidaDeLey(pct float64) float64  { return pctDeLey(pct, pctReducidaLey) }
+func pctAdicionalDeLey(pct float64) float64 { return pctDeLey(pct, pctAdicionalLey) }
+func pctIGTFDeLey(pct float64) float64      { return pctDeLey(pct, pctIGTFLey) }
 
 // nombreReceptor devuelve a quién se factura. Sin cliente identificado, la
 // factura es a consumidor final, que es un caso legítimo y no un dato faltante.

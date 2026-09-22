@@ -139,6 +139,10 @@ type Config struct {
 	SerieNombre      string `json:"serieNombre" bson:"serienombre"`
 	SucursalStrongID string `json:"sucursalStrongId" bson:"sucursalstrongid"`
 	SucursalNombre   string `json:"sucursalNombre" bson:"sucursalnombre"`
+	// CorreoRespaldo es a dónde va la factura cuando el cliente no dio correo, que
+	// es el caso normal del mostrador. La imprenta EXIGE un destinatario: sin
+	// respaldo, toda venta a consumidor final quedaría sin poder emitirse.
+	CorreoRespaldo string `json:"correoRespaldo" bson:"correorespaldo"`
 	// TicketPOS decide por dónde sale el comprobante del mostrador.
 	TicketPOS   string `json:"ticketPOS" bson:"ticketpos"`
 	Actualizada string `json:"actualizada" bson:"actualizada"`

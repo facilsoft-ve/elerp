@@ -70,6 +70,7 @@ type EntradaConfigDigital struct {
 	SerieNombre      string
 	SucursalStrongID string
 	SucursalNombre   string
+	CorreoRespaldo   string
 	TicketPOS        string
 }
 
@@ -99,6 +100,7 @@ func (s *Service) GuardarConfigDigital(empresaID, actor, origen string, in Entra
 	c.SerieNombre = strings.TrimSpace(in.SerieNombre)
 	c.SucursalStrongID = strings.TrimSpace(in.SucursalStrongID)
 	c.SucursalNombre = strings.TrimSpace(in.SucursalNombre)
+	c.CorreoRespaldo = strings.TrimSpace(in.CorreoRespaldo)
 	switch in.TicketPOS {
 	case fd.TicketFiscalNoFiscal, fd.TicketNinguno:
 		c.TicketPOS = in.TicketPOS
@@ -472,7 +474,12 @@ func (s *Service) consultarEmision(ctx context.Context, cli *unidigital.Cliente,
 		s.emisionesDigitales.Update(e)
 		return
 	}
-	e.NumeroControl = fmt.Sprintf("%d", doc.ControlNumber)
+	// El número FORMATEADO es el que va impreso y el que el cliente reclama. Si la
+	// imprenta no lo manda se cae al entero, que al menos identifica el documento.
+	e.NumeroControl = strings.TrimSpace(doc.ControlNumberFormatted)
+	if e.NumeroControl == "" || e.NumeroControl == "-1" {
+		e.NumeroControl = fmt.Sprintf("%d", doc.ControlNumber)
+	}
 	e.Estado = fd.EstadoFiscal
 	e.ProximoIntento = ""
 	e.Actualizada = ahora()
