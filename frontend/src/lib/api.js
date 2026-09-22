@@ -516,6 +516,12 @@ export const api = {
   // pantalla oculta lo que no aplica, pero quien decide es el backend.
   accionPedido: (id, accion, body) => request(`/api/pedidos/${encodeURIComponent(id)}/${accion}`,
     { method: 'POST', body: JSON.stringify(body || {}) }),
+  // Vista del repartidor: devuelve SOLO lo suyo, resuelto por el usuario de la
+  // sesión. Sin id en la URL — pedir el de otro sería ver las direcciones y los
+  // teléfonos de los clientes de todo el local.
+  misEntregas: () => request('/api/pedidos/mis-entregas'),
+  marcarDisponibilidad: (disponible) => request('/api/pedidos/disponibilidad',
+    { method: 'POST', body: JSON.stringify({ disponible }) }),
   canalesPedido: () => request('/api/pedidos/config/canales'),
   guardarCanalPedido: (body) => request('/api/pedidos/config/canales', { method: 'PUT', body: JSON.stringify(body) }),
   zonasPedido: () => request('/api/pedidos/config/zonas'),

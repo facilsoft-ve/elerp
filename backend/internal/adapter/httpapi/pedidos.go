@@ -40,6 +40,12 @@ func (s *Server) registerPedidos(api fiber.Router) {
 	g.Post("/:id/fallida", s.handleFallidaPedido)
 	g.Post("/:id/cancelar", s.handleCancelarPedido)
 
+	// VISTA DEL REPARTIDOR. Sin gate de rol: lo que la acota es el usuario de la
+	// sesión, que solo devuelve lo suyo. Un repartidor puede tener cualquier rol
+	// —o ninguno de los de oficina— y aun así tiene que poder trabajar.
+	g.Get("/mis-entregas", s.handleMisEntregas)
+	g.Post("/disponibilidad", s.handleDisponibilidadRepartidor)
+
 	// Maestros del módulo.
 	g.Get("/config/canales", admin, s.handleCanalesPedido)
 	g.Put("/config/canales", admin, s.handleGuardarCanalPedido)
@@ -391,4 +397,36 @@ li:last-child{border-left-color:%s;color:#1F2430;font-weight:600}
 </div></body></html>`,
 		html.EscapeString(titulo), col[0], col[1], col[0],
 		html.EscapeString(titulo), html.EscapeString(cuerpo), ref, linea.String())
+}
+
+/* --- Vista del repartidor ------------------------------------------------- */
+
+// handleMisEntregas devuelve los pedidos del repartidor que consulta.
+//
+// Se resuelve por el USUARIO de la sesión y no por un id en la URL: un
+// repartidor solo ve lo suyo, y dejar que pida el id de otro sería dejar que vea
+// las direcciones y los teléfonos de los clientes de todo el local.
+func (s *Server) handleMisEntregas(c *fiber.Ctx) error {
+	r, ok := s.svc.RepartidorDeUsuario(empresaIDOf(c), principalOf(c).UserID)
+	if !ok {
+		return c.JSON(fiber.Map{"repartidor": nil, "entregas": []any{}})
+	}
+	return c.JSON(fiber.Map{
+		"repartidor": r,
+		"entregas":   s.svc.EntregasDe(empresaIDOf(c), r.ID),
+	})
+}
+
+// handleDisponibilidad marca al repartidor disponible o no. Lo decide él desde
+// su teléfono: despacho no puede saber si ya volvió del almuerzo.
+func (s *Server) handleDisponibilidadRepartidor(c *fiber.Ctx) error {
+	var in struct {
+		Disponible bool `json:"disponible"`
+	}
+	_ = c.BodyParser(&in)
+	r, err := s.svc.MarcarDisponibilidad(empresaIDOf(c), principalOf(c).UserID, in.Disponible, origen(c))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(r)
 }

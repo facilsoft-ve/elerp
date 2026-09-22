@@ -267,7 +267,18 @@ func sembrarNichos(st *Store, semilla *inmem.Store, refrescar bool) {
 		// PEDIDOS: canales, zonas, repartidores y el tablero vivo. Sin esto la
 		// bandeja arranca vacía en una base con Mongo, y el módulo se ve como una
 		// pantalla sin usar en vez de un local trabajando.
-		if len(snap.Pedidos) > 0 && len(st.Pedidos.List(n.EmpresaID, "")) == 0 {
+		// Se REEMPLAZAN al regenerar la demo, como el plano: si solo se sembraran
+		// cuando la lista está vacía, una base ya sembrada nunca vería el tablero
+		// nuevo y la demostración quedaría con los pedidos de la versión anterior
+		// —que es justo lo que pasó al cambiar qué productos se piden—.
+		if len(snap.Pedidos) > 0 && (refrescar || len(st.Pedidos.List(n.EmpresaID, "")) == 0) {
+			if refrescar {
+				f := map[string]any{"empresaid": n.EmpresaID}
+				st.Pedidos.c.delMany(f)
+				st.CanalesPedido.c.delMany(f)
+				st.ZonasPedido.c.delMany(f)
+				st.Repartidores.c.delMany(f)
+			}
 			for _, c := range snap.CanalesPedido {
 				st.CanalesPedido.Upsert(c)
 			}

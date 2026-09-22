@@ -95,7 +95,11 @@ func (s *Service) AbrirCuenta(in AperturaCuenta) (cuenta.Cuenta, error) {
 		return cuenta.Cuenta{}, ErrCuentasNoDisponible
 	}
 	nombre := mesaID
-	if s.mesas != nil {
+	// SIN MESA es un caso legítimo, no un dato faltante: una cuenta de PEDIDO PARA
+	// LLEVAR usa el tablero de cocina igual que una mesa, pero no ocupa ninguna.
+	// Validar la mesa cuando no la hay rechazaba esas cuentas y dejaba el pedido
+	// esperando una comanda que nunca se mandó.
+	if s.mesas != nil && mesaID != "" {
 		m, ok := s.mesas.ByID(empresaID, mesaID)
 		if !ok {
 			return cuenta.Cuenta{}, ErrMesaNoExiste
@@ -120,7 +124,14 @@ func (s *Service) AbrirCuenta(in AperturaCuenta) (cuenta.Cuenta, error) {
 	// que la asignación—, pero distinguiendo si la mesa YA ES SUYA: seguir
 	// atendiendo lo propio vale incluso en cerrando; tomar una mesa nueva, no.
 	// Eso es exactamente el cierre suave.
-	ex, hayAbierta := s.cuentasMesa.AbiertaDeMesa(empresaID, mesaID)
+	// Solo se busca una cuenta abierta CUANDO HAY MESA: dos pedidos para llevar no
+	// comparten cuenta, y buscar por mesa vacía le entregaría al segundo la del
+	// primero — con los platos del otro adentro.
+	var ex cuenta.Cuenta
+	hayAbierta := false
+	if mesaID != "" {
+		ex, hayAbierta = s.cuentasMesa.AbiertaDeMesa(empresaID, mesaID)
+	}
 	propia := hayAbierta && ex.MesoneroID == mesoneroID
 	if err := s.exigirTurnoParaAtender(empresaID, mesoneroID, in.RolActor, propia); err != nil {
 		return cuenta.Cuenta{}, err

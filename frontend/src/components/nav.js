@@ -38,6 +38,10 @@ export const NAV = [
       // acá y se atienden igual, como el tablero de comandas.
       { id: 'bandeja', label: 'Atender pedidos', grupo: 'Operación' },
       { id: 'despacho', label: 'Despacho', grupo: 'Operación' },
+      // La vista del repartidor: su pantalla, en su teléfono. Se deja visible
+      // para todos los roles porque quien reparte puede no tener rol de oficina,
+      // y lo que la acota es el usuario de la sesión: solo devuelve lo suyo.
+      { id: 'mis-entregas', label: 'Mis entregas', grupo: 'Operación' },
       { id: 'canales', label: 'Canales conectados', grupo: 'Configuración', roles: ADMIN },
       { id: 'zonas', label: 'Zonas de reparto', grupo: 'Configuración', roles: ADMIN },
       { id: 'repartidores', label: 'Repartidores', grupo: 'Configuración', roles: ADMIN },

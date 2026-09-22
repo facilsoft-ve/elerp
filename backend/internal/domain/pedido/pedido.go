@@ -209,6 +209,20 @@ type Pedido struct {
 	// VenceAceptacion (RFC3339) es hasta cuándo el canal espera respuesta.
 	VenceAceptacion string `json:"venceAceptacion,omitempty" bson:"venceaceptacion,omitempty"`
 
+	/* PRODUCCIÓN LISTA ≠ PEDIDO LISTO, y confundirlas manda al repartidor a
+	 * buscar algo que todavía no está en el mostrador.
+	 *
+	 * Cocina avisa que terminó el último plato; eso no significa que el pedido se
+	 * pueda retirar — falta empacarlo, meter la bebida, revisar que esté completo.
+	 * Quien gestiona el delivery es el que confirma «listo para retirar», y esa
+	 * confirmación es la que emite el número de envío y le dice a la app (o al
+	 * repartidor propio) que venga.
+	 *
+	 * ProduccionLista guarda CUÁNDO avisó cocina, para que la bandeja lo destaque
+	 * y quien despacha sepa que ya puede revisar y confirmar.
+	 */
+	ProduccionLista string `json:"produccionLista,omitempty" bson:"produccionlista,omitempty"`
+
 	// PruebaEntrega es cómo se comprobó la entrega (firma, foto, nombre de quien
 	// recibió). Es lo que responde un reclamo de «nunca me llegó».
 	PruebaEntrega string `json:"pruebaEntrega,omitempty" bson:"pruebaentrega,omitempty"`
@@ -278,6 +292,13 @@ func (p Pedido) EsperaAceptacion() bool {
 // VencioAceptacion indica si se pasó la ventana sin responder.
 func (p Pedido) VencioAceptacion(ahora string) bool {
 	return p.EsperaAceptacion() && p.VenceAceptacion < ahora
+}
+
+// EsperaConfirmacionDeListo indica que cocina ya terminó y falta que alguien
+// confirme que el pedido está armado y se puede retirar. Es el estado que la
+// bandeja tiene que destacar: es trabajo esperando a una persona.
+func (p Pedido) EsperaConfirmacionDeListo() bool {
+	return p.Estado == EstadoEnPreparacion && p.ProduccionLista != ""
 }
 
 // EnProduccion indica si este pedido mandó algo a producir. Es informativo —para

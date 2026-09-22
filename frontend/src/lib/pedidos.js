@@ -103,6 +103,25 @@ export function accionesDe(p) {
   }
 }
 
+/** esperaConfirmacionDeListo: cocina terminó y falta que alguien confirme que el
+ *  pedido está armado y se puede retirar.
+ *
+ *  PRODUCCIÓN LISTA NO ES PEDIDO LISTO, y confundirlas manda al repartidor a
+ *  buscar algo que todavía está en la cocina. El plato puede estar hecho y el
+ *  pedido sin empacar, sin la bebida, o incompleto. */
+export const esperaConfirmacionDeListo = (p) =>
+  p?.estado === 'en_preparacion' && !!p?.produccionLista
+
+/** pagoDelPedido resume si hay que cobrar en la puerta. Es lo PRIMERO que el
+ *  repartidor necesita saber: cobrar lo ya pagado es el error que más caro
+ *  sale, y no cobrar lo que había que cobrar lo paga él. */
+export function pagoDelPedido(p) {
+  if (p?.formaPago === 'en_canal') {
+    return { cobra: false, etiqueta: 'Ya pagado', detalle: 'El cliente pagó al hacer el pedido. No cobres nada.' }
+  }
+  return { cobra: true, etiqueta: 'Cobrar al entregar', detalle: 'Cobra el total en la puerta.' }
+}
+
 /** minutosRestantes de la ventana de aceptación. null cuando no hay ventana: un
  *  reloj que no existe no debe dibujarse como si corriera. */
 export function minutosRestantes(vence) {

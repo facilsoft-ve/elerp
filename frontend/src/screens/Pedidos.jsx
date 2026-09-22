@@ -5,8 +5,8 @@ import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
 import { fmtCurrency } from '../lib/format.js'
 import {
-  ESTADOS, etiquetaEstado, colorEstado, accionesDe, etiquetaOrigen,
-  agruparBandeja, minutosRestantes, estaDemorado,
+  etiquetaEstado, colorEstado, accionesDe, etiquetaOrigen,
+  agruparBandeja, minutosRestantes, estaDemorado, esperaConfirmacionDeListo, pagoDelPedido,
 } from '../lib/pedidos.js'
 
 /* PEDIDOS PARA LLEVAR.
@@ -27,6 +27,7 @@ export function Pedidos({ route }) {
     <div>
       {sub === 'bandeja' ? <Bandeja /> : null}
       {sub === 'despacho' ? <Despacho /> : null}
+      {sub === 'mis-entregas' ? <MisEntregas /> : null}
       {sub === 'canales' ? <Canales /> : null}
       {sub === 'zonas' ? <Zonas /> : null}
       {sub === 'repartidores' ? <Repartidores /> : null}
@@ -139,6 +140,10 @@ function TarjetaPedido({ p, ccy, onAbrir, onAccion }) {
             <span className="text-[11.5px] px-1.5 py-0.5 rounded font-semibold"
               style={{ background: col.bg, color: col.text }}>{etiquetaEstado(p.estado)}</span>
             {demorado ? <Badge size="sm" color="red" dot>Demorado</Badge> : null}
+            {/* Cocina terminó pero el pedido todavía no está confirmado como
+                listo. Es trabajo esperando a una persona: empacar, revisar y
+                confirmar para que el repartidor venga a buscarlo. */}
+            {esperaConfirmacionDeListo(p) ? <Badge size="sm" color="emerald" dot>Cocina terminó</Badge> : null}
           </div>
           {/* DE DÓNDE VINO, con nombre propio: «Yummy», no «app». Cuando el
               courier pregunta por su número, es el de ellos. */}
@@ -146,7 +151,17 @@ function TarjetaPedido({ p, ccy, onAbrir, onAccion }) {
             {p.canalNombre || etiquetaOrigen(p.origen)}
             {p.referenciaExterna ? <span className="mono"> · {p.referenciaExterna}</span> : null}
           </div>
-          <div className="text-[13px] font-medium mt-1.5 truncate">{p.clienteNombre || 'Consumidor final'}</div>
+          <div className="flex items-center gap-2 mt-1.5">
+            <span className="text-[13px] font-medium truncate">{p.clienteNombre || 'Consumidor final'}</span>
+            {/* EL ESTADO DEL PAGO, a la vista desde la bandeja: decide si el
+                repartidor cobra en la puerta, y es el dato que más caro sale
+                descubrir tarde. */}
+            <span className={`text-[10.5px] px-1.5 py-0.5 rounded shrink-0 ${pagoDelPedido(p).cobra
+              ? 'bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+              : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>
+              {pagoDelPedido(p).etiqueta}
+            </span>
+          </div>
           <div className="text-[12px] text-slate-500 truncate">{p.destino?.direccion}</div>
         </button>
         <div className="text-right shrink-0">
@@ -296,10 +311,17 @@ function NuevoPedidoModal({ onClose, onCreado, toast }) {
 
   useEffect(() => { api.productos().then((r) => setCatalogo(r?.productos || r || [])).catch(() => {}) }, [])
 
+  /* LOS INSUMOS NO SE OFRECEN. Son materia prima que se consume por la receta de
+   * un plato: nadie pide media pechuga cruda a domicilio, y ofrecerla haría que
+   * el pedido descontara stock que ya se descuenta por otro lado. Es la misma
+   * regla que aplican el punto de venta y la comandera. */
   const resultados = useMemo(() => {
     const q = busca.trim().toLowerCase()
     if (!q) return []
-    return (catalogo || []).filter((p) => (p.nombre || '').toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q)).slice(0, 6)
+    return (catalogo || [])
+      .filter((p) => !p.esInsumo && p.activo !== false)
+      .filter((p) => (p.nombre || '').toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q))
+      .slice(0, 6)
   }, [busca, catalogo])
 
   const agregar = (p) => {
@@ -830,6 +852,176 @@ function RepartidorModal({ r, onClose, onSaved, toast }) {
         <Toggle checked={f.activo} onChange={(v) => set('activo', v)} label="Activo" sub="Inactivo, no aparece para asignar." />
         <Toggle checked={f.disponible} onChange={(v) => set('disponible', v)} label="Disponible ahora"
           sub="Despacho lo ve primero al asignar el próximo pedido." />
+      </div>
+    </Modal>
+  )
+}
+
+/* --- Vista del repartidor ------------------------------------------------- */
+
+/* PENSADA PARA EL TELÉFONO, en la calle y con una mano.
+ *
+ * Lo primero que se ve de cada entrega es SI HAY QUE COBRAR: cobrar lo ya pagado
+ * es el error que más caro sale, y no cobrar lo que había que cobrar lo paga el
+ * repartidor de su bolsillo. Después la dirección, que es lo que necesita para
+ * llegar, y el teléfono a un toque, porque la mitad de las entregas se resuelven
+ * llamando desde la puerta.
+ */
+export function MisEntregas() {
+  const toast = useToast()
+  const { ui } = useUI()
+  const [data, setData] = useState(null)
+  const [abierta, setAbierta] = useState(null)
+
+  const cargar = useCallback(() => {
+    api.misEntregas().then(setData).catch(() => setData({ repartidor: null, entregas: [] }))
+  }, [])
+  useEffect(() => { cargar() }, [cargar])
+  useEffect(() => { const t = setInterval(cargar, 30000); return () => clearInterval(t) }, [cargar])
+
+  const actuar = async (p, accion, body) => {
+    try {
+      await api.accionPedido(p.id, accion, body)
+      cargar(); setAbierta(null)
+      toast({ title: 'Listo' })
+    } catch (e) {
+      toast({ title: 'No se pudo', body: e?.message || 'Error', kind: 'error' })
+    }
+  }
+
+  if (data === null) return <div className="p-4"><TableSkeleton rows={3} cols={2} /></div>
+
+  if (!data.repartidor) {
+    return <Empty icon={<Icon.Truck size={22} />} title="No estás registrado como repartidor"
+      body="Pídele a quien administra el local que te agregue a la flota y enlace tu usuario." />
+  }
+
+  const r = data.repartidor
+  const entregas = data.entregas || []
+
+  return (
+    <div className="max-w-md mx-auto">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4 mb-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="font-display font-bold text-[16px]">{r.nombre}</div>
+            <div className="text-[12px] text-slate-500">{r.codigo ? `${r.codigo} · ` : ''}{r.vehiculo}</div>
+          </div>
+          {/* La disponibilidad la decide él: despacho no puede saber si ya volvió
+              del almuerzo. */}
+          <Toggle checked={!!r.disponible} onChange={(v) => api.marcarDisponibilidad(v).then(cargar)}
+            label="Disponible" />
+        </div>
+      </div>
+
+      {entregas.length === 0 ? (
+        <Empty icon={<Icon.Check size={22} />} title="No tienes entregas pendientes"
+          body="Cuando despacho te asigne un pedido, aparece acá." />
+      ) : (
+        <div className="space-y-2.5">
+          {entregas.map((p) => {
+            const pago = pagoDelPedido(p)
+            const demorado = estaDemorado(p)
+            return (
+              <button key={p.id} type="button" onClick={() => setAbierta(p)}
+                className={`w-full text-left bg-white dark:bg-slate-900 border rounded-xl shadow-card p-4 ${demorado
+                  ? 'border-[#B3362C]/60' : 'border-slate-200 dark:border-slate-800'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-display font-bold text-[15px]">#{p.numero}</span>
+                  <span className={`text-[11.5px] px-2 py-0.5 rounded-full font-semibold ${pago.cobra
+                    ? 'bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                    : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>
+                    {pago.etiqueta}
+                  </span>
+                </div>
+                <div className="text-[14px] mt-1.5">{p.destino?.direccion}</div>
+                {p.destino?.referencia ? <div className="text-[12.5px] text-slate-500">{p.destino.referencia}</div> : null}
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-[12.5px] text-slate-500">{etiquetaEstado(p.estado)}</span>
+                  {pago.cobra ? (
+                    <span className="num font-semibold text-[14px]">{fmtCurrency((p.total || 0) + (p.costoEnvio || 0), ui.ccy)}</span>
+                  ) : null}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {abierta ? <EntregaModal p={abierta} ccy={ui.ccy} onClose={() => setAbierta(null)} onAccion={(a, b) => actuar(abierta, a, b)} /> : null}
+    </div>
+  )
+}
+
+/* EntregaModal: la pantalla del momento de entregar. Botones grandes, un solo
+ * dato importante por bloque — se usa de pie, en la puerta de una casa. */
+function EntregaModal({ p, ccy, onClose, onAccion }) {
+  const [prueba, setPrueba] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const pago = pagoDelPedido(p)
+  const tel = (p.destino?.telefono || '').replace(/[^0-9+]/g, '')
+
+  return (
+    <Modal open onClose={onClose} size="sm" icon={<Icon.Truck size={18} />}
+      title={`Pedido #${p.numero}`} sub={p.tracking || ''}>
+      <div className="space-y-3.5">
+        {/* EL COBRO PRIMERO: es lo que decide qué hace al llegar. */}
+        <div className={`rounded-lg px-3 py-3 ${pago.cobra
+          ? 'bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-700/60'
+          : 'bg-emerald-50 dark:bg-emerald-900/25 border border-emerald-200 dark:border-emerald-700/60'}`}>
+          <div className="font-semibold text-[14px]">{pago.etiqueta}</div>
+          <div className="text-[12.5px] mt-0.5">{pago.detalle}</div>
+          {pago.cobra ? (
+            <div className="num font-display font-bold text-[22px] mt-1.5">
+              {fmtCurrency((p.total || 0) + (p.costoEnvio || 0), ccy)}
+            </div>
+          ) : null}
+        </div>
+
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-slate-400">Entregar en</div>
+          <div className="text-[14.5px]">{p.destino?.direccion}</div>
+          {p.destino?.referencia ? <div className="text-[13px] text-slate-500">{p.destino.referencia}</div> : null}
+          {p.destino?.instruccion ? <div className="text-[13px] text-slate-500 mt-1">{p.destino.instruccion}</div> : null}
+        </div>
+
+        <div className="flex gap-2">
+          {tel ? (
+            <a href={`tel:${tel}`} className="flex-1 text-center py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[13.5px] font-semibold">
+              Llamar al cliente
+            </a>
+          ) : null}
+          {(p.destino?.lat || p.destino?.lon) ? (
+            <a href={`https://maps.google.com/?q=${p.destino.lat},${p.destino.lon}`} target="_blank" rel="noreferrer"
+              className="flex-1 text-center py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[13.5px] font-semibold">
+              Cómo llegar
+            </a>
+          ) : null}
+        </div>
+
+        <div className="rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+          {(p.items || []).map((it, i) => (
+            <div key={i} className="px-3 py-2 text-[13px]">{it.cantidad} × {it.nombre || it.sku}</div>
+          ))}
+        </div>
+
+        {p.estado === 'asignado' ? (
+          <Button className="w-full" onClick={() => onAccion('en-ruta')}>Salí con el pedido</Button>
+        ) : null}
+
+        {p.estado === 'en_ruta' || p.estado === 'entrega_fallida' ? (
+          <>
+            <Field label="¿Quién recibió?" hint="queda como prueba de entrega">
+              <Input value={prueba} onChange={(e) => setPrueba(e.target.value)} placeholder="Nombre de quien recibió" />
+            </Field>
+            <Button className="w-full" onClick={() => onAccion('entregado', { prueba })}>Entregado</Button>
+            <Field label="¿No se pudo entregar?" hint="explica qué pasó">
+              <Input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Nadie atendió, dirección errada…" />
+            </Field>
+            <Button className="w-full" variant="destructive" disabled={!motivo.trim()}
+              onClick={() => onAccion('fallida', { motivo })}>No se pudo entregar</Button>
+          </>
+        ) : null}
       </div>
     </Modal>
   )

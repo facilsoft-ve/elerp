@@ -245,6 +245,16 @@ func (s *Service) enviarAPreparacion(p pedido.Pedido, actor, origen string) pedi
 			EmpresaID: p.EmpresaID, SedeID: p.SedeID,
 			MesoneroNombre: "Delivery", Actor: actor, Origen: origen,
 		})
+		if err != nil {
+			// NO se traga el error. Un pedido que no llegó a cocina se queda en
+			// preparación para siempre esperando algo que nadie mandó, y el local
+			// se entera cuando el cliente llama. Queda en la bitácora, a la vista
+			// de quien atiende.
+			p.Bitacora = append(p.Bitacora, pedido.Evento{
+				Cuando: ahora(), Estado: pedido.EstadoEnPreparacion, Actor: actor, Origen: origen,
+				Motivo: "no se pudo mandar a cocina: " + err.Error(),
+			})
+		}
 		if err == nil {
 			p.CuentaID = cta.ID
 			// La comanda tiene que decir de DÓNDE viene y con qué números. Cuando
@@ -305,11 +315,21 @@ func (s *Service) MarcarListo(empresaID, pedidoID, actor, origen string) (pedido
 	return p, nil
 }
 
-// avisarProduccionLista marca listo el pedido cuya producción terminó.
-//
-// Se llama desde el tablero de cocina y no al revés porque quien sabe que el
-// último renglón salió es la cuenta. Si la cuenta no es de un pedido, o todavía
-// falta algo, no hace nada: es un aviso, no una obligación.
+/* avisarProduccionLista registra que cocina terminó. NO marca el pedido listo.
+ *
+ * PRODUCCIÓN LISTA NO ES PEDIDO LISTO. Cocina avisa que salió el último plato;
+ * el pedido todavía hay que empacarlo, meterle la bebida y revisar que esté
+ * completo. Quien gestiona el delivery es el que confirma «listo para retirar»,
+ * y esa confirmación es la que emite el número de envío y hace venir al
+ * repartidor.
+ *
+ * Avanzar solo hasta ahí ahorraría un toque y costaría lo peor: un courier
+ * llegando por algo que todavía está en la cocina, esperando en el mostrador.
+ *
+ * Se llama desde el tablero de cocina y no al revés porque quien sabe que el
+ * último renglón salió es la cuenta. Si la cuenta no es de un pedido, o todavía
+ * falta algo, no hace nada: es un aviso, no una obligación.
+ */
 func (s *Service) avisarProduccionLista(empresaID string, c cuenta.Cuenta, actor, origen string) {
 	if s.pedidos == nil {
 		return
@@ -328,7 +348,15 @@ func (s *Service) avisarProduccionLista(empresaID string, c cuenta.Cuenta, actor
 		if p.CuentaID != c.ID || p.Estado != pedido.EstadoEnPreparacion {
 			continue
 		}
-		s.MarcarListo(empresaID, p.ID, actor, origen)
+		if p.ProduccionLista != "" {
+			return // ya se había avisado
+		}
+		p.ProduccionLista = ahora()
+		p.Bitacora = append(p.Bitacora, pedido.Evento{
+			Cuando: ahora(), Estado: pedido.EstadoEnPreparacion, Actor: actor, Origen: origen,
+			Motivo: "cocina terminó el pedido",
+		})
+		s.pedidos.Update(p)
 		return
 	}
 }
@@ -713,5 +741,57 @@ func (s *Service) GuardarRepartidor(empresaID, actor, origen string, r pedido.Re
 	}
 	out := s.repartidores.Upsert(r)
 	s.audit.Append(evento(empresaID, actor, origen, "pedido.repartidor.guardar", out.Nombre, out.Codigo))
+	return out, nil
+}
+
+/* --- Vista del repartidor ------------------------------------------------- */
+
+// RepartidorDeUsuario resuelve qué repartidor es el usuario de la sesión.
+func (s *Service) RepartidorDeUsuario(empresaID, usuarioID string) (pedido.Repartidor, bool) {
+	if s.repartidores == nil {
+		return pedido.Repartidor{}, false
+	}
+	return s.repartidores.ByUsuario(empresaID, usuarioID)
+}
+
+// EntregasDe son los pedidos vivos de un repartidor, del más urgente al menos.
+//
+// Solo los VIVOS: un repartidor no necesita la lista de lo que ya entregó
+// mientras maneja, y una pantalla con veinte entregas cerradas esconde las dos
+// que tiene que hacer ahora.
+func (s *Service) EntregasDe(empresaID, repartidorID string) []pedido.Pedido {
+	if s.pedidos == nil {
+		return []pedido.Pedido{}
+	}
+	out := []pedido.Pedido{}
+	for _, p := range s.pedidos.List(empresaID, "") {
+		if p.RepartidorID != repartidorID || pedido.Final(p.Estado) {
+			continue
+		}
+		out = append(out, p)
+	}
+	// Primero lo que ya está en la calle, después lo asignado; dentro de cada
+	// grupo, lo que se prometió antes.
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, rj := out[i].Estado == pedido.EstadoEnRuta, out[j].Estado == pedido.EstadoEnRuta
+		if ri != rj {
+			return ri
+		}
+		return out[i].PromesaEntrega < out[j].PromesaEntrega
+	})
+	return out
+}
+
+// MarcarDisponibilidad la cambia el propio repartidor desde su teléfono:
+// despacho no puede saber si ya volvió del almuerzo.
+func (s *Service) MarcarDisponibilidad(empresaID, usuarioID string, disponible bool, origen string) (pedido.Repartidor, error) {
+	r, ok := s.RepartidorDeUsuario(empresaID, usuarioID)
+	if !ok {
+		return pedido.Repartidor{}, ErrRepartidorNoExiste
+	}
+	r.Disponible = disponible
+	out := s.repartidores.Upsert(r)
+	s.audit.Append(evento(empresaID, usuarioID, origen, "pedido.repartidor.disponibilidad", out.Nombre,
+		fmt.Sprintf("%v", disponible)))
 	return out, nil
 }

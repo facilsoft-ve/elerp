@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mornix/elerp/internal/domain/inventario"
+
 	"github.com/mornix/elerp/internal/domain/aplicacion"
 	"github.com/mornix/elerp/internal/domain/pedido"
 )
@@ -87,10 +89,30 @@ func (s *Store) seedDelivery(empID, sedeID string, conCocina bool) {
 		Telefono: "0412-5559988", Vehiculo: pedido.VehiculoBicicleta, Activo: true, Disponible: false, Creado: fecha,
 	})
 
-	// Los productos salen del catálogo ya sembrado: un pedido demo con SKU
-	// inventado no se podría confirmar ni facturar, y la demostración se cortaría
-	// justo donde importa.
-	prods := s.Productos.List(empID)
+	/* LOS PRODUCTOS SALEN DEL CATÁLOGO YA SEMBRADO —un pedido demo con SKU
+	 * inventado no se podría confirmar ni facturar— pero SOLO LOS VENDIBLES.
+	 *
+	 * Un insumo no se factura: es materia prima que se consume por la receta del
+	 * plato. Nadie pide media pechuga cruda a domicilio, y un pedido demo con
+	 * insumos adentro enseña el módulo haciendo algo que en la vida real no pasa.
+	 * En un restaurante, además, se prefieren los PLATOS: es lo que de verdad se
+	 * vende, y es lo que hace que la comanda tenga sentido en cocina.
+	 */
+	vendibles := []inventario.Producto{}
+	platos := []inventario.Producto{}
+	for _, p := range s.Productos.List(empID) {
+		if p.EsInsumo || !p.Activo || p.Precio <= 0 {
+			continue
+		}
+		vendibles = append(vendibles, p)
+		if p.EsPlato {
+			platos = append(platos, p)
+		}
+	}
+	prods := vendibles
+	if conCocina && len(platos) > 0 {
+		prods = platos
+	}
 	if len(prods) == 0 {
 		return
 	}
@@ -279,5 +301,4 @@ func (s *Store) seedDelivery(empID, sedeID string, conCocina bool) {
 	// prospecto no puede repetir un número que ya está en la bandeja.
 	s.Numerador.Fijar(empID, sedeID, "PED", num)
 	s.Numerador.Fijar(empID, sedeID, "DLV", 41)
-	_ = conCocina
 }
