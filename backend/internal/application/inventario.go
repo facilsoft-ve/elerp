@@ -574,7 +574,10 @@ func (s *Service) Existencias(empresaID, sedeID string) []ExistenciaView {
 		// es el de sus componentes/insumos). Se excluyen de la proyección para no
 		// listarlos con saldo — si no, todo plato aparece «agotado» en existencias,
 		// en los avisos del Inicio y en los reportes, que es justo lo que pasaba.
-		if p.EsCombo || p.EsPlato {
+		// Un SERVICIO tampoco: el flete de un envío se vende, no se guarda. Listarlo
+		// lo deja para siempre en cero en existencias, en los avisos de agotados y
+		// en la valorización, que es ruido sobre algo que nunca tuvo stock.
+		if p.EsCombo || p.EsPlato || p.EsServicio {
 			continue
 		}
 		movs := s.movimientos.List(empresaID, inventario.FiltroMovimiento{SedeID: sedeID, ProductoID: p.ID})
@@ -680,7 +683,7 @@ func (s *Service) ExistenciasDeAlmacen(empresaID, almacenID string) ([]Existenci
 	prods := s.productos.List(empresaID)
 	out := make([]ExistenciaView, 0, len(prods))
 	for _, p := range prods {
-		if p.EsCombo {
+		if p.EsCombo || p.EsServicio {
 			continue
 		}
 		cant, avg := fold(s.movsDeAlmacen(empresaID, alm, inventario.FiltroMovimiento{ProductoID: p.ID}))
