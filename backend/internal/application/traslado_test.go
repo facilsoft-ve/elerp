@@ -14,17 +14,6 @@ import (
  * tres se mueve, el traslado dejó de ser un traslado y nadie lo va a notar mirando
  * la pantalla de existencias — que seguirá cuadrando. */
 
-// existenciaYCosto proyecta la existencia y el costo promedio de un sku en la sede.
-func existenciaYCosto(t *testing.T, svc *application.Service, sku string) (float64, float64) {
-	t.Helper()
-	for _, e := range svc.Existencias(empDemo, sede1) {
-		if e.SKU == sku {
-			return e.Cantidad, e.CostoPromedio
-		}
-	}
-	return 0, 0
-}
-
 // saldoEn devuelve lo que hay de un sku en una ubicación concreta de la sede.
 func saldoEn(t *testing.T, svc *application.Service, sku, ubicacionID string) float64 {
 	t.Helper()
@@ -49,7 +38,7 @@ func TestTraslado_MueveElSitioYNadaMas(t *testing.T) {
 		t.Fatalf("cargar en muelle: %v", err)
 	}
 
-	antesCant, antesCosto := existenciaYCosto(t, svc, sku)
+	antesCant, antesCosto := existenciaDe(t, svc, empDemo, sede1, sku)
 	antesAsientos := len(svc.LibroDiario(empDemo))
 
 	if _, err := svc.TrasladarEntreUbicaciones(empDemo, actorA, origenTst, application.TrasladoPeticion{
@@ -65,7 +54,7 @@ func TestTraslado_MueveElSitioYNadaMas(t *testing.T) {
 		t.Errorf("el estante tenía que subir a 12, quedó en %v", got)
 	}
 
-	despuesCant, despuesCosto := existenciaYCosto(t, svc, sku)
+	despuesCant, despuesCosto := existenciaDe(t, svc, empDemo, sede1, sku)
 	if !casi(antesCant, despuesCant) {
 		t.Errorf("un traslado no cambia la existencia: %v → %v", antesCant, despuesCant)
 	}

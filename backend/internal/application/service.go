@@ -210,6 +210,9 @@ type Service struct {
 	// por qué ubicación). Se cablea con ConTiposOperacion; sin él cada proceso se
 	// comporta como siempre: un paso, almacén principal.
 	tiposOperacion almacen.TipoOperacionRepo
+	// apartados es la mercancía comprometida que todavía no salió. Se cablea con
+	// ConApartados; sin él nada aparta y el disponible es la existencia.
+	apartados inventario.ApartadoRepo
 	// sedes da acceso a las COORDENADAS del local, para la presencia estricta
 	// (ver presencia.go). Se cablea con ConSedes; sin él la verificación de
 	// presencia no aplica y todo se comporta como antes.

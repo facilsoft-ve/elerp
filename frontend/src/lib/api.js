@@ -636,6 +636,11 @@ export const api = {
   sembrarTiposOperacion: () => request('/api/config/operaciones/sembrar', { method: 'POST' }),
   // Lo que espera en el muelle el segundo paso de una recepción.
   pendienteDeUbicar: () => request('/api/inventario/pendiente-de-ubicar'),
+  // APARTADOS: mercancía comprometida que todavía no salió.
+  apartados: () => request('/api/inventario/apartados'),
+  crearApartado: (body) => request('/api/inventario/apartados', { method: 'POST', body: JSON.stringify(body) }),
+  despacharApartado: (id) => request(`/api/inventario/apartados/${encodeURIComponent(id)}/despachar`, { method: 'POST' }),
+  liberarApartado: (id) => request(`/api/inventario/apartados/${encodeURIComponent(id)}/liberar`, { method: 'POST' }),
   actualizarAlmacen: (id, body) => request(`/api/config/almacenes/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   desactivarAlmacen: (id) => request(`/api/config/almacenes/${encodeURIComponent(id)}/desactivar`, { method: 'POST' }),
 

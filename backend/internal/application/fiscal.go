@@ -493,6 +493,11 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 	if in.SedeID != "" {
 		sedeChequeo = in.SedeID
 	}
+	// Lo APARTADO no se vende: se comprueba aquí, antes de numerar, por el mismo
+	// motivo que los lotes vencidos — después de emitir ya no hay vuelta atrás.
+	if err := s.validarVentaContraApartados(empresaID, sedeChequeo, doc.Lineas); err != nil {
+		return fiscal.Documento{}, err
+	}
 	if err := s.validarLotesVendibles(empresaID, sedeChequeo, doc.Lineas); err != nil {
 		return fiscal.Documento{}, err
 	}

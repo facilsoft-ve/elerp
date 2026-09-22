@@ -174,6 +174,18 @@ type ExistenciaView struct {
 	Cantidad      float64 `json:"cantidad"`
 	CostoPromedio float64 `json:"costoPromedio"`
 	Valor         float64 `json:"valor"`
+	// Apartado solo viaja cuando hay algo comprometido: es la señal de que esta
+	// fila tiene algo que mirar.
+	Apartado float64 `json:"apartado,omitempty"`
+	// Disponible viaja SIEMPRE, incluso valiendo cero, y ahí está la diferencia: con
+	// omitempty, «todo apartado» (disponible 0) y «sin apartados» se leerían igual
+	// desde la pantalla — el campo faltaría en los dos casos. Sin apartados vale lo
+	// mismo que Cantidad, que es la verdad.
+	//
+	// PUEDE SER NEGATIVO y hay que dejarlo verse: significa que hay más comprometido
+	// que mercancía —una merma sobre lo apartado, por ejemplo— y alguien tiene que
+	// decidir qué pedido se recorta. Enseñar un cero lo taparía.
+	Disponible float64 `json:"disponible"`
 }
 
 // KardexLinea es un renglón del Kardex con saldo y costo corridos.
@@ -559,7 +571,7 @@ func (s *Service) Existencias(empresaID, sedeID string) []ExistenciaView {
 		}
 		movs := s.movimientos.List(empresaID, inventario.FiltroMovimiento{SedeID: sedeID, ProductoID: p.ID})
 		cant, avg := fold(movs)
-		out = append(out, ExistenciaView{
+		v := ExistenciaView{
 			ProductoID:    p.ID,
 			SKU:           p.SKU,
 			Nombre:        p.Nombre,
@@ -567,7 +579,12 @@ func (s *Service) Existencias(empresaID, sedeID string) []ExistenciaView {
 			Cantidad:      cant,
 			CostoPromedio: avg,
 			Valor:         cant * avg,
-		})
+		}
+		v.Disponible = round2(cant)
+		if apt := s.Apartado(empresaID, sedeID, p.ID); apt > 0.0001 {
+			v.Apartado, v.Disponible = apt, round2(cant-apt)
+		}
+		out = append(out, v)
 	}
 	return out
 }
