@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/mornix/elerp/internal/application"
+	"github.com/mornix/elerp/internal/domain/aplicacion"
 	"github.com/mornix/elerp/internal/domain/fabricacion"
 	"github.com/mornix/elerp/internal/domain/inventario"
 )
@@ -27,6 +28,15 @@ import (
  * descuadre que la pantalla de valoración destapó en este mismo seed.
  */
 func (s *Store) seedFabricacion(empID, sedeID string) {
+	// El módulo queda INSTALADO Y ACTIVO, igual que delivery: si hubiera que
+	// activarlo a mano, las órdenes sembradas existirían y el menú no las
+	// mostraría — la demo arrancaría enseñando un módulo que no está.
+	s.Modulos.Upsert(aplicacion.Instalacion{
+		EmpresaID: empID, ModuloID: aplicacion.ModFabricacion,
+		Instalado: true, Activo: true,
+		Actualizada: time.Now().UTC().Format(time.RFC3339),
+	})
+
 	// El brownie: se hornea por bandejas y se vende de la vitrina. Receta escrita
 	// PARA LA BANDEJA (20 unidades), no por unidad — que es como se escribe una
 	// receta de verdad y lo que el módulo vino a soportar.
