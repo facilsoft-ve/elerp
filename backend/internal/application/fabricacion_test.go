@@ -290,3 +290,166 @@ func TestFabricacion_NoSeFabricaConOrdenLoQueNoSeGuarda(t *testing.T) {
 		t.Fatalf("el mensaje debe nombrar el interruptor a cambiar: %q", err)
 	}
 }
+
+/* LA FÓRMULA, EN SERIO.
+ *
+ * Una receta de tres campos alcanza para una torta y no para producir. Lo que se
+ * prueba acá son las tres pérdidas que una receta plana se salta, y que son
+ * justamente las que hacen que la cuenta «cierre poco» — la forma en que un
+ * error de costeo se queda años sin que nadie lo vea.
+ */
+
+// formulaEstricta arma un plato cuya receta está escrita para una TANDA de 10,
+// pierde 20% en el proceso y descarta 10% al preparar el insumo A.
+func formulaEstricta(t *testing.T, svc *application.Service) inventario.Producto {
+	t.Helper()
+	plato, _, _ := recetaDePrueba(t, svc, inventario.FabricaParaStock)
+	out, err := svc.ActualizarProducto(empDemo, actorA, origenTst, plato.SKU, application.CambiosProducto{
+		Receta: []inventario.ComboComponente{
+			{SKU: "INS-A", Cantidad: 2, MermaPct: 10}, // se descarta 10% al pelarlo
+			{SKU: "INS-B", Cantidad: 3},
+		},
+		LoteBase:       ptrF(10), // la receta es para 10 unidades
+		RendimientoPct: ptrF(80), // el proceso rinde 80%
+		ToleranciaPct:  ptrF(5),
+	})
+	if err != nil {
+		t.Fatalf("fórmula: %v", err)
+	}
+	return out
+}
+
+func ptrF(v float64) *float64 { return &v }
+
+// La receta está escrita para una TANDA. Multiplicar por la cantidad pedida sin
+// dividir entre el lote base pide diez veces de más.
+func TestFormula_LaRecetaEsPorTandaNoPorUnidad(t *testing.T) {
+	svc, _ := servicioFabricacion(t)
+	p := formulaEstricta(t, svc)
+	plan, err := svc.PlanearOrden(empDemo, sede1, p.SKU, 8)
+	if err != nil {
+		t.Fatalf("planear: %v", err)
+	}
+	// Para 8 unidades, con lote de 10 y rendimiento 80%: factor = 8/(10×0,8) = 1.
+	if plan.Factor != 1 {
+		t.Fatalf("el factor debería ser 1 (8 / (10 × 0,8)), es %v", plan.Factor)
+	}
+	// INS-B no tiene merma: 3 × 1 = 3.
+	var b float64
+	for _, c := range plan.Consumos {
+		if c.SKU == "INS-B" {
+			b = c.Cantidad
+		}
+	}
+	if b != 3 {
+		t.Fatalf("INS-B debería consumir 3, consume %v", b)
+	}
+}
+
+// El rendimiento se aplica AL REVÉS de lo intuitivo: para obtener menos hay que
+// meter más. Un proceso que rinde 80% necesita partir de 1,25× el insumo.
+func TestFormula_ElRendimientoPideMasInsumoNoMenos(t *testing.T) {
+	svc, _ := servicioFabricacion(t)
+	p := formulaEstricta(t, svc)
+	// 10 unidades con lote 10 y rendimiento 80% ⇒ factor 1,25.
+	plan, _ := svc.PlanearOrden(empDemo, sede1, p.SKU, 10)
+	if plan.Factor != 1.25 {
+		t.Fatalf("factor = %v, debería ser 1,25: para sacar 10 con 80%% de rendimiento hay que partir de más", plan.Factor)
+	}
+}
+
+// La merma del insumo es SUYA, no del proceso: de un tomate se descarta el 10%
+// entre en la receta que entre. Se saca más del almacén de lo que entra a la olla.
+func TestFormula_LaMermaDelInsumoSacaMasDelAlmacen(t *testing.T) {
+	svc, _ := servicioFabricacion(t)
+	p := formulaEstricta(t, svc)
+	plan, _ := svc.PlanearOrden(empDemo, sede1, p.SKU, 8) // factor 1
+	var a float64
+	for _, c := range plan.Consumos {
+		if c.SKU == "INS-A" {
+			a = c.Cantidad
+		}
+	}
+	// 2 × factor 1, más 10% que se descarta al pelarlo = 2,2.
+	if a != 2.2 {
+		t.Fatalf("INS-A debería sacar 2,2 del almacén (2 a la olla + 10%% de merma), saca %v", a)
+	}
+}
+
+// Una tanda que se desvía más de lo declarado queda MARCADA. No se bloquea —ya
+// salió— pero alguien tiene que mirarla.
+func TestFormula_LaDesviacionFueraDeToleranciaQuedaMarcada(t *testing.T) {
+	svc, _ := servicioFabricacion(t)
+	p := formulaEstricta(t, svc)
+
+	dentro, _ := svc.CrearOrdenFabricacion(empDemo, application.EntradaOrden{
+		SedeID: sede1, SKU: p.SKU, Cantidad: 8, Actor: actorA, Origen: origenTst,
+	})
+	dentro, _ = svc.IniciarOrden(empDemo, dentro.ID, actorA, origenTst)
+	dentro, _ = svc.TerminarOrden(empDemo, dentro.ID, 7.8, actorA, origenTst) // −2,5%, dentro del 5%
+	if dentro.FueraDeTolerancia {
+		t.Fatal("una desviación del 2,5% con tolerancia del 5% no debería marcarse")
+	}
+
+	fuera, _ := svc.CrearOrdenFabricacion(empDemo, application.EntradaOrden{
+		SedeID: sede1, SKU: p.SKU, Cantidad: 8, Actor: actorA, Origen: origenTst,
+	})
+	fuera, _ = svc.IniciarOrden(empDemo, fuera.ID, actorA, origenTst)
+	fuera, _ = svc.TerminarOrden(empDemo, fuera.ID, 6, actorA, origenTst) // −25%
+	if !fuera.FueraDeTolerancia {
+		t.Fatal("una tanda que rindió 25% menos tiene que quedar señalada")
+	}
+}
+
+// Y sin fórmula declarada todo se comporta como antes: es lo que permite que
+// ninguna receta ya cargada cambie de conducta.
+func TestFormula_SinDeclararNadaSeComportaComoAntes(t *testing.T) {
+	svc, _ := servicioFabricacion(t)
+	plato, _, _ := recetaDePrueba(t, svc, inventario.FabricaParaStock)
+	plan, err := svc.PlanearOrden(empDemo, sede1, plato.SKU, 5)
+	if err != nil {
+		t.Fatalf("planear: %v", err)
+	}
+	if plan.Factor != 1*5 {
+		t.Fatalf("sin lote ni rendimiento el factor es la cantidad pedida: %v", plan.Factor)
+	}
+	for _, c := range plan.Consumos {
+		if c.SKU == "INS-A" && c.Cantidad != 10 { // 2 × 5, sin merma
+			t.Fatalf("INS-A debería ser 10 sin fórmula declarada, es %v", c.Cantidad)
+		}
+	}
+}
+
+/* RESTAURANTE Y FABRICACIÓN, LOS DOS ACTIVOS.
+ *
+ * Conviven, y conviven POR PRODUCTO: el mismo local prepara la pasta al pedirla
+ * y tiene los postres hechos en la vitrina. Lo que no puede pasar es que un
+ * postre ya fabricado se mande a cocina — el cliente esperaría por algo que está
+ * a tres metros, y la comanda quedaría abierta hasta que alguien marque listo un
+ * plato que nadie va a preparar.
+ */
+func TestFabricacion_LoFabricadoParaStockNoVaACocina(t *testing.T) {
+	svc, st := servicioFabricacion(t)
+	svc.ConPedidos(st.Pedidos, st.CanalesPedido, st.ZonasPedido, st.Repartidores)
+	svc.ConCuentas(st.Cuentas)
+
+	bajoPedido, _, _ := recetaDePrueba(t, svc, inventario.FabricaBajoPedido)
+	if !bajoPedido.SePreparaAlPedirlo() {
+		t.Fatal("un plato bajo pedido SÍ se prepara al pedirlo: tiene que ir a cocina")
+	}
+
+	paraStock, err := svc.ActualizarProducto(empDemo, actorA, origenTst, bajoPedido.SKU,
+		application.CambiosProducto{ModoFabricacion: ptrS(inventario.FabricaParaStock)})
+	if err != nil {
+		t.Fatalf("cambiar modo: %v", err)
+	}
+	if paraStock.SePreparaAlPedirlo() {
+		t.Fatal("un plato fabricado para stock ya está hecho: no va a cocina")
+	}
+	// Y sigue siendo un plato con receta: lo que cambió es CUÁNDO se produce.
+	if !paraStock.EsPlato || len(paraStock.Receta) == 0 {
+		t.Fatal("cambiar el modo no puede dejar de ser un plato con receta")
+	}
+}
+
+func ptrS(v string) *string { return &v }

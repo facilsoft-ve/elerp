@@ -396,6 +396,10 @@ type CambiosProducto struct {
 	Componentes         []inventario.ComboComponente
 	EsPlato             *bool
 	Receta              []inventario.ComboComponente
+	// Fórmula: nil = no se toca. Ver Producto.LoteBase/RendimientoPct/ToleranciaPct.
+	LoteBase       *float64
+	RendimientoPct *float64
+	ToleranciaPct  *float64
 	// ModoFabricacion: nil = no se toca. Cambia CUÁNDO se consumen los insumos —al
 	// venderlo o antes, con una orden— y por eso también si el producto se stockea.
 	ModoFabricacion *string
@@ -488,6 +492,15 @@ func (s *Service) ActualizarProducto(empresaID, actor, origen, sku string, cambi
 	}
 	if cambios.Receta != nil {
 		p.Receta = cambios.Receta
+	}
+	if cambios.LoteBase != nil {
+		p.LoteBase = *cambios.LoteBase
+	}
+	if cambios.RendimientoPct != nil {
+		p.RendimientoPct = *cambios.RendimientoPct
+	}
+	if cambios.ToleranciaPct != nil {
+		p.ToleranciaPct = *cambios.ToleranciaPct
 	}
 	if cambios.ModoFabricacion != nil {
 		/* Cambiar el modo cambia si el producto SE STOCKEA, así que cambia lo que

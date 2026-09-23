@@ -60,6 +60,28 @@ const (
 type ComboComponente struct {
 	SKU      string  `json:"sku" bson:"sku"`
 	Cantidad float64 `json:"cantidad" bson:"cantidad"`
+	/* MermaPct es lo que se PIERDE al preparar ESTE insumo, en porcentaje: el
+	 * pelado del tomate, la limpieza de la carne, el recorte del pan.
+	 *
+	 * Va por insumo y no por fórmula porque es una propiedad del ingrediente: de
+	 * un tomate se descarta el 10% siempre, entre en la receta que entre. Sin
+	 * esto, la fórmula pide 2 kg de tomate, se sacan 2 kg del almacén y a la olla
+	 * entran 1,8 — y la cuenta nunca cierra, pero cierra "poco", que es la forma
+	 * en que un error se queda años.
+	 *
+	 * Cero ⇒ sin merma de preparación, que es el comportamiento anterior. Solo
+	 * aplica a recetas de fabricación; en un combo se ignora. */
+	MermaPct float64 `json:"mermaPct,omitempty" bson:"mermapct,omitempty"`
+}
+
+// CantidadBruta es cuánto hay que SACAR del almacén para que lleguen `Cantidad`
+// al proceso, contando la merma de preparación.
+func (c ComboComponente) CantidadBruta(factor float64) float64 {
+	bruta := c.Cantidad * factor
+	if c.MermaPct > 0 {
+		bruta *= 1 + c.MermaPct/100
+	}
+	return bruta
 }
 
 // Presentacion es una forma de venta de un producto (p. ej. "Bulto x24") que
@@ -159,6 +181,36 @@ type Producto struct {
 	 * producto: un mismo local tiene los dos a la vez. Y vacío se lee como bajo
 	 * pedido, así que ningún plato ya cargado cambia de comportamiento. */
 	ModoFabricacion string `json:"modoFabricacion,omitempty" bson:"modofabricacion,omitempty"`
+
+	/* LA FÓRMULA, EN SERIO.
+	 *
+	 * Una receta de tres campos alcanza para una torta. No alcanza para producir:
+	 * una fórmula real dice para qué TANDA está escrita, cuánto RINDE y cuánta
+	 * desviación es aceptable. Sin eso no se puede distinguir «se produjo menos de
+	 * lo esperado» de «se planificó mal», que es justamente lo que un control de
+	 * producción existe para responder.
+	 *
+	 * Los tres tienen default neutro, así que toda receta ya cargada se comporta
+	 * exactamente igual que antes y no hay nada que migrar.
+	 */
+
+	// LoteBase es para cuántas unidades está escrita la fórmula. Una receta dice
+	// «para 10 kg de masa», no «para 1». Cero o uno ⇒ la receta es por unidad.
+	LoteBase float64 `json:"loteBase,omitempty" bson:"lotebase,omitempty"`
+	/* RendimientoPct es cuánto del lote SALE como producto terminado, en
+	 * porcentaje. 10 kg de pollo crudo rinden 6,5 kg de pollo cocido: el agua se
+	 * fue, y esa pérdida es del PROCESO, no de ningún insumo en particular.
+	 *
+	 * Se usa al revés de lo que parece: para obtener 6,5 kg hay que partir de más
+	 * insumo, no de menos. Cero o cien ⇒ el proceso no pierde. */
+	RendimientoPct float64 `json:"rendimientoPct,omitempty" bson:"rendimientopct,omitempty"`
+	/* ToleranciaPct es cuánta desviación entre lo esperado y lo producido se
+	 * considera normal. Fuera de ella, la orden queda marcada para que alguien
+	 * mire: una tanda que rinde 20% menos no es mala suerte dos veces seguidas.
+	 *
+	 * Cero ⇒ no se controla. Es el default a propósito: avisar de desviaciones a
+	 * quien no declaró cuál le importa es enseñarle a ignorar el aviso. */
+	ToleranciaPct float64 `json:"toleranciaPct,omitempty" bson:"toleranciapct,omitempty"`
 	/* EsServicio marca algo que SE VENDE PERO NO SE STOCKEA: un envío a
 	 * domicilio, una instalación, una hora de mano de obra.
 	 *
@@ -364,6 +416,17 @@ func (p Producto) SeFabricaParaStock() bool {
 	return p.ModoFabricacion == FabricaParaStock && len(p.Receta) > 0
 }
 
+/* SePreparaAlPedirlo indica si este producto hay que PRODUCIRLO cuando lo piden.
+ *
+ * No es lo mismo que «tiene receta»: un postre fabricado para stock tiene receta
+ * y ya está hecho, en la vitrina. Mandarlo a cocina haría esperar al cliente por
+ * algo que está a tres metros, y dejaría la comanda abierta hasta que alguien
+ * marque como listo un plato que nadie va a preparar.
+ */
+func (p Producto) SePreparaAlPedirlo() bool {
+	return p.EsPlato && len(p.Receta) > 0 && !p.SeFabricaParaStock()
+}
+
 /* SeStockea indica si el producto tiene existencia propia en el Kardex.
  *
  * Es la pregunta que antes estaba repetida en cada sitio como «EsCombo ||
@@ -379,4 +442,48 @@ func (p Producto) SeStockea() bool {
 		return p.SeFabricaParaStock()
 	}
 	return true
+}
+
+/* LoteDeFormula es el tamaño de tanda para el que está escrita la receta.
+ * Normaliza el caso «no declarado» a 1, que es como se comportaba antes.
+ */
+func (p Producto) LoteDeFormula() float64 {
+	if p.LoteBase > 0 {
+		return p.LoteBase
+	}
+	return 1
+}
+
+// RendimientoDeFormula es la fracción del lote que sale como producto terminado
+// (1 = no se pierde nada). Se acota a (0, 1]: un rendimiento de cero o negativo
+// haría falta infinito insumo, y uno mayor que 100% sería crear materia.
+func (p Producto) RendimientoDeFormula() float64 {
+	if p.RendimientoPct <= 0 || p.RendimientoPct > 100 {
+		return 1
+	}
+	return p.RendimientoPct / 100
+}
+
+/* FactorDeFormula es por cuánto hay que multiplicar cada renglón de la receta
+ * para obtener `objetivo` unidades de producto terminado.
+ *
+ * Contempla las dos pérdidas, que son distintas y se aplican en sitios
+ * distintos: el RENDIMIENTO es del proceso y entra acá (para sacar 6,5 hay que
+ * meter para 10); la MERMA es de cada insumo y entra en CantidadBruta.
+ */
+func (p Producto) FactorDeFormula(objetivo float64) float64 {
+	return objetivo / (p.LoteDeFormula() * p.RendimientoDeFormula())
+}
+
+// DesviacionAceptable indica si producir `real` contra `esperado` entra dentro de
+// la tolerancia declarada. Sin tolerancia declarada no se controla nada.
+func (p Producto) DesviacionAceptable(esperado, real float64) bool {
+	if p.ToleranciaPct <= 0 || esperado <= 0 {
+		return true
+	}
+	desvio := (real - esperado) / esperado * 100
+	if desvio < 0 {
+		desvio = -desvio
+	}
+	return desvio <= p.ToleranciaPct
 }

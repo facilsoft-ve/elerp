@@ -134,6 +134,12 @@ type PlanDeOrden struct {
 	CostoTotal    float64  `json:"costoTotal"`
 	CostoUnitario float64  `json:"costoUnitario"`
 	Alcanza       bool     `json:"alcanza"`
+	// Factor es por cuánto se multiplicó la receta: sale del tamaño de tanda y del
+	// rendimiento. Se devuelve para que la pantalla pueda explicar de dónde salen
+	// las cantidades en vez de mostrar números que no cuadran con la receta.
+	Factor float64 `json:"factor"`
+	// Esperado es cuánto producto terminado debería salir.
+	Esperado float64 `json:"esperado"`
 }
 
 // PlanearOrden calcula los consumos y el costo de fabricar `cantidad` unidades.
@@ -149,6 +155,15 @@ func (s *Service) PlanearOrden(empresaID, sedeID, sku string, cantidad float64) 
 	if cantidad <= 0 {
 		return plan, ErrCantidadInvalida
 	}
+	/* EL FACTOR DE LA FÓRMULA, no una multiplicación simple.
+	 *
+	 * La receta está escrita para una TANDA (10 kg de masa, no 1), y el proceso
+	 * RINDE menos de lo que entra (10 kg de pollo crudo dan 6,5 cocidos). Para
+	 * obtener lo pedido hay que partir de más insumo, no de menos — y eso es
+	 * justamente lo que un `cantidad × receta` se salta. */
+	factor := p.FactorDeFormula(cantidad)
+	plan.Factor = round2(factor)
+	plan.Esperado = round2(cantidad)
 	for _, comp := range p.Receta {
 		ins, ok := s.productos.BySKU(empresaID, comp.SKU)
 		if !ok {
@@ -157,7 +172,9 @@ func (s *Service) PlanearOrden(empresaID, sedeID, sku string, cantidad float64) 
 			continue
 		}
 		hay, costo := fold(s.movimientos.List(empresaID, inventario.FiltroMovimiento{SedeID: sedeID, ProductoID: ins.ID}))
-		nec := round2(comp.Cantidad * cantidad)
+		// Bruto: lo que hay que SACAR del almacén, contando lo que se pierde al
+		// preparar ese insumo (pelado, limpieza, recorte).
+		nec := round2(comp.CantidadBruta(factor))
 		c := fabricacion.Consumo{
 			SKU: ins.SKU, ProductoID: ins.ID, Nombre: ins.Nombre,
 			Cantidad: nec, CostoUnitario: round2(costo),
@@ -234,6 +251,14 @@ func (s *Service) TerminarOrden(empresaID, id string, producida float64, actor, 
 		producida = o.Cantidad
 	}
 	o.CantidadProducida = round2(producida)
+	/* ¿SE DESVIÓ DE LO ESPERADO? Hasta ahora la orden no podía saberlo: consumía
+	 * exactamente lo que decía la fórmula, así que lo real ERA lo teórico por
+	 * construcción y no había nada que comparar. Con el rendimiento declarado sí
+	 * hay un esperado, y la desviación fuera de tolerancia queda marcada para que
+	 * alguien mire — una tanda que rinde 20% menos no es mala suerte dos veces. */
+	if p, ok := s.productos.ByID(empresaID, o.ProductoID); ok {
+		o.FueraDeTolerancia = !p.DesviacionAceptable(o.Cantidad, o.CantidadProducida)
+	}
 	o.CostoUnitario = 0
 	if o.CantidadProducida > 0 {
 		o.CostoUnitario = round2(o.CostoTotal / o.CantidadProducida)

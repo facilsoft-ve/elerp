@@ -69,7 +69,10 @@ func (s *Service) hayQueProducir(empresaID string, items []pedido.Item) bool {
 		return false
 	}
 	for _, it := range items {
-		if p, ok := s.productos.BySKU(empresaID, it.SKU); ok && p.EsPlato {
+		// Lo que hay que producir es lo que se prepara AL PEDIRLO. Un postre
+		// fabricado para stock tiene receta y ya está hecho: mandarlo a cocina
+		// dejaría la comanda esperando por algo que está en la vitrina.
+		if p, ok := s.productos.BySKU(empresaID, it.SKU); ok && p.SePreparaAlPedirlo() {
 			return true
 		}
 	}

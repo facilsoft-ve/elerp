@@ -2001,6 +2001,8 @@ function PlatoModal({ plato, insumos, monedaEmpresa, rubros = [], comanderas = [
     exentoIva: !!plato?.exentoIva, receta: (plato?.receta || []).map((r) => ({ ...r })),
     rubro: plato?.rubro || '', comanderaId: plato?.comanderaId || '',
     modoFabricacion: plato?.modoFabricacion || 'bajo_pedido',
+    loteBase: plato?.loteBase || '', rendimientoPct: plato?.rendimientoPct || '',
+    toleranciaPct: plato?.toleranciaPct || '',
   }))
   const [busy, setBusy] = useState(false)
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
@@ -2010,7 +2012,8 @@ function PlatoModal({ plato, insumos, monedaEmpresa, rubros = [], comanderas = [
   const costo = f.receta.reduce((a, r) => a + costoDe(r.sku) * (Number(r.cantidad) || 0), 0)
 
   const guardar = async () => {
-    const receta = f.receta.filter((r) => r.sku && Number(r.cantidad) > 0).map((r) => ({ sku: r.sku, cantidad: Number(r.cantidad) }))
+    const receta = f.receta.filter((r) => r.sku && Number(r.cantidad) > 0)
+      .map((r) => ({ sku: r.sku, cantidad: Number(r.cantidad), mermaPct: Number(r.mermaPct) || 0 }))
     if (!f.nombre.trim()) { toast({ title: 'Ponle nombre al plato', kind: 'warn' }); return }
     if (!receta.length) { toast({ title: 'Agrega al menos un insumo a la receta', kind: 'warn' }); return }
     setBusy(true)
@@ -2020,6 +2023,8 @@ function PlatoModal({ plato, insumos, monedaEmpresa, rubros = [], comanderas = [
           nombre: f.nombre.trim(), precio: Number(f.precio) || 0, exentoIva: f.exentoIva,
           esPlato: true, receta, rubro: f.rubro, comanderaId: f.comanderaId,
           modoFabricacion: f.modoFabricacion,
+          loteBase: Number(f.loteBase) || 0, rendimientoPct: Number(f.rendimientoPct) || 0,
+          toleranciaPct: Number(f.toleranciaPct) || 0,
         })
       } else {
         const sku = (f.sku || ('PLATO-' + Date.now().toString(36).toUpperCase())).trim()
@@ -2027,6 +2032,8 @@ function PlatoModal({ plato, insumos, monedaEmpresa, rubros = [], comanderas = [
           sku, nombre: f.nombre.trim(), precio: Number(f.precio) || 0, moneda: monedaEmpresa,
           exentoIva: f.exentoIva, esPlato: true, receta, rubro: f.rubro, comanderaId: f.comanderaId,
           modoFabricacion: f.modoFabricacion,
+          loteBase: Number(f.loteBase) || 0, rendimientoPct: Number(f.rendimientoPct) || 0,
+          toleranciaPct: Number(f.toleranciaPct) || 0,
         })
       }
       toast({ title: editar ? 'Plato actualizado' : 'Plato creado', body: f.nombre })
@@ -2074,6 +2081,29 @@ function PlatoModal({ plato, insumos, monedaEmpresa, rubros = [], comanderas = [
           </Select>
         </Field>
 
+        {/* LA FÓRMULA. Solo aparece en «para stock»: un plato que se prepara al
+            venderlo se hace de a uno y no tiene tanda ni rendimiento que declarar.
+            Los tres son opcionales y en blanco se comportan como siempre. */}
+        {f.modoFabricacion === 'para_stock' ? (
+          <div className="grid grid-cols-3 gap-2">
+            <Field label="La receta es para"
+              hint="¿para cuántas unidades está escrita? En blanco: para una.">
+              <Input type="number" min={0} step="0.01" value={f.loteBase} placeholder="1"
+                onChange={(e) => set('loteBase', e.target.value)} className="num" />
+            </Field>
+            <Field label="Rendimiento %"
+              hint="cuánto sale del lote: 10 kg de pollo crudo dan 6,5 cocidos ⇒ 65%">
+              <Input type="number" min={0} max={100} step="0.1" value={f.rendimientoPct} placeholder="100"
+                onChange={(e) => set('rendimientoPct', e.target.value)} className="num" />
+            </Field>
+            <Field label="Tolerancia %"
+              hint="cuánta desviación es normal. En blanco no se controla.">
+              <Input type="number" min={0} step="0.1" value={f.toleranciaPct} placeholder="—"
+                onChange={(e) => set('toleranciaPct', e.target.value)} className="num" />
+            </Field>
+          </div>
+        ) : null}
+
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[13px] font-semibold text-slate-700 dark:text-slate-300">Receta (insumos)</span>
@@ -2091,6 +2121,13 @@ function PlatoModal({ plato, insumos, monedaEmpresa, rubros = [], comanderas = [
                   </Select>
                   <Input type="number" min={0} step="0.001" value={r.cantidad} onChange={(e) => setRow(i, 'cantidad', e.target.value)} className="w-24" />
                   <span className="text-[11.5px] text-slate-400 w-10">{ins?.unidadBase || ''}</span>
+                  {/* MERMA DEL INSUMO: lo que se descarta al prepararlo (pelado,
+                      limpieza). Es suya, no del proceso: del tomate se bota el 10%
+                      entre en la receta que entre. En blanco, no hay merma. */}
+                  <Input type="number" min={0} max={99} step="0.1" value={r.mermaPct ?? ''} placeholder="0"
+                    title="Merma al preparar este insumo (%)"
+                    onChange={(e) => setRow(i, 'mermaPct', e.target.value)} className="w-16 num" />
+                  <span className="text-[11.5px] text-slate-400">% merma</span>
                   <button onClick={() => delRow(i)} className="p-1.5 rounded-md text-slate-400 hover:text-red-500"><Icon.Trash size={14} /></button>
                 </div>
               )

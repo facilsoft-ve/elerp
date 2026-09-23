@@ -156,6 +156,11 @@ func (s *Server) handleCrearProducto(c *fiber.Ctx) error {
 		// ModoFabricacion decide CUÁNDO se convierten los insumos: al venderlo
 		// (bajo pedido) o antes, con una orden (para stock).
 		ModoFabricacion string `json:"modoFabricacion"`
+		// La fórmula: para qué tanda está escrita, cuánto rinde y cuánta
+		// desviación es aceptable.
+		LoteBase       float64 `json:"loteBase"`
+		RendimientoPct float64 `json:"rendimientoPct"`
+		ToleranciaPct  float64 `json:"toleranciaPct"`
 		// Comandera por la que sale este producto (módulo Restaurante). Vacío =
 		// se rutea por su rubro.
 		ComanderaID string `json:"comanderaId"`
@@ -172,7 +177,8 @@ func (s *Server) handleCrearProducto(c *fiber.Ctx) error {
 		EsCombo: in.EsCombo, Componentes: in.Componentes,
 		EsPlato: in.EsPlato, Receta: in.Receta, EsInsumo: in.EsInsumo,
 		ModoFabricacion: in.ModoFabricacion,
-		ComanderaID:     in.ComanderaID,
+		LoteBase:        in.LoteBase, RendimientoPct: in.RendimientoPct, ToleranciaPct: in.ToleranciaPct,
+		ComanderaID: in.ComanderaID,
 	}
 	out, err := s.svc.CrearProducto(empresaIDOf(c), principalOf(c).UserID, origen(c), p)
 	if err != nil {
@@ -254,6 +260,9 @@ func (s *Server) handleActualizarProducto(c *fiber.Ctx) error {
 		EsInsumo        *bool                        `json:"esInsumo"`
 		Receta          []inventario.ComboComponente `json:"receta"`
 		ModoFabricacion *string                      `json:"modoFabricacion"`
+		LoteBase        *float64                     `json:"loteBase"`
+		RendimientoPct  *float64                     `json:"rendimientoPct"`
+		ToleranciaPct   *float64                     `json:"toleranciaPct"`
 		ComanderaID     *string                      `json:"comanderaId"`
 	}
 	if err := c.BodyParser(&in); err != nil {
@@ -262,7 +271,8 @@ func (s *Server) handleActualizarProducto(c *fiber.Ctx) error {
 	out, err := s.svc.ActualizarProducto(empresaIDOf(c), principalOf(c).UserID, origen(c), c.Params("sku"), application.CambiosProducto{
 		Nombre: in.Nombre, Rubro: in.Rubro, TipoVenta: in.TipoVenta, UnidadBase: in.UnidadBase,
 		ModoFabricacion: in.ModoFabricacion,
-		Precio:          in.Precio, Moneda: in.Moneda,
+		LoteBase:        in.LoteBase, RendimientoPct: in.RendimientoPct, ToleranciaPct: in.ToleranciaPct,
+		Precio: in.Precio, Moneda: in.Moneda,
 		CodigoBarras: in.CodigoBarras, ExentoIVA: in.ExentoIVA, AlicuotaCodigo: in.AlicuotaCodigo,
 		ConceptoISLR: in.ConceptoISLR,
 		RequiereLote: in.RequiereLote, ControlaVencimiento: in.ControlaVencimiento,

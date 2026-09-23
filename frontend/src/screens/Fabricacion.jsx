@@ -140,7 +140,15 @@ export function Fabricacion() {
                       <td className="py-2.5 pr-3 text-right num private-mask">
                         {o.costoUnitario > 0 ? fmtCurrency(o.costoUnitario, 'VES') : <span className="text-slate-300 dark:text-slate-600">—</span>}
                       </td>
-                      <td className="py-2.5 pr-3"><Badge size="sm" color={st.color}>{st.label}</Badge></td>
+                      <td className="py-2.5 pr-3">
+                        <Badge size="sm" color={st.color}>{st.label}</Badge>
+                        {/* Fuera de tolerancia no bloquea nada —la tanda ya salió—
+                            pero queda señalada: el valor del control está en que
+                            alguien mire las que se desviaron. */}
+                        {o.fueraDeTolerancia ? (
+                          <div className="mt-0.5"><Badge size="sm" color="amber">Rindió fuera de lo esperado</Badge></div>
+                        ) : null}
+                      </td>
                       <td className="py-2.5 pr-3 text-right whitespace-nowrap">
                         {o.estado === 'borrador' ? (
                           <Button size="sm" variant="secondary" loading={busy === o.id}
@@ -237,7 +245,15 @@ function NuevaOrdenModal({ productos, onClose, onCreada, toast }) {
         {plan ? (
           <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="px-3 py-2 text-[12px] bg-slate-50 dark:bg-slate-800/60 flex justify-between">
-              <span className="text-slate-500">Va a consumir</span>
+              <span className="text-slate-500">
+                Va a consumir
+                {/* De dónde salen las cantidades: sin esto, una receta «para 10»
+                    con 80% de rendimiento muestra números que no cuadran con lo
+                    que el usuario escribió, y parecen un error. */}
+                {plan.factor && plan.factor !== cant ? (
+                  <span className="text-slate-400"> · receta × {fmtNum(plan.factor, 2)}</span>
+                ) : null}
+              </span>
               <span className="num font-semibold">{fmtCurrency(plan.costoTotal, 'VES')}
                 <span className="text-slate-400 font-normal"> · {fmtCurrency(plan.costoUnitario, 'VES')} c/u</span></span>
             </div>

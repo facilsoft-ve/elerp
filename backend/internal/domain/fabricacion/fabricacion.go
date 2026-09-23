@@ -98,6 +98,11 @@ type Orden struct {
 	 * puede pasar es que el costo de los 20 se reparta entre los 18 sin que nadie
 	 * lo vea — por eso la merma queda explícita. */
 	CantidadProducida float64 `json:"cantidadProducida" bson:"cantidadproducida"`
+	/* FueraDeTolerancia marca que lo producido se apartó de lo esperado más de lo
+	 * que la fórmula declara aceptable. No bloquea nada —la tanda ya salió— pero
+	 * queda señalada: el valor de un control de producción está en que alguien
+	 * mire las que se desviaron, no en impedir que se desvíen. */
+	FueraDeTolerancia bool `json:"fueraDeTolerancia,omitempty" bson:"fueradetolerancia,omitempty"`
 
 	Estado string `json:"estado" bson:"estado"`
 
