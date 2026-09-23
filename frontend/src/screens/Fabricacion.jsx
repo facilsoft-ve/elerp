@@ -22,7 +22,16 @@ const ESTADOS = {
   cancelada: { label: 'Cancelada', color: 'slate' },
 }
 
-export function Fabricacion() {
+export function Fabricacion({ route, navigate }) {
+  const sub = (route || '').split(':')[1] || 'ordenes'
+  return (
+    <div>
+      {sub === 'formulas' ? <Formulas /> : <Ordenes irA={navigate} />}
+    </div>
+  )
+}
+
+function Ordenes({ irA = () => {} }) {
   const toast = useToast()
   const confirm = useConfirm()
   const { db, reload } = useData()
@@ -103,11 +112,16 @@ export function Fabricacion() {
       </div>
 
       {!conReceta.length ? (
-        <Empty icon={<Icon.Boxes size={22} />} title="Todavía no hay nada que fabricar"
-          body="Una orden de fabricación parte de la RECETA de un producto: qué insumos consume una unidad. Define la receta de un producto en el catálogo y vuelve acá." />
+        /* Decir DÓNDE se hace, no solo que falta. Antes remitía al catálogo, que
+           no edita fórmulas: quien activaba el módulo se quedaba mirando una
+           pantalla vacía sin saber por dónde empezar. */
+        <Empty icon={<Icon.Boxes size={22} />} title="Todavía no hay ninguna fórmula"
+          body="Una orden parte de la FÓRMULA de un producto: qué insumos consume, para qué tanda está escrita y cuánto rinde. Créala en «Fórmulas» y vuelve acá."
+          cta={puedeMover ? <Button icon={<Icon.Plus size={16} />} onClick={() => irA('fabricacion:formulas')}>Crear la primera fórmula</Button> : null} />
       ) : !fabricables.length ? (
         <Empty icon={<Icon.Boxes size={22} />} title="Tus productos con receta se preparan al venderlos"
-          body={`Hay ${conReceta.length} producto(s) con receta, pero todos están como «fabricar bajo pedido»: se preparan cuando se venden y no se guardan, así que no hay orden que hacer. Para producir antes y tener existencia —una bandeja de postres, un lote de pan—, cambia el producto a «fabricar para stock» en el catálogo.`} />
+          body={`Hay ${conReceta.length} producto(s) con fórmula, pero todos están como «fabricar bajo pedido»: se preparan cuando se venden y no se guardan, así que no hay orden que hacer. Para producir antes y tener existencia —una bandeja de postres, un lote de pan, una pieza armada—, cámbialo a «fabricar para stock» en Fórmulas.`}
+          cta={puedeMover ? <Button variant="secondary" onClick={() => irA('fabricacion:formulas')}>Ir a Fórmulas</Button> : null} />
       ) : lista.length === 0 ? (
         <Empty icon={<Icon.Boxes size={22} />} title="Sin órdenes en esta vista"
           body="Crea una orden para producir: la pantalla te dice si alcanzan los insumos y cuánto va a costar antes de sacar nada del almacén."
@@ -370,6 +384,240 @@ function FichaOrden({ orden: o, puedeMover = true, onClose, onTerminar }) {
               : ''}
           </div>
         ) : null}
+      </div>
+    </Modal>
+  )
+}
+
+/* FÓRMULAS — qué consume un producto, para qué tanda y cuánto rinde.
+ *
+ * VIVE ACÁ Y NO SOLO EN RESTAURANTE, y esa era la falla: la receta únicamente se
+ * podía definir dentro del módulo Restaurante, así que un taller que activaba
+ * Fabricación no tenía dónde crear nada — abría la pantalla, la veía vacía y no
+ * podía hacer una sola orden. El módulo prometía servir igual a una cocina que a
+ * un taller y solo servía a la cocina.
+ *
+ * El vocabulario también cambia: acá no hay «platos» ni comanderas. Hay un
+ * producto que se fabrica y los insumos que consume.
+ */
+function Formulas() {
+  const toast = useToast()
+  const confirm = useConfirm()
+  const { db, reload } = useData()
+  const { ui } = useUI()
+  const puedeEditar = ['dueno', 'desarrollador'].includes(ui.rol)
+  const [form, setForm] = useState(null)
+
+  const productos = db.PRODUCTOS || []
+  const conFormula = productos.filter((p) => (p.receta || []).length > 0)
+  // Insumos posibles: lo que se stockea y no es el propio producto. Un preparado
+  // que se fabrica para stock TAMBIÉN sirve —la salsa entra al sándwich— y eso
+  // es lo que permite encadenar fórmulas.
+  const insumos = productos.filter((p) => p.activo !== false && !p.esCombo && !p.esServicio
+    && (!p.esPlato || p.modoFabricacion === 'para_stock'))
+
+  const quitar = async (p) => {
+    if (!(await confirm({
+      title: `¿Quitar la fórmula de «${p.nombre}»?`,
+      body: 'El producto queda en el catálogo sin fórmula: deja de poder fabricarse. Lo ya producido no se toca.',
+      confirmLabel: 'Quitar fórmula', tone: 'danger',
+    }))) return
+    try {
+      await api.actualizarProducto(p.sku, { esPlato: false, receta: [] })
+      await reload()
+      toast({ title: 'Fórmula quitada', body: p.nombre })
+    } catch (e) {
+      toast({ title: 'No se pudo', body: e?.message || 'Error', kind: 'error' })
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <div className="text-[12.5px] text-slate-500 dark:text-slate-400 max-w-2xl">
+          Una fórmula dice <strong>qué consume</strong> el producto, <strong>para qué tanda</strong> está
+          escrita y <strong>cuánto rinde</strong>. De ahí sale el costo real de lo que fabriques: no se
+          teclea, se deriva de lo que salió del almacén.
+        </div>
+        {puedeEditar ? (
+          <Button size="sm" icon={<Icon.Plus size={15} />} onClick={() => setForm({})}>Nueva fórmula</Button>
+        ) : null}
+      </div>
+
+      {conFormula.length === 0 ? (
+        <Empty icon={<Icon.Boxes size={22} />} title="Sin fórmulas todavía"
+          body="Define qué insumos consume un producto y podrás producirlo con una orden: los insumos salen del almacén al arrancar y lo fabricado entra con su costo real."
+          cta={puedeEditar ? <Button icon={<Icon.Plus size={16} />} onClick={() => setForm({})}>Crear la primera</Button> : null} />
+      ) : (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60">
+                  <th className="py-2.5 px-3 font-medium">Producto</th>
+                  <th className="py-2.5 pr-3 font-medium">Insumos</th>
+                  <th className="py-2.5 pr-3 font-medium">Tanda / rinde</th>
+                  <th className="py-2.5 pr-3 font-medium">Cuándo se produce</th>
+                  <th className="py-2.5 pr-3 font-medium text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {conFormula.map((p) => (
+                  <tr key={p.sku} className="border-b border-slate-100 dark:border-slate-800/70">
+                    <td className="py-2.5 px-3">
+                      <div className="font-medium text-[13px]">{p.nombre}</div>
+                      <div className="text-[11px] text-slate-400 num">{p.sku}</div>
+                    </td>
+                    <td className="py-2.5 pr-3 text-[12.5px] text-slate-500">{(p.receta || []).length}</td>
+                    <td className="py-2.5 pr-3 text-[12.5px] num text-slate-500">
+                      {p.loteBase > 1 ? `para ${fmtNum(p.loteBase, 0)}` : 'por unidad'}
+                      {p.rendimientoPct > 0 && p.rendimientoPct < 100 ? ` · rinde ${fmtNum(p.rendimientoPct, 0)}%` : ''}
+                    </td>
+                    <td className="py-2.5 pr-3">
+                      {p.modoFabricacion === 'para_stock'
+                        ? <Badge size="sm" color="teal">Se fabrica y se guarda</Badge>
+                        : <Badge size="sm" color="slate">Se prepara al venderlo</Badge>}
+                    </td>
+                    <td className="py-2.5 pr-3 text-right whitespace-nowrap">
+                      {puedeEditar ? (
+                        <>
+                          <button className="text-[12.5px] text-elerp-600 dark:text-teal-400 font-medium"
+                            onClick={() => setForm(p)}>Editar</button>
+                          <button className="ml-3 text-[12.5px] text-slate-400 hover:text-[#B3362C]"
+                            onClick={() => quitar(p)}>Quitar</button>
+                        </>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {form ? <FormulaModal producto={form.sku ? form : null} insumos={insumos} toast={toast}
+        onClose={() => setForm(null)} onGuardada={async () => { setForm(null); await reload() }} /> : null}
+    </div>
+  )
+}
+
+function FormulaModal({ producto, insumos, toast, onClose, onGuardada }) {
+  const editar = !!producto
+  const [f, setF] = useState(() => ({
+    sku: producto?.sku || '', nombre: producto?.nombre || '', precio: producto?.precio || 0,
+    receta: (producto?.receta || []).map((r) => ({ ...r })),
+    modoFabricacion: producto?.modoFabricacion || 'para_stock',
+    loteBase: producto?.loteBase || '', rendimientoPct: producto?.rendimientoPct || '',
+    toleranciaPct: producto?.toleranciaPct || '',
+  }))
+  const [busy, setBusy] = useState(false)
+  const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
+  const setRow = (i, k, v) => setF((s) => ({ ...s, receta: s.receta.map((r, j) => (j === i ? { ...r, [k]: v } : r)) }))
+  const addRow = () => setF((s) => ({ ...s, receta: [...s.receta, { sku: '', cantidad: 1 }] }))
+  const delRow = (i) => setF((s) => ({ ...s, receta: s.receta.filter((_, j) => j !== i) }))
+
+  const guardar = async () => {
+    const receta = f.receta.filter((r) => r.sku && Number(r.cantidad) > 0)
+      .map((r) => ({ sku: r.sku, cantidad: Number(r.cantidad), mermaPct: Number(r.mermaPct) || 0 }))
+    if (!f.nombre.trim()) { toast({ title: 'Ponle nombre al producto', kind: 'warn' }); return }
+    if (!receta.length) { toast({ title: 'Agrega al menos un insumo', kind: 'warn' }); return }
+    const cuerpo = {
+      nombre: f.nombre.trim(), precio: Number(f.precio) || 0,
+      esPlato: true, receta, modoFabricacion: f.modoFabricacion,
+      loteBase: Number(f.loteBase) || 0, rendimientoPct: Number(f.rendimientoPct) || 0,
+      toleranciaPct: Number(f.toleranciaPct) || 0,
+    }
+    setBusy(true)
+    try {
+      if (editar) await api.actualizarProducto(f.sku, cuerpo)
+      else await api.createProducto({ ...cuerpo, sku: (f.sku || `FAB-${Date.now().toString(36).toUpperCase()}`).trim() })
+      toast({ title: editar ? 'Fórmula actualizada' : 'Fórmula creada', body: f.nombre })
+      await onGuardada()
+    } catch (e) {
+      toast({ title: 'No se pudo guardar', body: e?.message || 'Error', kind: 'error' })
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} size="md" icon={<Icon.Boxes size={18} />}
+      title={editar ? `Fórmula de ${producto.nombre}` : 'Nueva fórmula'}
+      sub="De acá sale el costo real de lo que fabriques"
+      footer={<>
+        <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+        <Button onClick={guardar} loading={busy}>{editar ? 'Guardar' : 'Crear'}</Button>
+      </>}>
+      <div className="space-y-3.5">
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Producto que se fabrica" required>
+            <Input value={f.nombre} autoFocus onChange={(e) => set('nombre', e.target.value)}
+              placeholder="Pieza armada, bandeja de brownies…" />
+          </Field>
+          <Field label="Precio de venta" hint="opcional si no se vende directo">
+            <Input type="number" min={0} value={f.precio} onChange={(e) => set('precio', e.target.value)} className="num" />
+          </Field>
+        </div>
+
+        <Field label="¿Cuándo se produce?"
+          hint={f.modoFabricacion === 'para_stock'
+            ? 'Con una orden, antes de venderlo. Queda en existencia y al venderlo se descuenta él, no sus insumos.'
+            : 'Al venderlo. No tiene existencia propia y descuenta sus insumos en ese momento — no se produce con órdenes.'}>
+          <Select value={f.modoFabricacion} onChange={(e) => set('modoFabricacion', e.target.value)}>
+            <option value="para_stock">Se fabrica y se guarda</option>
+            <option value="bajo_pedido">Se prepara al venderlo</option>
+          </Select>
+        </Field>
+
+        {f.modoFabricacion === 'para_stock' ? (
+          <div className="grid grid-cols-3 gap-2">
+            <Field label="La fórmula es para" hint="¿cuántas unidades? En blanco: una.">
+              <Input type="number" min={0} step="0.01" placeholder="1" value={f.loteBase}
+                onChange={(e) => set('loteBase', e.target.value)} className="num" />
+            </Field>
+            <Field label="Rendimiento %" hint="10 kg crudos dan 6,5 cocidos ⇒ 65%">
+              <Input type="number" min={0} max={100} step="0.1" placeholder="100" value={f.rendimientoPct}
+                onChange={(e) => set('rendimientoPct', e.target.value)} className="num" />
+            </Field>
+            <Field label="Tolerancia %" hint="en blanco no se controla">
+              <Input type="number" min={0} step="0.1" placeholder="—" value={f.toleranciaPct}
+                onChange={(e) => set('toleranciaPct', e.target.value)} className="num" />
+            </Field>
+          </div>
+        ) : null}
+
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[13px] font-semibold text-slate-700 dark:text-slate-300">Insumos que consume</span>
+            <Button size="sm" variant="ghost" icon={<Icon.Plus size={14} />} onClick={addRow}>Agregar</Button>
+          </div>
+          <div className="space-y-1.5">
+            {f.receta.length === 0
+              ? <div className="text-[12px] text-slate-400">Todavía ninguno. Agrega lo que consume una tanda.</div>
+              : null}
+            {f.receta.map((r, i) => {
+              const ins = insumos.find((x) => x.sku === r.sku)
+              return (
+                <div key={i} className="flex items-center gap-2">
+                  <Select value={r.sku} onChange={(e) => setRow(i, 'sku', e.target.value)} className="flex-1">
+                    <option value="">Elegir insumo…</option>
+                    {insumos.map((p) => <option key={p.sku} value={p.sku}>{p.nombre}</option>)}
+                  </Select>
+                  <Input type="number" min={0} step="0.001" value={r.cantidad}
+                    onChange={(e) => setRow(i, 'cantidad', e.target.value)} className="w-24 num" />
+                  <span className="text-[11.5px] text-slate-400 w-10">{ins?.unidadBase || ''}</span>
+                  <Input type="number" min={0} max={99} step="0.1" placeholder="0" value={r.mermaPct ?? ''}
+                    title="Merma al preparar este insumo (%)"
+                    onChange={(e) => setRow(i, 'mermaPct', e.target.value)} className="w-16 num" />
+                  <span className="text-[11.5px] text-slate-400">% merma</span>
+                  <button onClick={() => delRow(i)} className="p-1.5 rounded-md text-slate-400 hover:text-red-500">
+                    <Icon.Trash size={14} />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
       </div>
     </Modal>
   )

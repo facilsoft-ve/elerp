@@ -1996,6 +1996,10 @@ function PlatosRecetas() {
 
 function PlatoModal({ plato, insumos, monedaEmpresa, rubros = [], comanderas = [], costoDe, onClose, onGuardado, toast }) {
   const editar = !!plato
+  const { db } = useData()
+  // Restaurante funciona SOLO, y Fabricación también: lo único que no puede
+  // pasar es que uno ofrezca algo que el otro tendría que resolver y no está.
+  const hayFabricacion = (db.MODULOS || []).includes('fabricacion')
   const [f, setF] = useState(() => ({
     sku: plato?.sku || '', nombre: plato?.nombre || '', precio: plato?.precio || 0,
     exentoIva: !!plato?.exentoIva, receta: (plato?.receta || []).map((r) => ({ ...r })),
@@ -2071,13 +2075,25 @@ function PlatoModal({ plato, insumos, monedaEmpresa, rubros = [], comanderas = [
         {/* CUÁNDO SE CONVIERTEN LOS INSUMOS. Es la diferencia entre la pasta que se
             hace al pedirla y la bandeja de postres que ya está en la vitrina, y
             decide si el plato tiene existencia propia. */}
+        {/* «PARA STOCK» SOLO SE OFRECE CON FABRICACIÓN ACTIVA, y no es un detalle:
+            sin ese módulo el plato dejaría de consumir insumos al venderse y no
+            habría forma de producirlo — vendería contra existencia cero. Ofrecer
+            una opción que rompe el plato en silencio es peor que no ofrecerla.
+
+            Si YA estaba en para stock y después se desinstaló Fabricación, se
+            muestra igual y se dice qué pasa: esconderlo dejaría un plato
+            comportándose de un modo que la pantalla niega. */}
         <Field label="¿Cuándo se prepara?"
           hint={f.modoFabricacion === 'para_stock'
-            ? 'Se produce antes con una orden de fabricación y queda en existencia. Al venderlo se descuenta él, no sus insumos: ya se consumieron al fabricarlo.'
+            ? (hayFabricacion
+              ? 'Se produce antes con una orden de fabricación y queda en existencia. Al venderlo se descuenta él, no sus insumos: ya se consumieron al fabricarlo.'
+              : 'Está para stock pero el módulo de Fabricación no está activo: no hay cómo producirlo y vende contra existencia cero. Actívalo en Aplicaciones o vuélvelo «bajo pedido».')
             : 'Se prepara al venderlo y descuenta sus insumos en ese momento. No tiene existencia propia.'}>
           <Select value={f.modoFabricacion} onChange={(e) => set('modoFabricacion', e.target.value)}>
             <option value="bajo_pedido">Bajo pedido — se prepara al venderlo</option>
-            <option value="para_stock">Para stock — se fabrica antes y se guarda</option>
+            {hayFabricacion || f.modoFabricacion === 'para_stock' ? (
+              <option value="para_stock">Para stock — se fabrica antes y se guarda</option>
+            ) : null}
           </Select>
         </Field>
 

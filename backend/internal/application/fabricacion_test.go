@@ -532,3 +532,57 @@ func recetaDePrueba2(t *testing.T, svc *application.Service) (inventario.Product
 	}
 	return p, "INS-A", ""
 }
+
+/* LOS DOS MÓDULOS FUNCIONAN POR SEPARADO.
+ *
+ * Que puedan convivir no puede significar que se necesiten. Un taller activa
+ * Fabricación y nunca Restaurante; una cocina que prepara todo al momento activa
+ * Restaurante y nunca Fabricación. La prueba recorre las dos soledades.
+ */
+func TestFabricacion_FuncionaSinElModuloRestaurante(t *testing.T) {
+	svc, st := nuevoServicio(t)
+	svc.ConFabricacion(st.OrdenesFabricacion)
+	// Deliberadamente NO se cablea ConMesas ni ConCuentas: no hay restaurante.
+
+	plato, _, _ := recetaDePrueba(t, svc, inventario.FabricaParaStock)
+	o, err := svc.CrearOrdenFabricacion(empDemo, application.EntradaOrden{
+		SedeID: sede1, SKU: plato.SKU, Cantidad: 5, Actor: actorA, Origen: origenTst,
+	})
+	if err != nil {
+		t.Fatalf("fabricar sin restaurante tiene que poder: %v", err)
+	}
+	if o, err = svc.IniciarOrden(empDemo, o.ID, actorA, origenTst); err != nil {
+		t.Fatalf("iniciar: %v", err)
+	}
+	if _, err := svc.TerminarOrden(empDemo, o.ID, 5, actorA, origenTst); err != nil {
+		t.Fatalf("terminar: %v", err)
+	}
+	if got := stockDe(svc, plato.SKU); got != 5 {
+		t.Fatalf("lo producido tiene que estar en existencia: %v", got)
+	}
+}
+
+// Y al revés: un plato con receta se vende consumiendo sus insumos aunque el
+// módulo de fabricación no exista.
+func TestFabricacion_ElRestauranteFuncionaSinFabricacion(t *testing.T) {
+	svc, _ := nuevoServicio(t) // sin ConFabricacion
+	plato, insA, _ := recetaDePrueba(t, svc, inventario.FabricaBajoPedido)
+	antes := stockDe(svc, insA)
+
+	if _, err := svc.EmitirFactura(empDemo, sede1, "forma_libre", actorA, origenTst, application.EmitirEntrada{
+		Lineas:  []application.LineaEntrada{{SKU: plato.SKU, Cantidad: 2, PrecioUnitario: 500}},
+		Pagos:   []application.PagoEntrada{{Metodo: "efectivo_bs", Monto: 1160, Moneda: "VES"}},
+		SinCaja: true,
+	}); err != nil {
+		t.Fatalf("vender un plato sin el módulo de fabricación: %v", err)
+	}
+	if got := stockDe(svc, insA); got != antes-4 {
+		t.Fatalf("sigue consumiendo sus insumos al venderse: %v → %v", antes, got)
+	}
+	// Y pedir una orden sin el módulo se niega con claridad, no con un pánico.
+	if _, err := svc.CrearOrdenFabricacion(empDemo, application.EntradaOrden{
+		SedeID: sede1, SKU: plato.SKU, Cantidad: 1, Actor: actorA, Origen: origenTst,
+	}); err == nil {
+		t.Fatal("sin el módulo cableado, crear una orden tiene que negarse")
+	}
+}

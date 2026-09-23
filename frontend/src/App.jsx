@@ -241,7 +241,7 @@ function Shell() {
   else if (base === 'reportes') screen = <Reportes route={route} />
   else if (base === 'aplicaciones') screen = <Aplicaciones route={route} />
   else if (base === 'pedidos') screen = <Pedidos route={route} />
-  else if (base === 'fabricacion') screen = <Fabricacion />
+  else if (base === 'fabricacion') screen = <Fabricacion route={route} navigate={navigate} />
   else if (base === 'restaurante') screen = <Restaurante route={route} />
   else if (base === 'diseno') screen = <SistemaDiseno />
   else screen = <Placeholder route={route} />

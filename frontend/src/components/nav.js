@@ -54,6 +54,12 @@ export const NAV = [
   // él: un taller que arma piezas fabrica igual que una cocina que hornea.
   {
     id: 'fabricacion', label: 'Fabricación', grupo: 'OPERACIÓN', glyph: Icon.Boxes, roles: TODOS, ready: true, modulo: 'fabricacion',
+    subs: [
+      { id: 'ordenes', label: 'Órdenes de producción', grupo: 'Operación' },
+      // Las FÓRMULAS viven acá y no solo en Restaurante: un taller que activa
+      // Fabricación tiene que poder definir qué consume lo que produce.
+      { id: 'formulas', label: 'Fórmulas', grupo: 'Configuración', roles: ADMIN },
+    ],
   },
   {
     id: 'restaurante', label: 'Restaurante', grupo: 'OPERACIÓN', glyph: Icon.Utensils, roles: [...TODOS, 'mesonero'], ready: true, modulo: 'restaurante',
