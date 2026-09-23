@@ -542,7 +542,10 @@ export const api = {
   planearOrdenFabricacion: (body) => request('/api/fabricacion/planear', { method: 'POST', body: JSON.stringify(body) }),
   crearOrdenFabricacion: (body) => request('/api/fabricacion/ordenes', { method: 'POST', body: JSON.stringify(body) }),
   iniciarOrdenFabricacion: (id) => request(`/api/fabricacion/ordenes/${encodeURIComponent(id)}/iniciar`, { method: 'POST' }),
-  terminarOrdenFabricacion: (id, producida) => request(`/api/fabricacion/ordenes/${encodeURIComponent(id)}/terminar`, { method: 'POST', body: JSON.stringify({ producida }) }),
+  // El resultado no es una cifra: es un reparto. De una tanda de 15 pueden salir
+  // 10 buenos, 3 perdidos y 2 para reprocesar.
+  terminarOrdenFabricacion: (id, producida, resultados = []) => request(`/api/fabricacion/ordenes/${encodeURIComponent(id)}/terminar`, { method: 'POST', body: JSON.stringify({ producida, resultados }) }),
+  destinosFabricacion: () => request('/api/fabricacion/destinos'),
   cancelarOrdenFabricacion: (id, motivo) => request(`/api/fabricacion/ordenes/${encodeURIComponent(id)}/cancelar`, { method: 'POST', body: JSON.stringify({ motivo }) }),
 
   cotizarEnvio: (body) => request('/api/pedidos/cotizar-envio', { method: 'POST', body: JSON.stringify(body) }),

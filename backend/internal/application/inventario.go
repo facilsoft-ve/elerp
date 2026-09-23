@@ -132,6 +132,20 @@ func (s *Service) validarPlato(empresaID string, p *inventario.Producto) error {
 		p.TipoVenta = inventario.TipoVentaUnidad
 		p.UnidadBase = inventario.UnidadUnidad
 	}
+	/* EL MODO SE GUARDA EXPLÍCITO, nunca vacío.
+	 *
+	 * «Vacío significa bajo pedido» es una convención que cada lector tiene que
+	 * recordar, y el primero que la olvidó fue la propia pantalla: abría una
+	 * fórmula bajo pedido, veía el campo vacío, caía a su default «para stock» y
+	 * al guardar CONVERTÍA el producto en silencio — dejaba de consumir insumos al
+	 * venderse sin que nadie lo pidiera.
+	 *
+	 * Los registros viejos con vacío se siguen leyendo igual (SeFabricaParaStock
+	 * compara contra el valor explícito), pero de acá en adelante nadie tiene que
+	 * acordarse de nada. */
+	if p.ModoFabricacion != inventario.FabricaParaStock {
+		p.ModoFabricacion = inventario.FabricaBajoPedido
+	}
 	return nil
 }
 

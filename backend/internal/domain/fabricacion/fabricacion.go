@@ -103,6 +103,23 @@ type Orden struct {
 	 * queda señalada: el valor de un control de producción está en que alguien
 	 * mire las que se desviaron, no en impedir que se desvíen. */
 	FueraDeTolerancia bool `json:"fueraDeTolerancia,omitempty" bson:"fueradetolerancia,omitempty"`
+	/* Resultados es QUÉ PASÓ con lo que no salió bien, y no es una sola cosa: de
+	 * una tanda de 15 pueden salir 10 buenos, 3 perdidos y 2 que sirven para
+	 * reprocesar. Registrarlo como «3 de merma» borra la diferencia entre lo que
+	 * se botó y lo que se puede recuperar, que es justo la que decide si hay que
+	 * cambiar algo del proceso.
+	 *
+	 * Qué destinos existen depende del negocio —una panadería recicla, una
+	 * farmacia destruye— y por eso son un catálogo, no una bifurcación en el
+	 * código. */
+	Resultados []Resultado `json:"resultados,omitempty" bson:"resultados,omitempty"`
+	/* PerdidaAnormal es el costo que los buenos NO cargan.
+	 *
+	 * La merma dentro de la tolerancia es parte de producir: el pan bueno carga
+	 * con el quemado, y eso es lo que de verdad costó. La que se pasa de la
+	 * tolerancia no: cargarla al producto inflaría su costo y escondería el
+	 * problema dentro del margen. Va a pérdida del período, donde se ve. */
+	PerdidaAnormal float64 `json:"perdidaAnormal,omitempty" bson:"perdidaanormal,omitempty"`
 
 	Estado string `json:"estado" bson:"estado"`
 
@@ -161,6 +178,65 @@ type Evento struct {
 	Estado string `json:"estado" bson:"estado"`
 	Actor  string `json:"actor" bson:"actor"`
 	Nota   string `json:"nota,omitempty" bson:"nota,omitempty"`
+}
+
+/* DESTINOS de lo que no salió bien.
+ *
+ * La diferencia entre ellos NO es cosmética: decide si la mercancía sigue
+ * existiendo físicamente y si su valor se puede recuperar.
+ */
+const (
+	// DestinoPerdida: no queda nada. Se derramó, se evaporó, se quemó. No entra a
+	// ningún almacén porque no hay qué guardar.
+	DestinoPerdida = "perdida"
+	/* DestinoDescarte: existe y no se puede vender. Va al almacén de descarte a
+	 * COSTO CERO —su valor ya se reconoció como pérdida— porque mientras la
+	 * mercancía esté ahí tiene que poder contarse: si desaparece del sistema, el
+	 * conteo físico deja de cuadrar hasta que alguien la bote. */
+	DestinoDescarte = "descarte"
+	/* DestinoReproceso: sirve para volver a entrar a producción. También va al
+	 * almacén de descarte y también a costo cero, y esto último es deliberado:
+	 * valorar lo que todavía no se sabe si servirá es inventar un activo. Cuando
+	 * se reprocese, su costo será el de la nueva orden. */
+	DestinoReproceso = "reproceso"
+)
+
+// DestinoValido acota el destino al catálogo.
+func DestinoValido(d string) bool {
+	switch d {
+	case DestinoPerdida, DestinoDescarte, DestinoReproceso:
+		return true
+	}
+	return false
+}
+
+// Resultado es una porción de la tanda que no salió buena, con su destino.
+type Resultado struct {
+	Cantidad float64 `json:"cantidad" bson:"cantidad"`
+	Destino  string  `json:"destino" bson:"destino"`
+	// Motivo es obligatorio: un desperdicio sin explicación no sirve para decidir
+	// nada, y es lo único que distingue un mal día de un problema del proceso.
+	Motivo string `json:"motivo" bson:"motivo"`
+}
+
+// NoLogrado es todo lo que no salió bien, sea cual sea su destino.
+func (o Orden) NoLogrado() float64 {
+	t := 0.0
+	for _, r := range o.Resultados {
+		t += r.Cantidad
+	}
+	return t
+}
+
+// EnDestino suma lo que fue a parar a un destino concreto.
+func (o Orden) EnDestino(destino string) float64 {
+	t := 0.0
+	for _, r := range o.Resultados {
+		if r.Destino == destino {
+			t += r.Cantidad
+		}
+	}
+	return t
 }
 
 // Merma es lo que se planificó y no salió. Positiva cuando se produjo de menos.

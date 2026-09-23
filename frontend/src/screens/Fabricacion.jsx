@@ -15,6 +15,10 @@ import { api } from '../lib/api.js'
  * demás ya salieron del almacén es descubrirlo tarde.
  */
 
+// Etiqueta corta de cada destino para el listado. La larga y su ayuda vienen del
+// servidor, que es quien valida el catálogo.
+const DESTINO_CORTO = { perdida: 'pérdida', descarte: 'descarte', reproceso: 'para reprocesar' }
+
 const ESTADOS = {
   borrador: { label: 'Planificada', color: 'slate' },
   en_proceso: { label: 'En proceso', color: 'amber' },
@@ -160,6 +164,13 @@ function Ordenes({ irA = () => {} }) {
                             de {fmtNum(o.cantidad, 2)} planificadas
                           </div>
                         ) : null}
+                        {/* El reparto, no solo el total: lo botado y lo recuperable
+                            no son lo mismo y el listado es donde se comparan. */}
+                        {(o.resultados || []).map((r, i) => (
+                          <div key={i} className="text-[11px] text-slate-400">
+                            {fmtNum(r.cantidad, 2)} · {DESTINO_CORTO[r.destino] || r.destino}
+                          </div>
+                        ))}
                       </td>
                       <td className="py-2.5 pr-3 text-right num private-mask">
                         {o.costoUnitario > 0 ? fmtCurrency(o.costoUnitario, 'VES') : <span className="text-slate-300 dark:text-slate-600">—</span>}
@@ -180,7 +191,7 @@ function Ordenes({ irA = () => {} }) {
                         ) : null}
                         {o.estado === 'en_proceso' ? (
                           <Button size="sm" loading={busy === o.id} onClick={() => setAbierta(o)}>
-                            {puedeMover ? 'Terminar' : 'Ver'}
+                            {puedeMover ? 'Reportar resultado' : 'Ver'}
                           </Button>
                         ) : null}
                         {puedeMover && (o.estado === 'borrador' || o.estado === 'en_proceso') ? (
@@ -200,7 +211,8 @@ function Ordenes({ irA = () => {} }) {
       {nueva ? <NuevaOrdenModal productos={fabricables} onClose={() => setNueva(false)}
         onCreada={() => { setNueva(false); cargar() }} toast={toast} /> : null}
       {abierta ? <FichaOrden orden={abierta} puedeMover={puedeMover} onClose={() => setAbierta(null)}
-        onTerminar={(prod) => actuar(abierta, () => api.terminarOrdenFabricacion(abierta.id, prod), 'Producción ingresada al inventario')} /> : null}
+        onReportar={(prod, resultados) => actuar(abierta,
+          () => api.terminarOrdenFabricacion(abierta.id, prod, resultados), 'Resultado reportado')} /> : null}
     </div>
   )
 }
@@ -328,35 +340,105 @@ function NuevaOrdenModal({ productos, onClose, onCreada, toast }) {
   )
 }
 
-/* FichaOrden: qué consumió y, si está en proceso, cuánto salió de verdad. */
-function FichaOrden({ orden: o, puedeMover = true, onClose, onTerminar }) {
+/* FichaOrden — y, cuando la tanda está en el mesón, EL REPORTE DEL RESULTADO.
+ *
+ * El resultado de fabricar no es un número: es un reparto. De una tanda de 15
+ * pueden salir 10 buenos, 3 perdidos y 2 que sirven para reprocesar, y meterlos
+ * todos en «salieron 10» borra la diferencia entre lo que se botó y lo que se
+ * puede recuperar — que es justo la que dice si hay que cambiar algo del proceso.
+ */
+function FichaOrden({ orden: o, puedeMover = true, onClose, onReportar }) {
   const [producida, setProducida] = useState(String(o.cantidad))
+  const [filas, setFilas] = useState([])
+  const [destinos, setDestinos] = useState([])
   const st = ESTADOS[o.estado] || { label: o.estado, color: 'slate' }
   const enProceso = o.estado === 'en_proceso' && puedeMover
   const prod = Number(producida) || 0
+
+  useEffect(() => {
+    api.destinosFabricacion().then((r) => setDestinos(r?.destinos || [])).catch(() => setDestinos([]))
+  }, [])
+
+  const addFila = () => setFilas((s2) => [...s2, { cantidad: '', destino: 'perdida', motivo: '' }])
+  const setFila = (i, k, v) => setFilas((s2) => s2.map((x, j) => (j === i ? { ...x, [k]: v } : x)))
+  const delFila = (i) => setFilas((s2) => s2.filter((_, j) => j !== i))
+
+  const noLogrado = filas.reduce((a, x) => a + (Number(x.cantidad) || 0), 0)
+  // Falta explicar lo que no salió: si lo declarado no suma lo planificado, hay
+  // unidades sin destino y nadie va a saber después qué pasó con ellas.
+  const sinExplicar = Math.round((o.cantidad - prod - noLogrado) * 100) / 100
+  const faltaMotivo = filas.some((x) => Number(x.cantidad) > 0 && !String(x.motivo || '').trim())
+
+  const reportar = () => onReportar(prod, filas
+    .filter((x) => Number(x.cantidad) > 0)
+    .map((x) => ({ cantidad: Number(x.cantidad), destino: x.destino, motivo: x.motivo.trim() })))
 
   return (
     <Modal open onClose={onClose} size="md" icon={<Icon.Boxes size={18} />}
       title={`${o.numeroCompleto} · ${o.nombre}`} sub={st.label}
       footer={enProceso ? <>
         <Button variant="ghost" onClick={onClose}>Cerrar</Button>
-        <Button onClick={() => onTerminar(prod)} disabled={prod <= 0} icon={<Icon.Check size={16} />}>
-          Terminar e ingresar al inventario
+        <Button onClick={reportar} disabled={faltaMotivo} icon={<Icon.Check size={16} />}>
+          Reportar resultado
         </Button>
       </> : <Button variant="ghost" onClick={onClose}>Cerrar</Button>}>
       <div className="space-y-3.5 text-[13px]">
         {enProceso ? (
-          <Field label="¿Cuántas salieron de verdad?"
-            hint="de una masa para 20 panes salen 18: el costo se reparte entre los que salieron, y la diferencia queda registrada como merma">
-            <Input type="number" inputMode="decimal" min="0" step="0.01" value={producida}
-              onChange={(e) => setProducida(e.target.value)} className="num" autoFocus />
-          </Field>
+          <>
+            <Field label="¿Cuántas salieron BIEN?"
+              hint="Lo que entra al inventario. Cero es una respuesta válida: la tanda se perdió entera.">
+              <Input type="number" inputMode="decimal" min="0" step="0.01" value={producida}
+                onChange={(e) => setProducida(e.target.value)} className="num" autoFocus />
+            </Field>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[13px] font-semibold text-slate-700 dark:text-slate-300">¿Y lo que no salió bien?</span>
+                <Button size="sm" variant="ghost" icon={<Icon.Plus size={14} />} onClick={addFila}>Agregar</Button>
+              </div>
+              {filas.length === 0 ? (
+                <div className="text-[12px] text-slate-400">
+                  Nada más que declarar. Si parte de la tanda se perdió o sirve para reprocesar, agrégalo:
+                  lo botado y lo recuperable no son lo mismo.
+                </div>
+              ) : null}
+              <div className="space-y-1.5">
+                {filas.map((x, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Input type="number" min="0" step="0.01" value={x.cantidad} placeholder="0"
+                      onChange={(e) => setFila(i, 'cantidad', e.target.value)} className="w-20 num" />
+                    <Select value={x.destino} onChange={(e) => setFila(i, 'destino', e.target.value)} className="w-44">
+                      {destinos.map((d) => <option key={d.codigo} value={d.codigo}>{d.nombre}</option>)}
+                    </Select>
+                    <Input value={x.motivo} placeholder="¿Qué pasó?"
+                      onChange={(e) => setFila(i, 'motivo', e.target.value)} className="flex-1" />
+                    <button onClick={() => delFila(i)} className="p-1.5 rounded-md text-slate-400 hover:text-red-500">
+                      <Icon.Trash size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              {filas.length ? (
+                <div className="mt-1.5 text-[11.5px] text-slate-400">
+                  {destinos.find((d) => d.codigo === filas[filas.length - 1].destino)?.ayuda}
+                </div>
+              ) : null}
+              {sinExplicar > 0.005 ? (
+                <div className="mt-2 rounded-lg px-3 py-2 text-[12.5px]"
+                  style={{ background: '#FFF7E8', border: '1px solid #EEDCB4', color: '#92600A' }}>
+                  Quedan <strong>{fmtNum(sinExplicar, 2)}</strong> sin explicar de las {fmtNum(o.cantidad, 2)}
+                  {' '}planificadas. Puedes reportarlo igual —a veces simplemente rinde menos— pero si se
+                  perdieron o se pueden recuperar, decirlo ahora es la única oportunidad.
+                </div>
+              ) : null}
+            </div>
+          </>
         ) : null}
 
         {(o.consumos || []).length ? (
           <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
             <div className="px-3 py-2 text-[12px] text-slate-500 bg-slate-50 dark:bg-slate-800/60">
-              Consumió — congelado al arrancar, porque la receta puede cambiar mañana
+              Consumió — congelado al arrancar, porque la fórmula puede cambiar mañana
             </div>
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
               {o.consumos.map((c) => (
@@ -375,14 +457,39 @@ function FichaOrden({ orden: o, puedeMover = true, onClose, onTerminar }) {
           <div className="text-[12.5px] text-slate-400">Todavía no ha consumido nada: los insumos salen al arrancar.</div>
         )}
 
+        {/* EL REGISTRO DE LO QUE PASÓ, una vez reportado. */}
         {o.estado === 'terminada' ? (
-          <div className="rounded-lg px-3 py-2 text-[12.5px]" style={{ background: '#EAF5EF', color: '#166B41' }}>
-            Ingresaron <strong>{fmtNum(o.cantidadProducida, 2)}</strong> al inventario
-            a <strong>{fmtCurrency(o.costoUnitario, 'VES')}</strong> cada una.
-            {o.cantidad !== o.cantidadProducida
-              ? ` Merma: ${fmtNum(o.cantidad - o.cantidadProducida, 2)} — su costo lo absorbieron las que sí salieron.`
-              : ''}
-          </div>
+          <>
+            <div className="rounded-lg px-3 py-2 text-[12.5px]" style={{ background: '#EAF5EF', color: '#166B41' }}>
+              Entraron <strong>{fmtNum(o.cantidadProducida, 2)}</strong> al inventario
+              a <strong>{fmtCurrency(o.costoUnitario, 'VES')}</strong> cada una.
+            </div>
+            {(o.resultados || []).length ? (
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <div className="px-3 py-2 text-[12px] text-slate-500 bg-slate-50 dark:bg-slate-800/60">Lo que no salió bien</div>
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {o.resultados.map((r, i) => (
+                    <div key={i} className="px-3 py-1.5 flex justify-between gap-3">
+                      <span>
+                        <span className="num">{fmtNum(r.cantidad, 2)}</span>
+                        {' · '}{destinos.find((d) => d.codigo === r.destino)?.nombre || r.destino}
+                      </span>
+                      <span className="text-slate-500 text-right">{r.motivo}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {o.perdidaAnormal > 0 ? (
+              /* La merma que se pasa de la tolerancia NO la cargan los buenos:
+                 inflaría su costo y escondería el problema dentro del margen. */
+              <div className="rounded-lg px-3 py-2 text-[12.5px]"
+                style={{ background: '#FBEDEB', border: '1px solid #ECC8C4', color: '#B3362C' }}>
+                <strong>{fmtCurrency(o.perdidaAnormal, 'VES')}</strong> fueron a pérdida del período: es la
+                merma que se pasó de la tolerancia, y no la cargan las unidades buenas.
+              </div>
+            ) : null}
+          </>
         ) : null}
       </div>
     </Modal>
@@ -507,7 +614,11 @@ function FormulaModal({ producto, insumos, toast, onClose, onGuardada }) {
   const [f, setF] = useState(() => ({
     sku: producto?.sku || '', nombre: producto?.nombre || '', precio: producto?.precio || 0,
     receta: (producto?.receta || []).map((r) => ({ ...r })),
-    modoFabricacion: producto?.modoFabricacion || 'para_stock',
+    /* El modo se lee tal cual viene: solo «para_stock» es para stock, y CUALQUIER
+     * otra cosa —incluido el vacío de los registros viejos— es bajo pedido.
+     * Caer a «para stock» por defecto era lo que convertía el producto al
+     * guardar, sin que nadie lo hubiera pedido. */
+    modoFabricacion: producto?.modoFabricacion === 'para_stock' ? 'para_stock' : 'bajo_pedido',
     loteBase: producto?.loteBase || '', rendimientoPct: producto?.rendimientoPct || '',
     toleranciaPct: producto?.toleranciaPct || '',
   }))

@@ -18,14 +18,22 @@ const (
 	TipoDevoluciones = "devoluciones"
 	TipoMateriaPrima = "materia_prima"
 	TipoCuarentena   = "cuarentena"
-	TipoRefrigerado  = "refrigerado"
+	/* TipoDescarte es a donde va lo que YA NO SE PUEDE VENDER: lo vencido, lo
+	 * dañado, la tanda que salió mal y todavía no se ha destruido.
+	 *
+	 * Es distinto de cuarentena —ahí lo retenido espera una decisión— y de
+	 * simplemente ajustar el stock a la baja: mientras la mercancía existe
+	 * físicamente tiene que estar en algún sitio, y si desaparece del sistema el
+	 * conteo físico deja de cuadrar hasta que alguien la bote. */
+	TipoDescarte    = "descarte"
+	TipoRefrigerado = "refrigerado"
 )
 
 // TipoValido indica si el tipo es uno de los admitidos.
 func TipoValido(t string) bool {
 	switch t {
 	case TipoPrincipal, TipoGeneral, TipoTransito, TipoDevoluciones,
-		TipoMateriaPrima, TipoCuarentena, TipoRefrigerado:
+		TipoMateriaPrima, TipoCuarentena, TipoRefrigerado, TipoDescarte:
 		return true
 	}
 	return false

@@ -2004,7 +2004,7 @@ function PlatoModal({ plato, insumos, monedaEmpresa, rubros = [], comanderas = [
     sku: plato?.sku || '', nombre: plato?.nombre || '', precio: plato?.precio || 0,
     exentoIva: !!plato?.exentoIva, receta: (plato?.receta || []).map((r) => ({ ...r })),
     rubro: plato?.rubro || '', comanderaId: plato?.comanderaId || '',
-    modoFabricacion: plato?.modoFabricacion || 'bajo_pedido',
+    modoFabricacion: plato?.modoFabricacion === 'para_stock' ? 'para_stock' : 'bajo_pedido',
     loteBase: plato?.loteBase || '', rendimientoPct: plato?.rendimientoPct || '',
     toleranciaPct: plato?.toleranciaPct || '',
   }))

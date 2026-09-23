@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mornix/elerp/internal/domain/almacen"
 	"github.com/mornix/elerp/internal/domain/contabilidad"
 	"github.com/mornix/elerp/internal/domain/fabricacion"
 	"github.com/mornix/elerp/internal/domain/inventario"
@@ -243,12 +244,56 @@ func (s *Service) IniciarOrden(empresaID, id, actor, origen string) (fabricacion
  * Producir de más también se acepta: la merma sale negativa y queda a la vista.
  */
 func (s *Service) TerminarOrden(empresaID, id string, producida float64, actor, origen string) (fabricacion.Orden, error) {
+	return s.CerrarOrden(empresaID, id, actor, origen, CierreOrden{Producida: producida})
+}
+
+/* CierreOrden es el REPORTE DEL RESULTADO: cuánto salió bien y qué pasó con lo
+ * demás. No es una cifra sino un reparto — de una tanda de 15 pueden salir 10
+ * buenos, 3 perdidos y 2 para reprocesar.
+ */
+type CierreOrden struct {
+	Producida  float64
+	Resultados []fabricacion.Resultado
+}
+
+/* CerrarOrden reporta el resultado de la fabricación.
+ *
+ * TRES DECISIONES QUE PARECEN CONTABLES Y SON DE NEGOCIO:
+ *
+ *  1. Solo lo BUENO entra al inventario a su costo. Lo demás no es producto.
+ *  2. Lo que sigue EXISTIENDO —descarte y reproceso— entra al almacén de
+ *     descarte a COSTO CERO. Su valor ya se reconoció como pérdida; lo que hace
+ *     falta es poder contarlo, porque mientras esté ahí el conteo físico tiene
+ *     que cuadrar. Valorar lo que no se sabe si servirá sería inventar un activo.
+ *  3. La merma DENTRO de la tolerancia la cargan los buenos —el pan bueno carga
+ *     con el quemado, y eso es lo que de verdad costó—. La que se PASA, no:
+ *     inflaría el costo del producto y escondería el problema en el margen.
+ */
+func (s *Service) CerrarOrden(empresaID, id, actor, origen string, in CierreOrden) (fabricacion.Orden, error) {
 	o, err := s.ordenParaCambio(empresaID, id, fabricacion.EstadoTerminada)
 	if err != nil {
 		return fabricacion.Orden{}, err
 	}
-	if producida <= 0 {
-		producida = o.Cantidad
+	producida := in.Producida
+	if producida < 0 {
+		producida = 0
+	}
+	/* CERO ES UNA RESPUESTA VÁLIDA: la tanda se perdió entera. Antes cero se leía
+	 * como «no declaró nada» y se sustituía por lo planificado, así que una pérdida
+	 * total quedaba registrada como producción completa — al revés de lo que pasó. */
+	for i, r := range in.Resultados {
+		if r.Cantidad <= 0 {
+			continue
+		}
+		if !fabricacion.DestinoValido(r.Destino) {
+			return fabricacion.Orden{}, fmt.Errorf("destino desconocido para lo que no salió bien: %q", r.Destino)
+		}
+		if strings.TrimSpace(r.Motivo) == "" {
+			return fabricacion.Orden{}, errors.New("hace falta decir qué pasó: un desperdicio sin explicación no sirve para decidir nada")
+		}
+		in.Resultados[i].Cantidad = round2(r.Cantidad)
+		in.Resultados[i].Motivo = strings.TrimSpace(r.Motivo)
+		o.Resultados = append(o.Resultados, in.Resultados[i])
 	}
 	o.CantidadProducida = round2(producida)
 	/* ¿SE DESVIÓ DE LO ESPERADO? Hasta ahora la orden no podía saberlo: consumía
@@ -259,19 +304,56 @@ func (s *Service) TerminarOrden(empresaID, id string, producida float64, actor, 
 	if p, ok := s.productos.ByID(empresaID, o.ProductoID); ok {
 		o.FueraDeTolerancia = !p.DesviacionAceptable(o.Cantidad, o.CantidadProducida)
 	}
-	o.CostoUnitario = 0
-	if o.CantidadProducida > 0 {
-		o.CostoUnitario = round2(o.CostoTotal / o.CantidadProducida)
+	/* EL COSTO UNITARIO, y dónde cae lo que los buenos no deben cargar. */
+	absorbible := o.CantidadProducida
+	if p, ok := s.productos.ByID(empresaID, o.ProductoID); ok && o.FueraDeTolerancia && p.ToleranciaPct > 0 {
+		if normal := round2(o.Cantidad * (1 - p.ToleranciaPct/100)); normal > absorbible {
+			absorbible = normal
+		}
 	}
-	s.movimientos.Append(inventario.Movimiento{
-		EmpresaID: empresaID, SedeID: o.SedeID, AlmacenID: o.AlmacenID,
-		ProductoID: o.ProductoID, SKU: o.SKU,
-		Tipo: inventario.MovEntrada, Cantidad: o.CantidadProducida, CostoUnitario: o.CostoUnitario,
-		Lote: o.Lote, Vencimiento: o.Vencimiento,
-		Motivo:  "fabricación " + o.NumeroCompleto,
-		RefTipo: RefFabricacion, RefID: o.ID,
-		Actor: actor, Fecha: ahora(),
-	})
+	o.CostoUnitario, o.PerdidaAnormal = 0, 0
+	if absorbible > 0 {
+		o.CostoUnitario = round2(o.CostoTotal / absorbible)
+		o.PerdidaAnormal = round2(o.CostoTotal - o.CostoUnitario*o.CantidadProducida)
+	} else {
+		// Nada salió bien: el costo entero es pérdida. No hay producto que lo cargue.
+		o.PerdidaAnormal = o.CostoTotal
+	}
+	if o.PerdidaAnormal < 0.005 {
+		o.PerdidaAnormal = 0
+	}
+	// Solo entra al inventario lo que salió BIEN. Una tanda perdida entera no
+	// ingresa nada: su costo ya quedó como pérdida.
+	if o.CantidadProducida > 0 {
+		s.movimientos.Append(inventario.Movimiento{
+			EmpresaID: empresaID, SedeID: o.SedeID, AlmacenID: o.AlmacenID,
+			ProductoID: o.ProductoID, SKU: o.SKU,
+			Tipo: inventario.MovEntrada, Cantidad: o.CantidadProducida, CostoUnitario: o.CostoUnitario,
+			Lote: o.Lote, Vencimiento: o.Vencimiento,
+			Motivo:  "fabricación " + o.NumeroCompleto,
+			RefTipo: RefFabricacion, RefID: o.ID,
+			Actor: actor, Fecha: ahora(),
+		})
+	}
+	/* LO QUE SIGUE EXISTIENDO va al almacén de descarte, a costo cero. Sin un
+	 * almacén de descarte no se mueve nada: queda el registro en la orden, que es
+	 * mejor que meter mercancía inservible en el almacén bueno. */
+	if alm := s.almacenDeDescarte(empresaID, o.SedeID); alm != "" {
+		for _, r := range o.Resultados {
+			if r.Destino == fabricacion.DestinoPerdida || r.Cantidad <= 0 {
+				continue // no queda nada que guardar
+			}
+			s.movimientos.Append(inventario.Movimiento{
+				EmpresaID: empresaID, SedeID: o.SedeID, AlmacenID: alm,
+				ProductoID: o.ProductoID, SKU: o.SKU,
+				Tipo: inventario.MovEntrada, Cantidad: r.Cantidad, CostoUnitario: 0,
+				Lote: o.Lote, Vencimiento: o.Vencimiento,
+				Motivo:  r.Destino + " de " + o.NumeroCompleto + " — " + r.Motivo,
+				RefTipo: RefFabricacion, RefID: o.ID,
+				Actor: actor, Fecha: ahora(),
+			})
+		}
+	}
 	o.Terminada = ahora()
 	o = s.marcarOrden(o, fabricacion.EstadoTerminada, actor, "")
 	out, _ := s.ordenesFabricacion.Update(o)
@@ -376,6 +458,26 @@ func (s *Service) asentarFabricacion(empresaID, actor string, o fabricacion.Orde
 		}
 		salidas[cta] = round2(salidas[cta] + c.Total())
 	}
+	/* LA PÉRDIDA ANORMAL SALE DEL INVENTARIO Y VA A RESULTADOS.
+	 *
+	 * Es valor que se consumió y no quedó en ningún producto. Dejarlo dentro del
+	 * inventario lo dejaría contando mercancía que no existe; cargárselo a los
+	 * buenos inflaría su costo. Va a costo del período, que es donde se ve. */
+	if o.PerdidaAnormal > 0.004 {
+		origenPerdida := destino
+		for _, c := range o.Consumos {
+			if cta := s.cuentaInventarioDe(empresaID, c.ProductoID); cta != "" {
+				origenPerdida = cta
+				break
+			}
+		}
+		s.asentar(empresaID, actor, o.Terminada,
+			"Merma anormal de fabricación "+o.NumeroCompleto+" — "+o.Nombre, RefFabricacion, o.ID,
+			[]contabilidad.Linea{
+				{Codigo: contabilidad.CtaCostoDeVentas, Debe: o.PerdidaAnormal},
+				{Codigo: origenPerdida, Haber: o.PerdidaAnormal},
+			})
+	}
 	if len(salidas) == 0 {
 		return
 	}
@@ -388,4 +490,19 @@ func (s *Service) asentarFabricacion(empresaID, actor string, o fabricacion.Orde
 	lineas = append([]contabilidad.Linea{{Codigo: destino, Debe: total}}, lineas...)
 	s.asentar(empresaID, actor, o.Terminada,
 		"Fabricación "+o.NumeroCompleto+" — "+o.Nombre, RefFabricacion, o.ID, lineas)
+}
+
+// almacenDeDescarte busca el almacén donde va lo que ya no se puede vender.
+// Vacío si la empresa no tiene ninguno: entonces solo queda el registro en la
+// orden, que es preferible a meter mercancía inservible en el almacén bueno.
+func (s *Service) almacenDeDescarte(empresaID, sedeID string) string {
+	if s.almacenes == nil {
+		return ""
+	}
+	for _, a := range s.almacenes.List(empresaID) {
+		if a.Tipo == almacen.TipoDescarte && a.Activo && (a.SedeID == sedeID || a.SedeID == "") {
+			return a.ID
+		}
+	}
+	return ""
 }

@@ -4,6 +4,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/mornix/elerp/internal/application"
+	"github.com/mornix/elerp/internal/domain/fabricacion"
 	"github.com/mornix/elerp/internal/domain/usuario"
 )
 
@@ -24,6 +25,9 @@ func (s *Server) registrarFabricacion(api fiber.Router) {
 	// Planear NO escribe: es lo que deja ver si alcanza y cuánto va a costar
 	// ANTES de sacar los insumos del almacén.
 	g.Post("/planear", ver, s.handlePlanearOrden)
+	// El catálogo de destinos lo da el servidor, que es quien valida: tenerlo
+	// escrito en la pantalla se desincroniza.
+	g.Get("/destinos", ver, s.handleDestinosFabricacion)
 
 	g.Post("/ordenes", s.escribirInventario, s.handleCrearOrdenFabricacion)
 	g.Post("/ordenes/:id/iniciar", s.escribirInventario, s.handleIniciarOrden)
@@ -95,10 +99,16 @@ func (s *Server) handleIniciarOrden(c *fiber.Ctx) error {
 
 func (s *Server) handleTerminarOrden(c *fiber.Ctx) error {
 	var in struct {
+		// Producida es lo que salió BIEN. Cero es una respuesta válida: la tanda se
+		// perdió entera.
 		Producida float64 `json:"producida"`
+		// Resultados reparte lo que NO salió bien entre sus destinos: de una tanda
+		// de 15 pueden salir 10 buenos, 3 perdidos y 2 para reprocesar.
+		Resultados []fabricacion.Resultado `json:"resultados"`
 	}
 	_ = c.BodyParser(&in)
-	out, err := s.svc.TerminarOrden(empresaIDOf(c), c.Params("id"), in.Producida, principalOf(c).UserID, origen(c))
+	out, err := s.svc.CerrarOrden(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c),
+		application.CierreOrden{Producida: in.Producida, Resultados: in.Resultados})
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -115,4 +125,18 @@ func (s *Server) handleCancelarOrden(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(out)
+}
+
+// handleDestinosFabricacion lista a dónde puede ir lo que no salió bien. Qué
+// destinos tienen sentido depende del negocio —una panadería recicla, una
+// farmacia destruye— pero el catálogo es uno solo y lo valida el servidor.
+func (s *Server) handleDestinosFabricacion(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"destinos": []fiber.Map{
+		{"codigo": fabricacion.DestinoPerdida, "nombre": "Pérdida",
+			"ayuda": "No queda nada: se derramó, se quemó, se evaporó."},
+		{"codigo": fabricacion.DestinoDescarte, "nombre": "Descarte",
+			"ayuda": "Existe y no se puede vender. Va al almacén de descarte hasta que se destruya."},
+		{"codigo": fabricacion.DestinoReproceso, "nombre": "Para reprocesar",
+			"ayuda": "Sirve para volver a entrar a producción."},
+	}})
 }
