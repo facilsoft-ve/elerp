@@ -100,7 +100,11 @@ func (s *Service) valorDelRubro(empresaID, rubro string) float64 {
 	}
 	total := 0.0
 	for _, p := range s.productos.List(empresaID) {
-		if p.Rubro != rubro || p.EsCombo || p.EsPlato {
+		// Se cuenta lo que TIENE existencia. Un plato fabricado para stock la tiene
+		// —está en la vitrina— y dejarlo fuera haría que la reclasificación mueva
+		// menos valor del que hay, y que la cuenta del rubro quede corta contra la
+		// valoración, que sí lo cuenta.
+		if p.Rubro != rubro || !p.SeStockea() {
 			continue
 		}
 		cant, avg := fold(s.movimientos.List(empresaID, inventario.FiltroMovimiento{ProductoID: p.ID}))

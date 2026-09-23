@@ -110,13 +110,28 @@ func (s *Service) validarPlato(empresaID string, p *inventario.Producto) error {
 		if !ok || !ins.Activo {
 			return fmt.Errorf("%w: %s", ErrPlatoInsumoInvalido, sku)
 		}
-		if ins.EsCombo || ins.EsPlato {
+		/* UNA RECETA PUEDE USAR OTRO PREPARADO, si ese se fabrica PARA STOCK.
+		 *
+		 * La salsa se produce con su propia orden, entra al inventario, y el
+		 * sándwich la consume como cualquier insumo. Lo que sigue prohibido es
+		 * anidar un plato BAJO PEDIDO: ese no tiene existencia, así que no hay nada
+		 * que consumir — la orden pediría algo que no está en ningún estante. */
+		if ins.EsCombo || (ins.EsPlato && !ins.SeFabricaParaStock()) {
 			return fmt.Errorf("%w: %s", ErrPlatoAnidado, sku)
 		}
 		p.Receta[i].SKU = sku
 	}
-	p.TipoVenta = inventario.TipoVentaUnidad
-	p.UnidadBase = inventario.UnidadUnidad
+	/* LA UNIDAD SOLO SE FUERZA EN EL PLATO BAJO PEDIDO.
+	 *
+	 * Uno que se prepara al venderlo no tiene existencia, así que su unidad es
+	 * nominal y «unidad» es lo único que significa algo. Pero uno FABRICADO PARA
+	 * STOCK es mercancía de verdad: una torta se produce y se vende POR KILO, y
+	 * forzarle «unidad» dejaba ese caso imposible de representar — lo fabricado y
+	 * lo vendido serían unidades distintas y el inventario no cerraría. */
+	if !p.SeFabricaParaStock() {
+		p.TipoVenta = inventario.TipoVentaUnidad
+		p.UnidadBase = inventario.UnidadUnidad
+	}
 	return nil
 }
 

@@ -453,3 +453,82 @@ func TestFabricacion_LoFabricadoParaStockNoVaACocina(t *testing.T) {
 }
 
 func ptrS(v string) *string { return &v }
+
+/* EL PLATO FABRICADO QUE SE VENDE POR PESO.
+ *
+ * Una torta se produce «una torta» y se vende POR KILO. Hasta ahora era
+ * imposible de representar: marcar un producto como plato le forzaba la unidad,
+ * así que lo fabricado y lo vendido eran unidades distintas y el inventario no
+ * podía cerrar.
+ *
+ * La restricción tenía sentido cuando todo plato era bajo pedido —sin existencia,
+ * la unidad es nominal— y dejó de tenerlo cuando un plato puede ser mercancía.
+ */
+func TestFormula_UnPlatoFabricadoSePuedeVenderPorPeso(t *testing.T) {
+	svc, _ := servicioFabricacion(t)
+	plato, _, _ := recetaDePrueba(t, svc, inventario.FabricaParaStock)
+
+	porPeso, err := svc.ActualizarProducto(empDemo, actorA, origenTst, plato.SKU,
+		application.CambiosProducto{
+			TipoVenta:  inventario.TipoVentaPeso,
+			UnidadBase: inventario.UnidadKg,
+		})
+	if err != nil {
+		t.Fatalf("pasar a peso: %v", err)
+	}
+	if porPeso.TipoVenta != inventario.TipoVentaPeso || porPeso.UnidadBase != inventario.UnidadKg {
+		t.Fatalf("un plato fabricado para stock tiene que poder venderse por kilo: %q / %q",
+			porPeso.TipoVenta, porPeso.UnidadBase)
+	}
+
+	// Y el bajo pedido sigue forzado a unidad: sin existencia, su unidad es nominal.
+	bajo, _, _ := recetaDePrueba2(t, svc)
+	if bajo.TipoVenta != inventario.TipoVentaUnidad {
+		t.Fatalf("un plato bajo pedido se sigue vendiendo por unidad: %q", bajo.TipoVenta)
+	}
+}
+
+/* UNA RECETA PUEDE USAR OTRO PREPARADO, si ese se fabrica para stock.
+ *
+ * La salsa se produce con su propia orden, entra al inventario, y el sándwich la
+ * consume como cualquier insumo. Lo que sigue prohibido es anidar uno BAJO
+ * PEDIDO: ese no tiene existencia, así que la orden pediría algo que no está en
+ * ningún estante.
+ */
+func TestFormula_UnPreparadoParaStockPuedeSerInsumoDeOtro(t *testing.T) {
+	svc, _ := servicioFabricacion(t)
+	salsa, _, _ := recetaDePrueba(t, svc, inventario.FabricaParaStock)
+
+	_, err := svc.CrearProducto(empDemo, actorA, origenTst, inventario.Producto{
+		EmpresaID: empDemo, SKU: "SANDWICH", Nombre: "Sándwich", EsPlato: true, Activo: true,
+		Precio: 300, Receta: []inventario.ComboComponente{{SKU: salsa.SKU, Cantidad: 0.05}},
+	})
+	if err != nil {
+		t.Fatalf("un preparado para stock sí puede ser insumo: %v", err)
+	}
+
+	// El bajo pedido, no.
+	bajo, _, _ := recetaDePrueba2(t, svc)
+	_, err = svc.CrearProducto(empDemo, actorA, origenTst, inventario.Producto{
+		EmpresaID: empDemo, SKU: "OTRO", Nombre: "Otro", EsPlato: true, Activo: true,
+		Precio: 100, Receta: []inventario.ComboComponente{{SKU: bajo.SKU, Cantidad: 1}},
+	})
+	if err == nil {
+		t.Fatal("anidar un plato bajo pedido no puede permitirse: no hay existencia que consumir")
+	}
+}
+
+// recetaDePrueba2 crea un segundo plato bajo pedido con SKUs propios, para poder
+// tener los dos modos vivos en la misma prueba.
+func recetaDePrueba2(t *testing.T, svc *application.Service) (inventario.Producto, string, string) {
+	t.Helper()
+	p, err := svc.CrearProducto(empDemo, actorA, origenTst, inventario.Producto{
+		EmpresaID: empDemo, SKU: "PASTA", Nombre: "Pasta al momento", EsPlato: true,
+		Precio: 200, Activo: true,
+		Receta: []inventario.ComboComponente{{SKU: "INS-A", Cantidad: 1}},
+	})
+	if err != nil {
+		t.Fatalf("plato bajo pedido: %v", err)
+	}
+	return p, "INS-A", ""
+}

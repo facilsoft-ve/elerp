@@ -242,7 +242,19 @@ export function Catalogo({ onKardex }) {
                       {p.esCombo
                         ? <div className="text-[11px] text-slate-400">paquete · {(p.componentes || []).length} componente(s)</div>
                         : p.esPlato
-                          ? <div className="text-[11px] text-slate-400">receta · {(p.receta || []).length} insumo(s)</div>
+                          ? (
+                            /* El MODO cambia la conducta del producto sin que se vea
+                               en ningún otro lado: uno para stock tiene existencia y
+                               se vende como mercancía; uno bajo pedido no. El
+                               catálogo es donde alguien viene a entender qué hace un
+                               producto, así que lo dice acá. */
+                            <div className="text-[11px] text-slate-400">
+                              receta · {(p.receta || []).length} insumo(s)
+                              {p.modoFabricacion === 'para_stock'
+                                ? <span className="text-teal-600 dark:text-teal-400"> · se fabrica y se guarda</span>
+                                : <span> · se prepara al venderlo</span>}
+                            </div>
+                          )
                           : p.esInsumo
                             ? <div className="text-[11px] text-slate-400">materia prima · no se vende directamente</div>
                             : (p.presentaciones?.length ? <div className="text-[11px] text-slate-400">{p.presentaciones.length} presentación(es)</div> : null)}
