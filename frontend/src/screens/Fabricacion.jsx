@@ -3,6 +3,7 @@ import { Icon } from '../components/Icon.jsx'
 import { Button, Badge, Select, Empty, useToast, TableSkeleton, Field, Input, Modal, Segmented, useConfirm } from '../components/primitives.jsx'
 import { fmtCurrency, fmtNum } from '../lib/format.js'
 import { useData } from '../context/DataContext.jsx'
+import { useUI } from '../context/UIContext.jsx'
 import { api } from '../lib/api.js'
 
 /* FABRICACIÓN — convertir insumos en producto terminado.
@@ -25,6 +26,13 @@ export function Fabricacion() {
   const toast = useToast()
   const confirm = useConfirm()
   const { db, reload } = useData()
+  const { ui } = useUI()
+  /* Ver la producción le sirve a todo el mundo —quien cocina quiere saber qué hay
+   * planificado— pero MOVER una orden toca el inventario, y eso el servidor solo
+   * se lo permite a dueño y desarrollador. Se ocultan los botones que van a
+   * fallar: mostrar un botón que siempre devuelve 403 es peor que no tenerlo.
+   * La interfaz solo oculta; quien protege es el servidor. */
+  const puedeMover = ['dueno', 'desarrollador'].includes(ui.rol)
   const [ordenes, setOrdenes] = useState(null)
   const [nueva, setNueva] = useState(false)
   const [abierta, setAbierta] = useState(null)
@@ -88,8 +96,10 @@ export function Fabricacion() {
           { value: 'terminadas', label: 'Terminadas' },
           { value: 'todas', label: 'Todas' },
         ]} />
-        <Button size="sm" icon={<Icon.Plus size={15} />} onClick={() => setNueva(true)}
-          disabled={!fabricables.length}>Nueva orden</Button>
+        {puedeMover ? (
+          <Button size="sm" icon={<Icon.Plus size={15} />} onClick={() => setNueva(true)}
+            disabled={!fabricables.length}>Nueva orden</Button>
+        ) : null}
       </div>
 
       {!conReceta.length ? (
@@ -101,7 +111,7 @@ export function Fabricacion() {
       ) : lista.length === 0 ? (
         <Empty icon={<Icon.Boxes size={22} />} title="Sin órdenes en esta vista"
           body="Crea una orden para producir: la pantalla te dice si alcanzan los insumos y cuánto va a costar antes de sacar nada del almacén."
-          cta={<Button icon={<Icon.Plus size={16} />} onClick={() => setNueva(true)}>Nueva orden</Button>} />
+          cta={puedeMover ? <Button icon={<Icon.Plus size={16} />} onClick={() => setNueva(true)}>Nueva orden</Button> : null} />
       ) : (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
           <div className="overflow-x-auto">
@@ -150,14 +160,16 @@ export function Fabricacion() {
                         ) : null}
                       </td>
                       <td className="py-2.5 pr-3 text-right whitespace-nowrap">
-                        {o.estado === 'borrador' ? (
+                        {o.estado === 'borrador' && puedeMover ? (
                           <Button size="sm" variant="secondary" loading={busy === o.id}
                             onClick={() => actuar(o, () => api.iniciarOrdenFabricacion(o.id), 'Insumos consumidos')}>Arrancar</Button>
                         ) : null}
                         {o.estado === 'en_proceso' ? (
-                          <Button size="sm" loading={busy === o.id} onClick={() => setAbierta(o)}>Terminar</Button>
+                          <Button size="sm" loading={busy === o.id} onClick={() => setAbierta(o)}>
+                            {puedeMover ? 'Terminar' : 'Ver'}
+                          </Button>
                         ) : null}
-                        {o.estado === 'borrador' || o.estado === 'en_proceso' ? (
+                        {puedeMover && (o.estado === 'borrador' || o.estado === 'en_proceso') ? (
                           <button className="ml-3 text-[12.5px] text-slate-400 hover:text-[#B3362C]"
                             onClick={() => cancelar(o)}>Cancelar</button>
                         ) : null}
@@ -173,7 +185,7 @@ export function Fabricacion() {
 
       {nueva ? <NuevaOrdenModal productos={fabricables} onClose={() => setNueva(false)}
         onCreada={() => { setNueva(false); cargar() }} toast={toast} /> : null}
-      {abierta ? <FichaOrden orden={abierta} onClose={() => setAbierta(null)}
+      {abierta ? <FichaOrden orden={abierta} puedeMover={puedeMover} onClose={() => setAbierta(null)}
         onTerminar={(prod) => actuar(abierta, () => api.terminarOrdenFabricacion(abierta.id, prod), 'Producción ingresada al inventario')} /> : null}
     </div>
   )
@@ -303,10 +315,10 @@ function NuevaOrdenModal({ productos, onClose, onCreada, toast }) {
 }
 
 /* FichaOrden: qué consumió y, si está en proceso, cuánto salió de verdad. */
-function FichaOrden({ orden: o, onClose, onTerminar }) {
+function FichaOrden({ orden: o, puedeMover = true, onClose, onTerminar }) {
   const [producida, setProducida] = useState(String(o.cantidad))
   const st = ESTADOS[o.estado] || { label: o.estado, color: 'slate' }
-  const enProceso = o.estado === 'en_proceso'
+  const enProceso = o.estado === 'en_proceso' && puedeMover
   const prod = Number(producida) || 0
 
   return (

@@ -380,3 +380,32 @@ vende frutos secos a granel quiere (2) y (3) sin (1).
    pero la **marca de origen de la sobra hay que ponerla desde el día uno**, porque no se puede
    agregar hacia atrás.*
 5. **¿Con qué balanza?** Es la dependencia que decide la factibilidad.
+
+---
+
+## Anexo — hallazgo abierto: la valoración del restaurante demo no cuadra
+
+Al sembrar el módulo de fabricación en el demo del restaurante apareció un
+descuadre **anterior y ajeno a fabricación** (sus consumos y su producción se
+compensan: aportan cero):
+
+```
+1201  ledger 4.526.807,90   contable 2.697.993,00   diferencia 1.828.814,90
+```
+
+**La causa es el cruce entre datos sembrados y un PERÍODO CONTABLE CERRADO.** El
+demo del restaurante tiene cerrado hasta el 31/08/2026 y su inventario inicial
+está fechado dentro de ese período, así que sus asientos no se pueden rehacer.
+
+Se intentó lo obvio —borrar los asientos del nicho al regenerar, para que el
+backfill los reconstruyera— y **salió peor**: el período los rechaza uno por uno
+y el tenant queda sin libro en vez de con un libro viejo. Está revertido.
+
+La lección es de diseño y vale más allá del seed: **reconstruir un libro
+append-only solo es seguro si nada bloquea la reconstrucción.** Con períodos
+cerrados de por medio, borrar es un camino de ida.
+
+Queda para Contabilidad decidir el criterio: o el sembrado fecha el inventario
+inicial fuera del período cerrado, o la regeneración del demo reabre el período
+antes de rehacer, o se acepta que un demo con período cerrado arrastre su libro
+tal como quedó. No es una decisión que corresponda tomar desde el seed.

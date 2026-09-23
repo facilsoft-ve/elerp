@@ -98,19 +98,42 @@ func TestDemosNicho_RecetasApuntanAInsumosReales(t *testing.T) {
 	}
 }
 
-// Un plato NO se stockea: su existencia sale de los insumos al facturar. Si el seed le
-// diera entrada de inventario, el Kardex quedaría contando algo que no existe.
-func TestDemosNicho_LosPlatosNoTienenExistencia(t *testing.T) {
+/* UN PLATO BAJO PEDIDO no se stockea: su existencia sale de los insumos al
+ * facturar, y darle entrada dejaría el Kardex contando algo que no existe.
+ *
+ * Uno fabricado PARA STOCK es al revés: está hecho, en la vitrina, y tiene que
+ * tener movimientos — si no, la orden que lo produjo diría una cosa y el Kardex
+ * otra. La prueba cubre los dos, porque el demo trae los dos a propósito.
+ */
+func TestDemosNicho_SoloElPlatoBajoPedidoNoTieneExistencia(t *testing.T) {
 	st := inmem.New()
+	movs := st.Movimientos.List("emp_demo_rest", inventario.FiltroMovimiento{})
+	tieneMovimientos := func(sku string) bool {
+		for _, m := range movs {
+			if m.SKU == sku {
+				return true
+			}
+		}
+		return false
+	}
+	vistoParaStock := false
 	for _, p := range st.Productos.List("emp_demo_rest") {
 		if !p.EsPlato {
 			continue
 		}
-		for _, m := range st.Movimientos.List("emp_demo_rest", inventario.FiltroMovimiento{}) {
-			if m.SKU == p.SKU {
-				t.Errorf("el plato %s tiene un movimiento de inventario (%s): los platos no se stockean", p.SKU, m.Tipo)
+		if p.SeFabricaParaStock() {
+			vistoParaStock = true
+			if !tieneMovimientos(p.SKU) {
+				t.Errorf("%s se fabrica para stock y no tiene movimientos: la orden diría una cosa y el Kardex otra", p.SKU)
 			}
+			continue
 		}
+		if tieneMovimientos(p.SKU) {
+			t.Errorf("el plato bajo pedido %s tiene movimientos de inventario: no se stockea", p.SKU)
+		}
+	}
+	if !vistoParaStock {
+		t.Fatal("el demo tiene que traer los DOS modos: sin uno para stock, el módulo de fabricación se ve vacío")
 	}
 }
 

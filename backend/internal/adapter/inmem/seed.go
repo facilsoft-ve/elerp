@@ -178,6 +178,9 @@ func New() *Store {
 	// argumento del módulo.
 	s.seedDelivery(demoEmpID, demoSede1ID, false)
 	s.seedDelivery("emp_demo_rest", "sede_demo_rest", true)
+	// Fabricación: el restaurante es donde el caso se entiende solo (la torta se
+	// prepara al pedirla, el brownie está hecho en la vitrina).
+	s.seedFabricacion("emp_demo_rest", "sede_demo_rest")
 	return s
 }
 

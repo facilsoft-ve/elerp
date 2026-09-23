@@ -37,6 +37,22 @@ func sembrarNichos(st *Store, semilla *inmem.Store, refrescar bool) {
 			continue
 		}
 
+		/* NO SE BORRAN LOS ASIENTOS DEL NICHO AL REGENERAR, y se intentó.
+		 *
+		 * Parecía correcto —el libro es una proyección, que se rehaga— y el
+		 * resultado fue peor: el demo del restaurante tiene un PERÍODO CERRADO hasta
+		 * agosto, y su inventario inicial está fechado dentro de él. Borrados los
+		 * asientos, el backfill no puede recrearlos: el período los rechaza, uno por
+		 * uno, y el tenant queda sin libro en vez de con un libro viejo.
+		 *
+		 * La lección es del diseño, no del seed: reconstruir un libro append-only
+		 * solo es seguro si nada bloquea la reconstrucción. Con períodos cerrados de
+		 * por medio, borrar es un camino de ida.
+		 *
+		 * Queda pendiente de verdad: la valoración del restaurante no cuadra contra
+		 * su cuenta 1201 (ver docs). La causa es el cruce entre el período cerrado y
+		 * datos sembrados, y se resuelve en Contabilidad, no acá. */
+
 		// Identidad y estructura: organización, empresa, sedes y membresías.
 		if _, existe := st.Empresas.ByID(n.EmpresaID); !existe {
 			if _, hayOrg := st.Organizaciones.ByID(n.OrgID); !hayOrg {
@@ -292,6 +308,43 @@ func sembrarNichos(st *Store, semilla *inmem.Store, refrescar bool) {
 				st.Pedidos.Append(p)
 			}
 			log.Printf("Mongo: %s → %d pedidos de delivery", n.Giro, len(snap.Pedidos))
+		}
+
+		/* ÓRDENES DE FABRICACIÓN. Mismo criterio que los pedidos: se reemplazan al
+		 * regenerar, o una base ya sembrada nunca vería el módulo con datos.
+		 *
+		 * Los MOVIMIENTOS que estas órdenes generaron ya viajan con el inventario
+		 * del nicho: sembrar las órdenes sin ellos dejaría el Kardex diciendo una
+		 * cosa y la orden otra. */
+		if len(snap.OrdenesFabricacion) > 0 && (refrescar || len(st.OrdenesFabricacion.List(n.EmpresaID, "")) == 0) {
+			/* LAS ÓRDENES Y SUS MOVIMIENTOS VIAJAN JUNTOS, y esto no es una comodidad.
+			 *
+			 * El top-up de arriba copia los movimientos de los productos NUEVOS. Las
+			 * salidas que una orden hace sobre insumos que YA existían quedan fuera de
+			 * ese criterio, y entonces la orden dice que consumió y el Kardex dice que
+			 * no: el inventario aparece con producto terminado que salió de la nada.
+			 * Pasó exactamente así al sembrar la primera orden. */
+			f := map[string]any{"empresaid": n.EmpresaID}
+			if refrescar {
+				st.OrdenesFabricacion.c.delMany(f)
+				st.Movimientos.c.delMany(map[string]any{"empresaid": n.EmpresaID, "reftipo": "fabricacion"})
+			}
+			for _, o := range snap.OrdenesFabricacion {
+				st.OrdenesFabricacion.Append(o)
+			}
+			movs := 0
+			for _, mv := range snap.Movimientos {
+				if mv.RefTipo != "fabricacion" {
+					continue
+				}
+				if _, ya := st.Movimientos.c.one(map[string]any{"empresaid": n.EmpresaID, "id": mv.ID}); ya {
+					continue
+				}
+				st.Movimientos.c.insert(mv)
+				movs++
+			}
+			log.Printf("Mongo: %s → %d orden(es) de fabricación y %d movimiento(s)",
+				n.Giro, len(snap.OrdenesFabricacion), movs)
 		}
 
 		// Salón: grilla + mesas (solo el restaurante).

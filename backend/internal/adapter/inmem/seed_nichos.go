@@ -13,6 +13,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/credencial"
 	"github.com/mornix/elerp/internal/domain/cuenta"
 	"github.com/mornix/elerp/internal/domain/empresa"
+	"github.com/mornix/elerp/internal/domain/fabricacion"
 	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/inventario"
 	"github.com/mornix/elerp/internal/domain/mesa"
@@ -347,6 +348,10 @@ type SnapshotEmpresa struct {
 	CanalesPedido []pedido.Canal
 	ZonasPedido   []pedido.Zona
 	Repartidores  []pedido.Repartidor
+	// Las ÓRDENES DE FABRICACIÓN sembradas. Van con sus movimientos ya en el
+	// ledger (los siembra seedFabricacion): una orden terminada sin su consumo y
+	// su producción dejaría el Kardex diciendo una cosa y la orden otra.
+	OrdenesFabricacion []fabricacion.Orden
 	// Contadores es el estado del numerador fiscal de ESTA empresa tras sembrar
 	// ("empresa|sede|serie" → último folio). Sin ellos, la primera factura real del
 	// prospecto reiniciaría en 1 y colisionaría con un folio sembrado.
@@ -407,12 +412,13 @@ func (s *Store) SnapshotNicho(n NichoDemo) SnapshotEmpresa {
 		Comanderas:   s.Impresoras.List(n.EmpresaID, n.SedeID),
 		Mesoneros:    s.Mesoneros.List(n.EmpresaID),
 
-		Pedidos:       s.Pedidos.List(n.EmpresaID, ""),
-		CanalesPedido: s.CanalesPedido.List(n.EmpresaID),
-		ZonasPedido:   s.ZonasPedido.List(n.EmpresaID, ""),
-		Repartidores:  s.Repartidores.List(n.EmpresaID, ""),
-		Horarios:      s.Horarios.List(n.EmpresaID, n.SedeID),
-		ConfigSalon:   cfgSalon, TieneConfig: tieneCfg,
+		Pedidos:            s.Pedidos.List(n.EmpresaID, ""),
+		CanalesPedido:      s.CanalesPedido.List(n.EmpresaID),
+		ZonasPedido:        s.ZonasPedido.List(n.EmpresaID, ""),
+		Repartidores:       s.Repartidores.List(n.EmpresaID, ""),
+		OrdenesFabricacion: s.OrdenesFabricacion.List(n.EmpresaID, ""),
+		Horarios:           s.Horarios.List(n.EmpresaID, n.SedeID),
+		ConfigSalon:        cfgSalon, TieneConfig: tieneCfg,
 		Contadores: contadores,
 	}
 }
