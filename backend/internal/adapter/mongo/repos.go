@@ -70,6 +70,7 @@ type Store struct {
 	ZonasPedido         *ZonaPedidoRepo
 	Repartidores        *RepartidorRepo
 	LiquidacionesPedido *LiquidacionRepo
+	OrdenesFabricacion  *OrdenFabricacionRepo
 	EmisionesDigitales  *EmisionDigitalRepo
 	ConceptosISLR       *ConceptoISLRRepo
 	UnidadesTributarias *UnidadTributariaRepo

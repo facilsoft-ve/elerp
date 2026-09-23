@@ -50,6 +50,11 @@ export const NAV = [
       { id: 'repartidores', label: 'Repartidores', grupo: 'Configuración', roles: ADMIN },
     ],
   },
+  // FABRICACIÓN. Va en OPERACIÓN y aparte de Restaurante porque no depende de
+  // él: un taller que arma piezas fabrica igual que una cocina que hornea.
+  {
+    id: 'fabricacion', label: 'Fabricación', grupo: 'OPERACIÓN', glyph: Icon.Boxes, roles: TODOS, ready: true, modulo: 'fabricacion',
+  },
   {
     id: 'restaurante', label: 'Restaurante', grupo: 'OPERACIÓN', glyph: Icon.Utensils, roles: [...TODOS, 'mesonero'], ready: true, modulo: 'restaurante',
     // El MESONERO alcanza el módulo pero solo la Comandera: el mapa, la cocina, las

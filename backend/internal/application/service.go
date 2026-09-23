@@ -15,6 +15,7 @@ import (
 	"github.com/mornix/elerp/internal/domain/cuenta"
 	"github.com/mornix/elerp/internal/domain/cupon"
 	"github.com/mornix/elerp/internal/domain/empresa"
+	"github.com/mornix/elerp/internal/domain/fabricacion"
 	"github.com/mornix/elerp/internal/domain/facturaciondigital"
 	"github.com/mornix/elerp/internal/domain/fiscal"
 	"github.com/mornix/elerp/internal/domain/inventario"
@@ -187,6 +188,9 @@ type Service struct {
 	canalesPedido pedido.CanalRepository
 	zonasPedido   pedido.ZonaRepository
 	repartidores  pedido.RepartidorRepository
+	// ordenesFabricacion son las órdenes de producción. Opcional: sin ellas, un
+	// producto con receta solo se consume al venderse, como antes.
+	ordenesFabricacion fabricacion.Repository
 	// liquidaciones son las actas de cierre del repartidor: opcional, porque un
 	// local sin flota propia nunca recibe plata de vuelta.
 	liquidaciones      pedido.LiquidacionRepository

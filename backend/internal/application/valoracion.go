@@ -98,8 +98,10 @@ func (s *Service) Valoracion(empresaID, sedeID string) ValoracionResult {
 	costoClave := func(productoID, sede string) string { return productoID + "|" + sede }
 
 	for _, p := range s.productos.List(empresaID) {
-		if p.EsCombo || p.EsPlato || p.EsServicio {
-			continue // no se stockean: su existencia es la de sus componentes
+		if !p.SeStockea() {
+			// Combos y servicios no tienen existencia propia; un plato tampoco,
+			// SALVO que se fabrique para stock — ahí está en la vitrina y se cuenta.
+			continue
 		}
 		movs := s.movimientos.List(empresaID, inventario.FiltroMovimiento{SedeID: sedeID, ProductoID: p.ID})
 		porSede := map[string][]inventario.Movimiento{}

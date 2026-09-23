@@ -139,6 +139,11 @@ type PagoEntrada struct {
 	Monto      float64
 	Moneda     string
 	Referencia string
+	// Aprobacion, Lote y TerminalID son lo que devuelve el punto de venta al
+	// aprobar una tarjeta. Vacíos en los demás medios.
+	Aprobacion string
+	Lote       string
+	TerminalID string
 }
 
 // VueltoParteEntrada es una parte del vuelto declarada por la caja: en qué
@@ -400,6 +405,9 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 		doc.Pagos = append(doc.Pagos, fiscal.Pago{
 			Metodo: pg.Metodo, CuentaID: pg.CuentaID, Monto: pg.Monto, Moneda: pg.Moneda,
 			EnDivisa: enDivisa, TasaCambio: tasaPago, Referencia: pg.Referencia,
+			// Lo que devolvió el punto de venta, sellado con el documento: es lo que
+			// permite conciliar contra el lote del banco sin depender de la memoria.
+			Aprobacion: pg.Aprobacion, Lote: pg.Lote, TerminalID: pg.TerminalID,
 		})
 	}
 	// El IGTF grava la porción de LA FACTURA pagada en divisas, no el efectivo

@@ -21,6 +21,15 @@ func (s *Service) recetaSnapshot(empresaID string, p inventario.Producto) []fisc
 	if !p.EsPlato || len(p.Receta) == 0 {
 		return nil
 	}
+	/* UN PLATO FABRICADO PARA STOCK NO LLEVA RECETA EN LA LÍNEA.
+	 *
+	 * Sus insumos ya salieron del almacén cuando se fabricó. Si la línea fiscal
+	 * los volviera a traer, venderlo los descontaría OTRA VEZ: el inventario
+	 * quedaría con insumos en negativo y con el producto terminado intacto, que es
+	 * exactamente al revés de lo que pasó en el mostrador. */
+	if p.SeFabricaParaStock() {
+		return nil
+	}
 	out := make([]fiscal.InsumoLinea, 0, len(p.Receta))
 	for _, comp := range p.Receta {
 		nombre, pid := comp.SKU, ""

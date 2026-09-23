@@ -153,6 +153,9 @@ func (s *Server) handleCrearProducto(c *fiber.Ctx) error {
 		EsPlato  bool                         `json:"esPlato"`
 		EsInsumo bool                         `json:"esInsumo"`
 		Receta   []inventario.ComboComponente `json:"receta"`
+		// ModoFabricacion decide CUÁNDO se convierten los insumos: al venderlo
+		// (bajo pedido) o antes, con una orden (para stock).
+		ModoFabricacion string `json:"modoFabricacion"`
 		// Comandera por la que sale este producto (módulo Restaurante). Vacío =
 		// se rutea por su rubro.
 		ComanderaID string `json:"comanderaId"`
@@ -168,7 +171,8 @@ func (s *Server) handleCrearProducto(c *fiber.Ctx) error {
 		RequiereLote: in.RequiereLote, ControlaVencimiento: in.ControlaVencimiento,
 		EsCombo: in.EsCombo, Componentes: in.Componentes,
 		EsPlato: in.EsPlato, Receta: in.Receta, EsInsumo: in.EsInsumo,
-		ComanderaID: in.ComanderaID,
+		ModoFabricacion: in.ModoFabricacion,
+		ComanderaID:     in.ComanderaID,
 	}
 	out, err := s.svc.CrearProducto(empresaIDOf(c), principalOf(c).UserID, origen(c), p)
 	if err != nil {
@@ -244,19 +248,21 @@ func (s *Server) handleActualizarProducto(c *fiber.Ctx) error {
 		Activo              *bool `json:"activo"`
 		// Combo: esCombo (nil = no cambiar) convierte/mantiene el paquete; componentes
 		// (nil = no se toca la receta) lleva la receta cuando se edita.
-		EsCombo     *bool                        `json:"esCombo"`
-		Componentes []inventario.ComboComponente `json:"componentes"`
-		EsPlato     *bool                        `json:"esPlato"`
-		EsInsumo    *bool                        `json:"esInsumo"`
-		Receta      []inventario.ComboComponente `json:"receta"`
-		ComanderaID *string                      `json:"comanderaId"`
+		EsCombo         *bool                        `json:"esCombo"`
+		Componentes     []inventario.ComboComponente `json:"componentes"`
+		EsPlato         *bool                        `json:"esPlato"`
+		EsInsumo        *bool                        `json:"esInsumo"`
+		Receta          []inventario.ComboComponente `json:"receta"`
+		ModoFabricacion *string                      `json:"modoFabricacion"`
+		ComanderaID     *string                      `json:"comanderaId"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
 	out, err := s.svc.ActualizarProducto(empresaIDOf(c), principalOf(c).UserID, origen(c), c.Params("sku"), application.CambiosProducto{
 		Nombre: in.Nombre, Rubro: in.Rubro, TipoVenta: in.TipoVenta, UnidadBase: in.UnidadBase,
-		Precio: in.Precio, Moneda: in.Moneda,
+		ModoFabricacion: in.ModoFabricacion,
+		Precio:          in.Precio, Moneda: in.Moneda,
 		CodigoBarras: in.CodigoBarras, ExentoIVA: in.ExentoIVA, AlicuotaCodigo: in.AlicuotaCodigo,
 		ConceptoISLR: in.ConceptoISLR,
 		RequiereLote: in.RequiereLote, ControlaVencimiento: in.ControlaVencimiento,

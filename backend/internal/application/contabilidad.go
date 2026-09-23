@@ -1020,6 +1020,12 @@ func (s *Service) RecontabilizarPendientes(empresaID, actor string) int {
 		if m.RefTipo == "documento" || m.RefTipo == "compra" || m.Tipo == inventario.MovTransferencia {
 			continue
 		}
+		// FABRICACIÓN: la orden asienta lo suyo una sola vez, y solo si el valor
+		// cambió de cuenta. Asentar sus movimientos por separado declararía un
+		// costo de ventas que no ocurrió —fabricar no gasta— y además duplicaría.
+		if m.RefTipo == RefFabricacion {
+			continue
+		}
 		if len(s.asientos.PorRef(empresaID, "movimiento", m.ID)) > 0 {
 			continue
 		}

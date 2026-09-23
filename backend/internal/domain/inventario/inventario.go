@@ -140,10 +140,25 @@ type Producto struct {
 	// líneas), pero al facturarlo el inventario descuenta sus INSUMOS (Receta), no
 	// el plato en sí (que no lleva stock: se prepara al momento).
 	EsPlato bool `json:"esPlato" bson:"esplato"`
+	// (el modo de fabricación está debajo, junto a la receta)
 	// Receta son los insumos que consume UNA unidad del plato: SKU del insumo y
 	// cantidad por plato (p. ej. 0.12 kg de pasta, 0.05 kg de queso). Cada insumo es
 	// un producto normal del catálogo. Solo tiene sentido cuando EsPlato.
 	Receta []ComboComponente `json:"receta" bson:"receta"`
+	/* MODO DE FABRICACIÓN: cuándo se convierten los insumos en el producto.
+	 *
+	 *   · BAJO PEDIDO (por defecto, y lo que hacía siempre): el producto no se
+	 *     stockea. Al venderlo, el inventario descuenta sus INSUMOS. Es la pasta
+	 *     que se prepara cuando la piden.
+	 *   · PARA STOCK: se fabrica antes con una orden, y lo producido entra al
+	 *     inventario como cualquier mercancía. Al venderlo se descuenta ÉL, no sus
+	 *     insumos — ya se consumieron al fabricarlo. Es la bandeja de postres que
+	 *     está en la vitrina, el lote de pan, la pieza armada en el taller.
+	 *
+	 * La diferencia vive acá y no en el módulo porque es una propiedad del
+	 * producto: un mismo local tiene los dos a la vez. Y vacío se lee como bajo
+	 * pedido, así que ningún plato ya cargado cambia de comportamiento. */
+	ModoFabricacion string `json:"modoFabricacion,omitempty" bson:"modofabricacion,omitempty"`
 	/* EsServicio marca algo que SE VENDE PERO NO SE STOCKEA: un envío a
 	 * domicilio, una instalación, una hora de mano de obra.
 	 *
@@ -333,4 +348,35 @@ type RubroRepo interface {
 	// Update existe para poder asignarle su cuenta contable. Un rubro no se borra:
 	// los productos que lo referencian dejarían de tener categoría.
 	Update(r Rubro) (Rubro, bool)
+}
+
+// Modos de fabricación de un producto con receta.
+const (
+	// FabricaBajoPedido: no se stockea; al venderlo se descuentan sus insumos.
+	FabricaBajoPedido = "bajo_pedido"
+	// FabricaParaStock: se fabrica con una orden y entra al inventario.
+	FabricaParaStock = "para_stock"
+)
+
+// SeFabricaParaStock indica si el producto se produce ANTES y se guarda. Solo
+// tiene sentido en un producto con receta: sin receta no hay nada que fabricar.
+func (p Producto) SeFabricaParaStock() bool {
+	return p.ModoFabricacion == FabricaParaStock && len(p.Receta) > 0
+}
+
+/* SeStockea indica si el producto tiene existencia propia en el Kardex.
+ *
+ * Es la pregunta que antes estaba repetida en cada sitio como «EsCombo ||
+ * EsPlato || EsServicio», y que la fabricación para stock vuelve más sutil: un
+ * plato que se fabrica antes SÍ se stockea, porque está en la vitrina. Tenerla
+ * en un solo lugar es lo que evita que una pantalla lo cuente y otra no.
+ */
+func (p Producto) SeStockea() bool {
+	if p.EsCombo || p.EsServicio {
+		return false
+	}
+	if p.EsPlato {
+		return p.SeFabricaParaStock()
+	}
+	return true
 }

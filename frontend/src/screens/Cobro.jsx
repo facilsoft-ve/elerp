@@ -227,6 +227,19 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
    * escribiendo, y mandarlo al servidor lo convertiría en un registro a medias.
    */
   const claveBorrador = `elerp:cobro:${canal}:${ventaId}`
+  /* EL PUNTO DE VENTA CON TARJETA.
+   *
+   * Hoy el cajero pasa la tarjeta en un aparato aparte y teclea el resultado: si
+   * el punto aprueba y nadie teclea, ElERP no se entera; si se teclea y el punto
+   * rechaza, ElERP cree que cobró. El paso existe para cerrar ese hueco — se pide
+   * la transacción, se espera la respuesta, y el número de aprobación y el lote
+   * quedan sellados en el pago.
+   *
+   * HOY LA APROBACIÓN LA DA UN SIMULADOR y la pantalla lo dice. Lo que importa es
+   * que el flujo ya sea el de verdad: el día que se conecte un proveedor, lo
+   * único que cambia es quién contesta — no el documento, ni el arqueo, ni la
+   * conciliación. */
+  const [tarjeta, setTarjeta] = useState(null) // null | {estado, aprobacion, lote}
   const [pidenCliente, setPidenCliente] = useState('')
   const [nuevoCliente, setNuevoCliente] = useState(false)
   const recibidoRef = useRef(null)
@@ -246,7 +259,7 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
     setVueltoPartes([])
     // El envío también: sin esto la próxima venta abría con la dirección de la
     // anterior, que es como se manda un pedido a la casa equivocada.
-    setEnvio(null); setCotEnvio(null); setPidenCliente('')
+    setEnvio(null); setCotEnvio(null); setPidenCliente(''); setTarjeta(null)
     // Y se recupera lo que hubiera quedado a medias de ESTA misma venta.
     try {
       const b = JSON.parse(localStorage.getItem(claveBorrador) || 'null')
@@ -497,6 +510,31 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
     }
   }
 
+  /* ¿ESTE COBRO PASA POR EL PUNTO? Cualquier parte pagada con tarjeta. Se mira
+   * sobre los pagos ya armados para que valga igual en el cobro simple y en el
+   * mixto: una venta pagada mitad efectivo mitad tarjeta también pasa el punto. */
+  const montoTarjeta = pagos
+    .filter((p) => p.metodo === 'tarjeta')
+    .reduce((a, p) => a + (Number(p.monto) || 0), 0)
+  const hayTarjeta = montoTarjeta > 0.005
+  const tarjetaAprobada = !hayTarjeta || tarjeta?.estado === 'aprobada'
+
+  const pasarTarjeta = async () => {
+    setTarjeta({ estado: 'procesando' })
+    try {
+      // TODO(integración): acá va la llamada al punto de venta del proveedor.
+      // Devuelve número de aprobación y lote; el resto del flujo no cambia.
+      await new Promise((r) => setTimeout(r, 1400))
+      setTarjeta({
+        estado: 'aprobada',
+        aprobacion: String(Math.floor(100000 + Math.random() * 899999)),
+        lote: String(Math.floor(1 + Math.random() * 999)).padStart(3, '0'),
+      })
+    } catch {
+      setTarjeta({ estado: 'rechazada' })
+    }
+  }
+
   // Validación: se dice qué falta, en vez de dejar emitir algo descuadrado.
   let error = ''
   if (!meta) error = 'Elige cómo te van a pagar.'
@@ -513,6 +551,9 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
     ? `Aún falta repartir ${fmtCurrency(faltaVuelto, 'VES')} del vuelto.`
     : `Te pasaste del vuelto por ${fmtCurrency(-faltaVuelto, 'VES')}.`
   else if (vueltoBloquea) error = 'Procesa el vuelto por pago móvil antes de emitir la factura.'
+  // Sin aprobación no hay cobro: emitir antes de que el punto conteste es
+  // facturar algo que el banco todavía puede rechazar.
+  else if (hayTarjeta && !tarjetaAprobada) error = 'Pasa la tarjeta por el punto de venta antes de emitir.'
   // El envío se valida ACÁ y no al volver del servidor: una factura emitida no se
   // deshace, y descubrir al cobrar que la dirección está fuera de zona deja la
   // venta hecha y a nadie que pueda llevarla.
@@ -530,7 +571,14 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
       const cobro = {
         clienteId: clienteId || '',
         lineas: lineas.map((l) => ({ sku: l.sku, cantidad: Number(l.cantidad), precioUnitario: Number(l.precioUnitario) })),
-        pagos: pagos.map((p) => ({ metodo: p.metodo, cuentaId: p.cuentaId, monto: p.monto, moneda: p.moneda, referencia })),
+        pagos: pagos.map((p) => ({
+          metodo: p.metodo, cuentaId: p.cuentaId, monto: p.monto, moneda: p.moneda, referencia,
+          // La aprobación se sella CON el pago: es lo que permite conciliar contra
+          // el lote del banco sin depender de que alguien se acuerde.
+          ...(p.metodo === 'tarjeta' && tarjeta?.estado === 'aprobada'
+            ? { aprobacion: tarjeta.aprobacion, lote: tarjeta.lote }
+            : {}),
+        })),
         moneda: 'VES',
         contingencia,
         credito: !!meta?.credito,
@@ -717,6 +765,41 @@ export function CobroModal({ open, onClose, lineas, clienteId, clienteNombre, co
             </div>
           ) : null}
         </div>
+
+        {/* EL PUNTO DE VENTA. Aparece solo cuando hay tarjeta, y bloquea la emisión
+            hasta que apruebe: facturar antes de que el banco conteste es facturar
+            algo que todavía puede rechazarse. */}
+        {hayTarjeta ? (
+          <div className="rounded-xl border p-3"
+            style={tarjeta?.estado === 'aprobada'
+              ? { background: '#EAF5EF', borderColor: '#BFE0CD' }
+              : tarjeta?.estado === 'rechazada'
+                ? { background: '#FBEDEB', borderColor: '#ECC8C4' }
+                : { background: '#EDF2F9', borderColor: '#C9D6EA' }}>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="text-[12.5px]" style={{ color: tarjeta?.estado === 'aprobada' ? '#166B41' : tarjeta?.estado === 'rechazada' ? '#B3362C' : '#1D3477' }}>
+                {tarjeta?.estado === 'aprobada' ? (
+                  <>Aprobada · <span className="num">aprobación {tarjeta.aprobacion} · lote {tarjeta.lote}</span></>
+                ) : tarjeta?.estado === 'rechazada' ? (
+                  <>El punto rechazó la transacción. Inténtalo de nuevo o cobra por otro medio.</>
+                ) : (
+                  <>Pasa <strong>{fmtCurrency(montoTarjeta, 'VES')}</strong> por el punto de venta.</>
+                )}
+              </div>
+              {tarjeta?.estado !== 'aprobada' ? (
+                <Button size="sm" variant="dinero" loading={tarjeta?.estado === 'procesando'}
+                  onClick={pasarTarjeta} icon={<Icon.Wallet size={15} />}>
+                  {tarjeta?.estado === 'procesando' ? 'Esperando al punto…'
+                    : tarjeta?.estado === 'rechazada' ? 'Reintentar' : 'Pasar tarjeta'}
+                </Button>
+              ) : null}
+            </div>
+            <div className="mt-1.5 text-[11.5px]" style={{ color: '#5C6470' }}>
+              Simulado: todavía no hay un punto de venta conectado. La aprobación y el lote
+              se guardan en el pago igual, así que al conectar el proveedor no cambia nada más.
+            </div>
+          </div>
+        ) : null}
 
         {/* 1 · Método */}
         <div>

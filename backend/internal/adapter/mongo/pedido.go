@@ -4,6 +4,7 @@ import (
 	gomongo "go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	"github.com/mornix/elerp/internal/domain/fabricacion"
 	"github.com/mornix/elerp/internal/domain/pedido"
 )
 
@@ -13,6 +14,7 @@ func (st *Store) attachPedidos(db *gomongo.Database) {
 	st.ZonasPedido = &ZonaPedidoRepo{coll[pedido.Zona]{db.Collection("zonaspedido")}}
 	st.Repartidores = &RepartidorRepo{coll[pedido.Repartidor]{db.Collection("repartidores")}}
 	st.LiquidacionesPedido = &LiquidacionRepo{coll[pedido.Liquidacion]{db.Collection("liquidacionespedido")}}
+	st.OrdenesFabricacion = &OrdenFabricacionRepo{coll[fabricacion.Orden]{db.Collection("ordenesfabricacion")}}
 }
 
 // PedidoRepo persiste los pedidos con filtro empresaid obligatorio (Mongo no
@@ -178,4 +180,37 @@ func (r *LiquidacionRepo) List(empresaID, sedeID string) []pedido.Liquidacion {
 
 func (r *LiquidacionRepo) ByID(empresaID, id string) (pedido.Liquidacion, bool) {
 	return r.c.one(map[string]any{"empresaid": empresaID, "id": id})
+}
+
+// OrdenFabricacionRepo persiste las órdenes de producción. Se editan mientras
+// avanzan (estado, consumos, costo); lo que nunca se toca son los movimientos de
+// inventario que generan.
+type OrdenFabricacionRepo struct{ c coll[fabricacion.Orden] }
+
+func (r *OrdenFabricacionRepo) Append(o fabricacion.Orden) fabricacion.Orden {
+	if o.ID == "" {
+		o.ID = newID("of_")
+	}
+	r.c.insert(o)
+	return o
+}
+
+func (r *OrdenFabricacionRepo) Update(o fabricacion.Orden) (fabricacion.Orden, bool) {
+	if _, ok := r.ByID(o.EmpresaID, o.ID); !ok {
+		return fabricacion.Orden{}, false
+	}
+	r.c.replace(o.ID, o)
+	return o, true
+}
+
+func (r *OrdenFabricacionRepo) ByID(empresaID, id string) (fabricacion.Orden, bool) {
+	return r.c.one(map[string]any{"empresaid": empresaID, "id": id})
+}
+
+func (r *OrdenFabricacionRepo) List(empresaID, sedeID string) []fabricacion.Orden {
+	f := map[string]any{"empresaid": empresaID}
+	if sedeID != "" {
+		f["sedeid"] = sedeID
+	}
+	return r.c.all(f)
 }

@@ -147,6 +147,10 @@ func (s *Server) handleFacturarCotizacion(c *fiber.Ctx) error {
 			Monto      float64 `json:"monto"`
 			Moneda     string  `json:"moneda"`
 			Referencia string  `json:"referencia"`
+			// Lo que devuelve el punto de venta al aprobar una tarjeta.
+			Aprobacion string `json:"aprobacion"`
+			Lote       string `json:"lote"`
+			TerminalID string `json:"terminalId"`
 		} `json:"pagos"`
 		// Venta a crédito: lo que no se cobró queda por cobrar en Tesorería.
 		Credito     bool `json:"credito"`
@@ -181,6 +185,7 @@ func (s *Server) handleFacturarCotizacion(c *fiber.Ctx) error {
 	for _, p := range in.Pagos {
 		ent.Pagos = append(ent.Pagos, application.PagoEntrada{
 			Metodo: p.Metodo, CuentaID: p.CuentaID, Monto: p.Monto, Moneda: p.Moneda, Referencia: p.Referencia,
+			Aprobacion: p.Aprobacion, Lote: p.Lote, TerminalID: p.TerminalID,
 		})
 	}
 	if in.Envio.pide() {

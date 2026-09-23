@@ -2000,6 +2000,7 @@ function PlatoModal({ plato, insumos, monedaEmpresa, rubros = [], comanderas = [
     sku: plato?.sku || '', nombre: plato?.nombre || '', precio: plato?.precio || 0,
     exentoIva: !!plato?.exentoIva, receta: (plato?.receta || []).map((r) => ({ ...r })),
     rubro: plato?.rubro || '', comanderaId: plato?.comanderaId || '',
+    modoFabricacion: plato?.modoFabricacion || 'bajo_pedido',
   }))
   const [busy, setBusy] = useState(false)
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }))
@@ -2018,12 +2019,14 @@ function PlatoModal({ plato, insumos, monedaEmpresa, rubros = [], comanderas = [
         await api.actualizarProducto(f.sku, {
           nombre: f.nombre.trim(), precio: Number(f.precio) || 0, exentoIva: f.exentoIva,
           esPlato: true, receta, rubro: f.rubro, comanderaId: f.comanderaId,
+          modoFabricacion: f.modoFabricacion,
         })
       } else {
         const sku = (f.sku || ('PLATO-' + Date.now().toString(36).toUpperCase())).trim()
         await api.createProducto({
           sku, nombre: f.nombre.trim(), precio: Number(f.precio) || 0, moneda: monedaEmpresa,
           exentoIva: f.exentoIva, esPlato: true, receta, rubro: f.rubro, comanderaId: f.comanderaId,
+          modoFabricacion: f.modoFabricacion,
         })
       }
       toast({ title: editar ? 'Plato actualizado' : 'Plato creado', body: f.nombre })
@@ -2058,6 +2061,19 @@ function PlatoModal({ plato, insumos, monedaEmpresa, rubros = [], comanderas = [
             </Select>
           </Field>
         </div>
+        {/* CUÁNDO SE CONVIERTEN LOS INSUMOS. Es la diferencia entre la pasta que se
+            hace al pedirla y la bandeja de postres que ya está en la vitrina, y
+            decide si el plato tiene existencia propia. */}
+        <Field label="¿Cuándo se prepara?"
+          hint={f.modoFabricacion === 'para_stock'
+            ? 'Se produce antes con una orden de fabricación y queda en existencia. Al venderlo se descuenta él, no sus insumos: ya se consumieron al fabricarlo.'
+            : 'Se prepara al venderlo y descuenta sus insumos en ese momento. No tiene existencia propia.'}>
+          <Select value={f.modoFabricacion} onChange={(e) => set('modoFabricacion', e.target.value)}>
+            <option value="bajo_pedido">Bajo pedido — se prepara al venderlo</option>
+            <option value="para_stock">Para stock — se fabrica antes y se guarda</option>
+          </Select>
+        </Field>
+
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[13px] font-semibold text-slate-700 dark:text-slate-300">Receta (insumos)</span>

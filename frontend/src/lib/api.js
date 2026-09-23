@@ -536,6 +536,15 @@ export const api = {
   reintentarEmision: (id) => request(`/api/facturacion-digital/emisiones/${encodeURIComponent(id)}/reintentar`, { method: 'POST' }),
   reintentarRechazadas: () => request('/api/facturacion-digital/emisiones/reintentar-rechazadas', { method: 'POST' }),
 
+  // FABRICACIÓN. Planear NO escribe: es la consulta que dice si alcanzan los
+  // insumos y cuánto va a costar, antes de sacar nada del almacén.
+  ordenesFabricacion: () => request('/api/fabricacion/ordenes'),
+  planearOrdenFabricacion: (body) => request('/api/fabricacion/planear', { method: 'POST', body: JSON.stringify(body) }),
+  crearOrdenFabricacion: (body) => request('/api/fabricacion/ordenes', { method: 'POST', body: JSON.stringify(body) }),
+  iniciarOrdenFabricacion: (id) => request(`/api/fabricacion/ordenes/${encodeURIComponent(id)}/iniciar`, { method: 'POST' }),
+  terminarOrdenFabricacion: (id, producida) => request(`/api/fabricacion/ordenes/${encodeURIComponent(id)}/terminar`, { method: 'POST', body: JSON.stringify({ producida }) }),
+  cancelarOrdenFabricacion: (id, motivo) => request(`/api/fabricacion/ordenes/${encodeURIComponent(id)}/cancelar`, { method: 'POST', body: JSON.stringify({ motivo }) }),
+
   cotizarEnvio: (body) => request('/api/pedidos/cotizar-envio', { method: 'POST', body: JSON.stringify(body) }),
   canalesPedido: () => request('/api/pedidos/config/canales'),
   guardarCanalPedido: (body) => request('/api/pedidos/config/canales', { method: 'PUT', body: JSON.stringify(body) }),

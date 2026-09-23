@@ -96,6 +96,7 @@ type Store struct {
 	ZonasPedido         *ZonaPedidoRepo
 	Repartidores        *RepartidorRepo
 	LiquidacionesPedido *LiquidacionRepo
+	OrdenesFabricacion  *OrdenFabricacionRepo
 	EmisionesDigitales  *EmisionDigitalRepo
 	ConceptosISLR       *ConceptoISLRRepo
 	UnidadesTributarias *UnidadTributariaRepo
@@ -158,6 +159,7 @@ func New() *Store {
 		ZonasPedido:         NewZonaPedidoRepo(),
 		Repartidores:        NewRepartidorRepo(),
 		LiquidacionesPedido: NewLiquidacionRepo(),
+		OrdenesFabricacion:  NewOrdenFabricacionRepo(),
 		EmisionesDigitales:  NewEmisionDigitalRepo(),
 		ConceptosISLR:       NewConceptoISLRRepo(),
 		UnidadesTributarias: NewUnidadTributariaRepo(),

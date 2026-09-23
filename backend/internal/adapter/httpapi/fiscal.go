@@ -405,6 +405,10 @@ func (s *Server) handleEmitir(c *fiber.Ctx) error {
 			Monto      float64 `json:"monto"`
 			Moneda     string  `json:"moneda"`
 			Referencia string  `json:"referencia"`
+			// Lo que devuelve el punto de venta al aprobar una tarjeta.
+			Aprobacion string `json:"aprobacion"`
+			Lote       string `json:"lote"`
+			TerminalID string `json:"terminalId"`
 		} `json:"pagos"`
 		Moneda       string `json:"moneda"`
 		Contingencia bool   `json:"contingencia"`
@@ -448,6 +452,7 @@ func (s *Server) handleEmitir(c *fiber.Ctx) error {
 	for _, p := range in.Pagos {
 		ent.Pagos = append(ent.Pagos, application.PagoEntrada{
 			Metodo: p.Metodo, CuentaID: p.CuentaID, Monto: p.Monto, Moneda: p.Moneda, Referencia: p.Referencia,
+			Aprobacion: p.Aprobacion, Lote: p.Lote, TerminalID: p.TerminalID,
 		})
 	}
 	/* ENVÍO A DOMICILIO desde el punto de venta o el módulo de ventas.

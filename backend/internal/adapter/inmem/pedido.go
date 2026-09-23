@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/mornix/elerp/internal/domain/fabricacion"
 	"github.com/mornix/elerp/internal/domain/pedido"
 )
 
@@ -326,4 +327,60 @@ func (r *LiquidacionRepo) ByID(empresaID, id string) (pedido.Liquidacion, bool) 
 		}
 	}
 	return pedido.Liquidacion{}, false
+}
+
+// --- Órdenes de fabricación ---
+
+type OrdenFabricacionRepo struct {
+	mu    sync.RWMutex
+	items []fabricacion.Orden
+	seq   int
+}
+
+func NewOrdenFabricacionRepo() *OrdenFabricacionRepo { return &OrdenFabricacionRepo{} }
+
+func (r *OrdenFabricacionRepo) Append(o fabricacion.Orden) fabricacion.Orden {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seq++
+	if o.ID == "" {
+		o.ID = fmt.Sprintf("of_%d", r.seq)
+	}
+	r.items = append(r.items, o)
+	return o
+}
+
+func (r *OrdenFabricacionRepo) Update(o fabricacion.Orden) (fabricacion.Orden, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, x := range r.items {
+		if x.EmpresaID == o.EmpresaID && x.ID == o.ID {
+			r.items[i] = o
+			return o, true
+		}
+	}
+	return fabricacion.Orden{}, false
+}
+
+func (r *OrdenFabricacionRepo) ByID(empresaID, id string) (fabricacion.Orden, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, x := range r.items {
+		if x.EmpresaID == empresaID && x.ID == id {
+			return x, true
+		}
+	}
+	return fabricacion.Orden{}, false
+}
+
+func (r *OrdenFabricacionRepo) List(empresaID, sedeID string) []fabricacion.Orden {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := []fabricacion.Orden{}
+	for _, x := range r.items {
+		if x.EmpresaID == empresaID && (sedeID == "" || x.SedeID == sedeID) {
+			out = append(out, x)
+		}
+	}
+	return out
 }

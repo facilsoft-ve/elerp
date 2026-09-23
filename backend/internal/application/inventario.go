@@ -396,7 +396,10 @@ type CambiosProducto struct {
 	Componentes         []inventario.ComboComponente
 	EsPlato             *bool
 	Receta              []inventario.ComboComponente
-	EsInsumo            *bool
+	// ModoFabricacion: nil = no se toca. Cambia CUÁNDO se consumen los insumos —al
+	// venderlo o antes, con una orden— y por eso también si el producto se stockea.
+	ModoFabricacion *string
+	EsInsumo        *bool
 	// ComanderaID es *string: nil = no enviado = no se toca; "" vacía la elección y
 	// devuelve el producto al ruteo por rubro.
 	ComanderaID *string
@@ -485,6 +488,14 @@ func (s *Service) ActualizarProducto(empresaID, actor, origen, sku string, cambi
 	}
 	if cambios.Receta != nil {
 		p.Receta = cambios.Receta
+	}
+	if cambios.ModoFabricacion != nil {
+		/* Cambiar el modo cambia si el producto SE STOCKEA, así que cambia lo que
+		 * muestran existencias y la valoración. No se migra nada del ledger: lo ya
+		 * movido queda como está, y de acá en adelante se cuenta con la regla
+		 * nueva. Es la decisión correcta —reescribir el histórico sería inventar un
+		 * pasado— pero conviene saberlo al tocar el interruptor. */
+		p.ModoFabricacion = strings.TrimSpace(*cambios.ModoFabricacion)
 	}
 	if err := s.validarPlato(empresaID, &p); err != nil {
 		return inventario.Producto{}, err
@@ -589,7 +600,10 @@ func (s *Service) Existencias(empresaID, sedeID string) []ExistenciaView {
 		// Un SERVICIO tampoco: el flete de un envío se vende, no se guarda. Listarlo
 		// lo deja para siempre en cero en existencias, en los avisos de agotados y
 		// en la valorización, que es ruido sobre algo que nunca tuvo stock.
-		if p.EsCombo || p.EsPlato || p.EsServicio {
+		// Un plato que se fabrica PARA STOCK sí se lista: está en la vitrina, se
+		// cuenta y se puede agotar. La pregunta vive en un solo sitio
+		// (Producto.SeStockea) para que ninguna pantalla lo cuente distinto.
+		if !p.SeStockea() {
 			continue
 		}
 		movs := s.movimientos.List(empresaID, inventario.FiltroMovimiento{SedeID: sedeID, ProductoID: p.ID})

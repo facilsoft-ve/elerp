@@ -119,6 +119,23 @@ type Pago struct {
 	// transferencia o del envío por Zelle). Es lo que permite conciliar contra el
 	// banco más adelante; sin ella un cobro electrónico no se puede rastrear.
 	Referencia string `json:"referencia" bson:"referencia"`
+	/* LO QUE DEVUELVE EL PUNTO DE VENTA cuando el pago es con tarjeta.
+	 *
+	 * Hoy el cajero pasa la tarjeta en un aparato aparte y teclea el resultado, así
+	 * que ElERP solo sabe lo que alguien escribió: si el punto aprueba y nadie
+	 * teclea, el sistema no se entera; si se teclea y el punto rechaza, el sistema
+	 * cree que cobró. Guardar la APROBACIÓN y el LOTE es lo que convierte «el
+	 * cajero dice que cobró» en «el banco dice que cobró», y es lo que hace
+	 * cuadrar el cierre sin depender de la memoria.
+	 *
+	 * Se guardan desde ya, aunque la aprobación la produzca todavía un simulador:
+	 * el día que se conecte un proveedor real, lo único que cambia es quién llena
+	 * estos campos — no el documento, ni el arqueo, ni la conciliación. */
+	Aprobacion string `json:"aprobacion,omitempty" bson:"aprobacion,omitempty"`
+	Lote       string `json:"lote,omitempty" bson:"lote,omitempty"`
+	// TerminalID identifica el equipo por el que pasó. Vacío mientras no haya
+	// integración: el cobro funciona igual, solo que no se puede rastrear al punto.
+	TerminalID string `json:"terminalId,omitempty" bson:"terminalid,omitempty"`
 }
 
 // VueltoParte es una porción del vuelto entregado al cliente. El vuelto puede
