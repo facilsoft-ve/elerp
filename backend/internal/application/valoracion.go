@@ -83,27 +83,41 @@ func (s *Service) Valoracion(empresaID, sedeID string) ValoracionResult {
 		return res
 	}
 
-	type clave struct{ Almacen, Ubicacion, Producto string }
+	type clave struct{ Almacen, Ubicacion, Producto, Sede string }
 	cantidades := map[clave]float64{}
-	// Costo promedio por (producto, sede): con varias sedes, el mismo producto puede
-	// tener promedios distintos y mezclarlos daría un valor que no es de nadie.
+	/* COSTO PROMEDIO POR (PRODUCTO, SEDE), que es como lo lleva el resto de la
+	 * aplicación —el Kardex y las existencias filtran por sede—.
+	 *
+	 * Promediarlo cruzando sedes da «un valor que no es de nadie»: si una sede
+	 * recibió a 625 y otra a 623, el promedio combinado no es el costo de ninguna
+	 * de las dos, y entonces el inventario valorizado deja de cuadrar contra la
+	 * contabilidad —que sí asentó cada salida al costo de SU sede—. El descuadre
+	 * es chico y constante, que es la peor forma: parece ruido y no lo es. */
 	costo := map[string]float64{}
 	sedeDe := map[string]string{}
+	costoClave := func(productoID, sede string) string { return productoID + "|" + sede }
 
 	for _, p := range s.productos.List(empresaID) {
-		if p.EsCombo || p.EsPlato {
+		if p.EsCombo || p.EsPlato || p.EsServicio {
 			continue // no se stockean: su existencia es la de sus componentes
 		}
 		movs := s.movimientos.List(empresaID, inventario.FiltroMovimiento{SedeID: sedeID, ProductoID: p.ID})
+		porSede := map[string][]inventario.Movimiento{}
 		for _, m := range movs {
 			if m.Tipo == inventario.MovRevaluacion {
-				continue // mueve valor, no unidades: ya está dentro del costo promedio
+				// Mueve valor, no unidades: no entra en las cantidades, pero SÍ en el
+				// promedio, así que igual va al fold de su sede.
+				porSede[m.SedeID] = append(porSede[m.SedeID], m)
+				continue
 			}
-			cantidades[clave{m.AlmacenID, m.UbicacionID, p.ID}] += m.Cantidad
+			cantidades[clave{m.AlmacenID, m.UbicacionID, p.ID, m.SedeID}] += m.Cantidad
 			sedeDe[m.SedeID] = m.SedeID
+			porSede[m.SedeID] = append(porSede[m.SedeID], m)
 		}
-		_, avg := fold(movs)
-		costo[p.ID] = avg
+		for sede, ms := range porSede {
+			_, avg := fold(ms)
+			costo[costoClave(p.ID, sede)] = avg
+		}
 	}
 
 	valorPorAlmacen := map[string]float64{}
@@ -123,8 +137,8 @@ func (s *Service) Valoracion(empresaID, sedeID string) ValoracionResult {
 		f := FilaValoracion{
 			AlmacenID: k.Almacen, UbicacionID: k.Ubicacion,
 			SKU: p.SKU, Nombre: p.Nombre, Rubro: p.Rubro, Cuenta: cuenta,
-			Cantidad: round2(cant), CostoPromedio: round2(costo[p.ID]),
-			Valor: round2(cant * costo[p.ID]),
+			Cantidad: round2(cant), CostoPromedio: round2(costo[costoClave(k.Producto, k.Sede)]),
+			Valor: round2(cant * costo[costoClave(k.Producto, k.Sede)]),
 		}
 		f.AlmacenNombre = "Sin almacén"
 		if a, ok := s.almacenes.ByID(empresaID, k.Almacen); ok {

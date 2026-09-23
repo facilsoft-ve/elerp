@@ -399,7 +399,13 @@ func (s *Store) seedDemo() {
 		s.Movimientos.Append(inventario.Movimiento{
 			EmpresaID: demoEmpID, SedeID: demoSede1ID, ProductoID: p.ID, SKU: p.SKU,
 			Tipo: inventario.MovSalida, Cantidad: -15, Motivo: "venta mostrador",
-			Actor: application.DemoUserID, Fecha: time.Date(2026, 7, 3, 9, 30, 0, 0, time.UTC).Format(time.RFC3339Nano),
+			// Con su costo: una salida sin costo saca las unidades del Kardex y no
+			// asienta costo de ventas, así que el inventario valorizado queda por
+			// debajo de su cuenta contable. Es el mismo descuadre que arrastraba la
+			// merma, y el que delató la pantalla de valoración.
+			CostoUnitario: costoPorSKU[p.SKU],
+			Actor:         application.DemoUserID,
+			Fecha:         time.Date(2026, 7, 3, 9, 30, 0, 0, time.UTC).Format(time.RFC3339Nano),
 		})
 	}
 
@@ -433,7 +439,14 @@ func (s *Store) seedDemo() {
 		s.Movimientos.Append(inventario.Movimiento{
 			EmpresaID: demoEmpID, SedeID: demoSede1ID, ProductoID: p.ID, SKU: p.SKU,
 			Tipo: inventario.MovAjuste, Cantidad: -4, Motivo: "merma por rotura en almacén",
-			Actor: application.DemoUserID, Fecha: time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+			// EL COSTO VA, y no es un detalle: un ajuste sin costo baja las unidades
+			// del Kardex y NO asienta nada —el asiento se salta cuando el costo es
+			// cero—, así que la valoración del inventario deja de cuadrar contra la
+			// cuenta contable. El demo arrastraba justo ese descuadre, y lo delató la
+			// pantalla de valoración. Es el costo al que entró el producto.
+			CostoUnitario: costoPorSKU[p.SKU],
+			Actor:         application.DemoUserID,
+			Fecha:         time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
 		})
 	}
 

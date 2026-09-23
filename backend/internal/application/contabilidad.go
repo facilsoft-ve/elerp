@@ -902,7 +902,23 @@ func (s *Service) Resultados(empresaID, desde, hasta string) EstadoResultados {
 // del demo se asienta contra Capital social, que es lo que económicamente es: un
 // aporte de mercancía del dueño.
 func (s *Service) asentarMovimientoInventario(empresaID, actor string, m inventario.Movimiento) {
-	if s.asientos == nil || m.CostoUnitario <= 0 {
+	if s.asientos == nil {
+		return
+	}
+	if m.CostoUnitario <= 0 {
+		/* UN MOVIMIENTO QUE MUEVE UNIDADES SIN COSTO NO SE ASIENTA, y eso es un
+		 * descuadre esperando: el Kardex baja y la cuenta de inventario no, así que
+		 * la valoración deja de cuadrar contra la contabilidad sin que nada falle.
+		 *
+		 * Pasó de verdad —una merma sembrada sin costo— y solo se descubrió cuando
+		 * la pantalla de valoración lo comparó. Saltar en silencio está bien cuando
+		 * no hay unidades que mover; cuando las hay, queda constancia para que se
+		 * pueda encontrar. */
+		if m.Cantidad > 0.0001 || m.Cantidad < -0.0001 {
+			s.audit.Append(evento(empresaID, actor, "contabilidad",
+				"inventario.movimiento.sin_costo", m.SKU,
+				fmt.Sprintf("%s de %.2f sin costo unitario: no genera asiento y descuadra la valoración", m.Tipo, m.Cantidad)))
+		}
 		return
 	}
 	monto := m.Cantidad * m.CostoUnitario
@@ -928,6 +944,19 @@ func (s *Service) asentarMovimientoInventario(empresaID, actor string, m inventa
 		s.asentar(empresaID, actor, m.Fecha, "Ajuste de inventario (sobrante) — "+m.Motivo, "movimiento", m.ID, append(
 			inv(monto, true),
 			contabilidad.Linea{Codigo: contabilidad.CtaCostoDeVentas, Haber: round2(monto)},
+		))
+	case m.Tipo == inventario.MovSalida && monto < -0.004:
+		/* SALIDA QUE NO VIENE DE UNA FACTURA. La venta ya asienta su costo por su
+		 * propia vía (asentarVenta) y no llega acá; lo que sí llega es lo que sale
+		 * del almacén sin ser una venta —un consumo, una salida cargada a mano—, y
+		 * hasta ahora no asentaba NADA: bajaba el Kardex y dejaba la cuenta de
+		 * inventario intacta.
+		 *
+		 * El descuadre era invisible: el balance seguía cuadrando y solo la pantalla
+		 * de valoración lo delataba al comparar las dos cifras. */
+		s.asentar(empresaID, actor, m.Fecha, "Salida de inventario — "+m.Motivo, "movimiento", m.ID, append(
+			[]contabilidad.Linea{{Codigo: contabilidad.CtaCostoDeVentas, Debe: round2(-monto)}},
+			inv(-monto, false)...,
 		))
 	}
 	// Las transferencias entre sedes NO se asientan: la mercancía sigue siendo de
