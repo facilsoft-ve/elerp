@@ -80,6 +80,17 @@ type platoNicho struct {
 	// comandera fija el puesto por el que sale su comanda, por NOMBRE (el id se
 	// genera al sembrar). Vacío ⇒ se rutea por su rubro.
 	comandera string
+	/* FABRICACIÓN. Vacíos ⇒ el plato se prepara al venderlo, que es lo de siempre.
+	 * Con `paraStock` el producto se fabrica ANTES con una orden y queda en
+	 * existencia — es el preparado oficinal de una farmacia, la bandeja de postres
+	 * o la pieza armada en un taller. */
+	paraStock                         bool
+	loteBase, rendimiento, tolerancia float64
+	exento                            bool
+	unidad                            string
+	// requiereLote obliga a declarar lote y vencimiento. En un preparado magistral
+	// no es opcional: la ley exige que el frasco salga rotulado con los dos.
+	requiereLote bool
 }
 
 type cliNicho struct {
@@ -242,10 +253,21 @@ func (s *Store) seedEmpresaNicho(e especNicho) {
 		if rubro == "" {
 			rubro = "Cocina"
 		}
+		unidad := pl.unidad
+		if unidad == "" {
+			unidad = inventario.UnidadUnidad
+		}
+		modo := ""
+		if pl.paraStock {
+			modo = inventario.FabricaParaStock
+		}
 		s.Productos.Create(inventario.Producto{
 			EmpresaID: e.empID, SKU: pl.sku, Nombre: pl.nombre, Rubro: rubro,
-			UnidadBase: "unidad", TipoVenta: inventario.TipoVentaUnidad, Precio: pl.precio,
-			EsPlato: true, Receta: pl.receta, Activo: true,
+			UnidadBase: unidad, TipoVenta: inventario.TipoVentaUnidad, Precio: pl.precio,
+			EsPlato: true, Receta: pl.receta, Activo: true, ExentoIVA: pl.exento,
+			ModoFabricacion: modo,
+			LoteBase:        pl.loteBase, RendimientoPct: pl.rendimiento, ToleranciaPct: pl.tolerancia,
+			RequiereLote: pl.requiereLote, ControlaVencimiento: pl.requiereLote,
 		})
 	}
 

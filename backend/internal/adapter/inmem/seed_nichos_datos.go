@@ -310,8 +310,14 @@ func farmaciaDemo() especNicho {
 			{diasAtras: 7, cliente: "Seguros Altamira, C.A.", doc: "J-31234567-8",
 				sku: "MAT-TEN-DIG", cant: 3, plazoDias: 30},
 		},
-		rubros:  []string{"Medicamentos", "Cuidado personal", "Bebé", "Vitaminas", "Material médico"},
-		modulos: []string{aplicacion.ModAsistenteIA},
+		rubros: []string{"Medicamentos", "Cuidado personal", "Bebé", "Vitaminas", "Material médico",
+			// El recetario es su propio rubro: lo que se PREPARA no se compra hecho, y
+			// mezclarlo con los medicamentos de reventa haría imposible ver cuánto
+			// mueve el laboratorio.
+			"Fórmulas magistrales", "Materia prima"},
+		// La farmacia PREPARA, no solo revende: el recetario es fabricación con otro
+		// nombre. Es además el caso que mejor lo muestra fuera de una cocina.
+		modulos: []string{aplicacion.ModAsistenteIA, aplicacion.ModFabricacion},
 		productos: []prodNicho{
 			// Exentos: medicamentos y material médico.
 			{sku: "MED-ACE-500", nombre: "Acetaminofén 500 mg (caja x20)", rubro: "Medicamentos", unidad: "unidad", costo: 2800, precio: 5400, stock: 140, exento: true},
@@ -334,6 +340,81 @@ func farmaciaDemo() especNicho {
 			{sku: "VIT-OME-3", nombre: "Omega 3 (x60 cápsulas)", rubro: "Vitaminas", unidad: "unidad", costo: 18500, precio: 31000, stock: 32},
 			// Agotado: el que siempre falta.
 			{sku: "MED-SAL-INH", nombre: "Salbutamol inhalador", rubro: "Medicamentos", unidad: "unidad", costo: 24000, precio: 39000, stock: 0, exento: true},
+
+			/* MATERIA PRIMA DEL RECETARIO. No se vende al público —un frasco de
+			 * ácido salicílico puro no se despacha en mostrador— y por eso va como
+			 * insumo: participa del Kardex y del costo, y queda fuera del POS.
+			 *
+			 * Los principios activos se pesan en GRAMOS y los vehículos se miden en
+			 * MILILITROS: la unidad del insumo es la de la fórmula, no la del envase
+			 * en que lo compra la droguería. */
+			{sku: "PA-UREA", nombre: "Urea USP (principio activo)", rubro: "Materia prima", unidad: "g", costo: 42, stock: 2500, porPeso: true, insumo: true, exento: true},
+			{sku: "PA-SALICILICO", nombre: "Ácido salicílico USP", rubro: "Materia prima", unidad: "g", costo: 180, stock: 800, porPeso: true, insumo: true, exento: true},
+			{sku: "PA-OXIDO-ZN", nombre: "Óxido de zinc USP", rubro: "Materia prima", unidad: "g", costo: 95, stock: 1500, porPeso: true, insumo: true, exento: true},
+			{sku: "PA-NISTATINA", nombre: "Nistatina (polvo)", rubro: "Materia prima", unidad: "g", costo: 2600, stock: 120, porPeso: true, insumo: true, exento: true},
+			{sku: "EXC-VASELINA", nombre: "Vaselina sólida", rubro: "Materia prima", unidad: "g", costo: 28, stock: 6000, porPeso: true, insumo: true, exento: true},
+			{sku: "EXC-GLICERINA", nombre: "Glicerina USP", rubro: "Materia prima", unidad: "ml", costo: 35, stock: 4000, porPeso: true, insumo: true, exento: true},
+			{sku: "EXC-JARABE", nombre: "Jarabe simple", rubro: "Materia prima", unidad: "ml", costo: 12, stock: 9000, porPeso: true, insumo: true, exento: true},
+			{sku: "EXC-AGUA-DES", nombre: "Agua destilada", rubro: "Materia prima", unidad: "ml", costo: 4, stock: 20000, porPeso: true, insumo: true, exento: true},
+			// El ENVASE es insumo también: se consume al preparar y cuesta. Dejarlo
+			// fuera subestima el costo de cada frasco que sale del recetario.
+			{sku: "ENV-POTE-100", nombre: "Pote plástico 100 g", rubro: "Materia prima", unidad: "unidad", costo: 850, stock: 400, insumo: true, exento: true},
+			{sku: "ENV-FRASCO-120", nombre: "Frasco ámbar 120 ml con tapa", rubro: "Materia prima", unidad: "unidad", costo: 1400, stock: 300, insumo: true, exento: true},
+			{sku: "ENV-ETIQUETA", nombre: "Etiqueta de rotulación", rubro: "Materia prima", unidad: "unidad", costo: 90, stock: 1200, insumo: true, exento: true},
+		},
+
+		/* EL RECETARIO. Dos maneras de preparar, y la farmacia usa las dos:
+		 *
+		 *  · PREPARADO OFICINAL (para stock): una fórmula del formulario nacional
+		 *    que se prepara por lotes y se tiene lista en el anaquel. Se produce con
+		 *    una orden y se vende como cualquier mercancía.
+		 *  · FÓRMULA MAGISTRAL (bajo pedido): se prepara contra el récipe de un
+		 *    médico, para un paciente. No se stockea: se hace cuando llega la receta
+		 *    y consume sus materias primas en ese momento.
+		 *
+		 * Los tres llevan LOTE Y VENCIMIENTO porque la ley lo exige en el rótulo, y
+		 * porque un preparado dura semanas, no años: sin vencimiento en el sistema,
+		 * el que caducó sigue apareciendo como disponible.
+		 */
+		platos: []platoNicho{
+			// Crema de urea al 10%: el preparado más común de un recetario. Se hace
+			// por tandas de 20 potes y se tiene listo.
+			{sku: "MAG-UREA-10", nombre: "Crema de urea 10% — pote 100 g", precio: 9800,
+				rubro: "Fórmulas magistrales", exento: true, paraStock: true, requiereLote: true,
+				// La fórmula está escrita para UNA TANDA de 20 potes.
+				loteBase: 20, rendimiento: 94, tolerancia: 8,
+				receta: []inventario.ComboComponente{
+					// 10% de urea sobre 2.000 g de crema = 200 g. Se pierde algo al pesar.
+					{SKU: "PA-UREA", Cantidad: 200, MermaPct: 2},
+					{SKU: "EXC-VASELINA", Cantidad: 1700, MermaPct: 3},
+					{SKU: "EXC-GLICERINA", Cantidad: 100},
+					{SKU: "ENV-POTE-100", Cantidad: 20},
+					{SKU: "ENV-ETIQUETA", Cantidad: 20},
+				}},
+			// Pasta de óxido de zinc: la otra de anaquel.
+			{sku: "MAG-OXIDO-ZN", nombre: "Pasta de óxido de zinc 25% — pote 100 g", precio: 8400,
+				rubro: "Fórmulas magistrales", exento: true, paraStock: true, requiereLote: true,
+				loteBase: 15, rendimiento: 95, tolerancia: 8,
+				receta: []inventario.ComboComponente{
+					{SKU: "PA-OXIDO-ZN", Cantidad: 375, MermaPct: 2},
+					{SKU: "EXC-VASELINA", Cantidad: 1050, MermaPct: 3},
+					{SKU: "EXC-GLICERINA", Cantidad: 75},
+					{SKU: "ENV-POTE-100", Cantidad: 15},
+					{SKU: "ENV-ETIQUETA", Cantidad: 15},
+				}},
+			/* Suspensión de nistatina: ESTA VA BAJO PEDIDO. Se prepara contra el
+			 * récipe porque dura pocos días refrigerada — tenerla en el anaquel sería
+			 * botarla. Es el mismo recetario y la decisión opuesta, que es justo lo
+			 * que el modo por producto permite. */
+			{sku: "MAG-NISTATINA", nombre: "Suspensión de nistatina — frasco 120 ml", precio: 16500,
+				rubro: "Fórmulas magistrales", exento: true, requiereLote: true,
+				receta: []inventario.ComboComponente{
+					{SKU: "PA-NISTATINA", Cantidad: 2.4},
+					{SKU: "EXC-JARABE", Cantidad: 90},
+					{SKU: "EXC-AGUA-DES", Cantidad: 30},
+					{SKU: "ENV-FRASCO-120", Cantidad: 1},
+					{SKU: "ENV-ETIQUETA", Cantidad: 1},
+				}},
 		},
 		clientes: []cliNicho{
 			{nombre: "Consumidor final", tipoDoc: "V", doc: "00000000", telefono: ""},

@@ -185,3 +185,108 @@ func foldSemilla(movs []inventario.Movimiento) (float64, float64) {
 }
 
 func r2Semilla(v float64) float64 { return float64(int64(v*100+0.5)) / 100 }
+
+/* EL RECETARIO DE LA FARMACIA.
+ *
+ * Fabricación fuera de una cocina, que es lo que este caso enseña: una farmacia
+ * que además de revender prepara sus propias fórmulas. Cambia el vocabulario
+ * —materia prima en vez de insumo, preparado en vez de plato— y no cambia nada
+ * del mecanismo.
+ *
+ * Y es el caso donde LOTE Y VENCIMIENTO dejan de ser opcionales: un preparado
+ * magistral sale rotulado con los dos por ley, y dura semanas, no años. Sin
+ * vencimiento en el sistema, el que caducó sigue apareciendo como disponible.
+ */
+func (s *Store) seedRecetarioFarmacia(empID, sedeID string) {
+	s.Modulos.Upsert(aplicacion.Instalacion{
+		EmpresaID: empID, ModuloID: aplicacion.ModFabricacion,
+		Instalado: true, Activo: true,
+		Actualizada: time.Now().UTC().Format(time.RFC3339),
+	})
+
+	hace := func(h int) time.Time { return time.Now().Add(-time.Duration(h) * time.Hour).UTC() }
+	num := 0
+
+	// preparar ejecuta una orden completa contra el ledger, igual que lo haría la
+	// aplicación: consume la materia prima al arrancar e ingresa el preparado al
+	// terminar, con su lote y su vencimiento.
+	preparar := func(sku, lote string, objetivo, producida float64, diasVida, horas int) {
+		p, ok := s.Productos.BySKU(empID, sku)
+		if !ok {
+			return
+		}
+		num++
+		inicio := hace(horas)
+		fin := hace(horas - 1)
+		o := fabricacion.Orden{
+			EmpresaID: empID, SedeID: sedeID,
+			Numero: num, NumeroCompleto: fmt.Sprintf("OF-%06d", num),
+			ProductoID: p.ID, SKU: p.SKU, Nombre: p.Nombre,
+			Cantidad: objetivo, Estado: fabricacion.EstadoEnProceso,
+			Lote: lote,
+			// El vencimiento se cuenta desde que se PREPARÓ, no desde hoy: es la
+			// fecha que va en el rótulo del frasco.
+			Vencimiento: inicio.AddDate(0, 0, diasVida).Format("2006-01-02"),
+			Creada:      inicio.Format(time.RFC3339Nano),
+			Iniciada:    inicio.Format(time.RFC3339Nano),
+		}
+		o.Bitacora = append(o.Bitacora,
+			fabricacion.Evento{Cuando: o.Creada, Estado: fabricacion.EstadoBorrador, Actor: application.DemoUserID},
+			fabricacion.Evento{Cuando: o.Iniciada, Estado: fabricacion.EstadoEnProceso, Actor: application.DemoUserID},
+		)
+
+		factor := p.FactorDeFormula(objetivo)
+		for _, comp := range p.Receta {
+			ins, ok := s.Productos.BySKU(empID, comp.SKU)
+			if !ok {
+				continue
+			}
+			_, avg := foldSemilla(s.Movimientos.List(empID, inventario.FiltroMovimiento{SedeID: sedeID, ProductoID: ins.ID}))
+			c := fabricacion.Consumo{
+				SKU: ins.SKU, ProductoID: ins.ID, Nombre: ins.Nombre,
+				Cantidad: r2Semilla(comp.CantidadBruta(factor)), CostoUnitario: r2Semilla(avg),
+			}
+			o.Consumos = append(o.Consumos, c)
+			o.CostoTotal = r2Semilla(o.CostoTotal + c.Total())
+			s.Movimientos.Append(inventario.Movimiento{
+				EmpresaID: empID, SedeID: sedeID, ProductoID: c.ProductoID, SKU: c.SKU,
+				Tipo: inventario.MovSalida, Cantidad: -c.Cantidad, CostoUnitario: c.CostoUnitario,
+				Motivo: "preparación " + o.NumeroCompleto, RefTipo: application.RefFabricacion, RefID: o.ID,
+				Actor: application.DemoUserID, Fecha: o.Iniciada,
+			})
+		}
+
+		if producida <= 0 { // queda en el mesón, preparándose
+			s.OrdenesFabricacion.Append(o)
+			return
+		}
+		o.CantidadProducida = producida
+		o.CostoUnitario = r2Semilla(o.CostoTotal / producida)
+		o.FueraDeTolerancia = !p.DesviacionAceptable(objetivo, producida)
+		o.Terminada = fin.Format(time.RFC3339Nano)
+		o.Estado = fabricacion.EstadoTerminada
+		o.Bitacora = append(o.Bitacora, fabricacion.Evento{
+			Cuando: o.Terminada, Estado: fabricacion.EstadoTerminada, Actor: application.DemoUserID,
+		})
+		s.Movimientos.Append(inventario.Movimiento{
+			EmpresaID: empID, SedeID: sedeID, ProductoID: p.ID, SKU: p.SKU,
+			Tipo: inventario.MovEntrada, Cantidad: producida, CostoUnitario: o.CostoUnitario,
+			Lote: o.Lote, Vencimiento: o.Vencimiento,
+			Motivo: "preparación " + o.NumeroCompleto, RefTipo: application.RefFabricacion, RefID: o.ID,
+			Actor: application.DemoUserID, Fecha: o.Terminada,
+		})
+		s.OrdenesFabricacion.Append(o)
+	}
+
+	// Dos tandas de crema de urea con lotes distintos: es lo que permite ver el
+	// rastro por lote y que una vence antes que la otra.
+	preparar("MAG-UREA-10", "U-2609A", 20, 19, 60, 240)
+	preparar("MAG-UREA-10", "U-2609B", 20, 20, 60, 72)
+	// La pasta de zinc rindió por debajo de la tolerancia: alguien tiene que mirar
+	// por qué de 15 potes salieron 12.
+	preparar("MAG-OXIDO-ZN", "Z-2609A", 15, 12, 90, 120)
+	// Y una en el mesón ahora mismo, para poder terminarla desde la pantalla.
+	preparar("MAG-UREA-10", "U-2609C", 20, 0, 60, 3)
+
+	s.Numerador.Fijar(empID, sedeID, "OF", num)
+}

@@ -181,6 +181,9 @@ func New() *Store {
 	// Fabricación: el restaurante es donde el caso se entiende solo (la torta se
 	// prepara al pedirla, el brownie está hecho en la vitrina).
 	s.seedFabricacion("emp_demo_rest", "sede_demo_rest")
+	// La farmacia PREPARA: el recetario es fabricación fuera de una cocina, y es
+	// donde lote y vencimiento dejan de ser opcionales.
+	s.seedRecetarioFarmacia("emp_demo_farm", "sede_demo_farm")
 	return s
 }
 
