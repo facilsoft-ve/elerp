@@ -35,6 +35,15 @@ func (s *Server) registerInventario(r fiber.Router) {
 
 	// VALORACIÓN: dónde está el valor y si coincide con la contabilidad.
 	g.Get("/valoracion", s.handleValoracion)
+
+	// REABASTECIMIENTO: cuándo volver a comprar, y cuánto.
+	g.Get("/reabastecimiento/reglas", s.handleReglasReabastecimiento)
+	g.Post("/reabastecimiento/reglas", s.escribirInventario, s.handleCrearReglaReabastecimiento)
+	g.Patch("/reabastecimiento/reglas/:id", s.escribirInventario, s.handleActualizarReglaReabastecimiento)
+	// La revisión NO escribe: es lo que hay que poder mirar antes de generar nada,
+	// y por eso no exige el permiso de escritura.
+	g.Get("/reabastecimiento/revisar", s.handleRevisarReabastecimiento)
+	g.Post("/reabastecimiento/generar", s.escribirInventario, s.handleGenerarReabastecimiento)
 	// CORRECCIÓN DE COSTO: revaluar sin mover unidades.
 	g.Post("/existencias/:sku/corregir-costo", s.escribirInventario, s.handleCorregirCosto)
 	// CONTEO FÍSICO: la hoja entera en una operación. La vista previa NO escribe, y
@@ -444,6 +453,88 @@ func respuestaApartado(c *fiber.Ctx, out inventario.Apartado, err error) error {
 		estado = fiber.StatusConflict
 	}
 	return c.Status(estado).JSON(fiber.Map{"error": err.Error()})
+}
+
+func (s *Server) handleReglasReabastecimiento(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"reglas": s.svc.ReglasReabastecimiento(empresaIDOf(c), c.Query("sede"))})
+}
+
+// reglaReabastecimientoBody es el cuerpo de alta y edición.
+type reglaReabastecimientoBody struct {
+	SKU         string  `json:"sku"`
+	SedeID      string  `json:"sedeId"`
+	AlmacenID   string  `json:"almacenId"`
+	Minimo      float64 `json:"minimo"`
+	Maximo      float64 `json:"maximo"`
+	Multiplo    float64 `json:"multiplo"`
+	ProveedorID string  `json:"proveedorId"`
+	Activa      bool    `json:"activa"`
+}
+
+func (in reglaReabastecimientoBody) aDominio(sedePorDefecto string) inventario.ReglaReabastecimiento {
+	sede := in.SedeID
+	if sede == "" {
+		sede = sedePorDefecto
+	}
+	return inventario.ReglaReabastecimiento{
+		SKU: in.SKU, SedeID: sede, AlmacenID: in.AlmacenID,
+		Minimo: in.Minimo, Maximo: in.Maximo, Multiplo: in.Multiplo,
+		ProveedorID: in.ProveedorID, Activa: in.Activa,
+	}
+}
+
+func (s *Server) handleCrearReglaReabastecimiento(c *fiber.Ctx) error {
+	var in reglaReabastecimientoBody
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.CrearReglaReabastecimiento(empresaIDOf(c), principalOf(c).UserID, origen(c),
+		in.aDominio(s.sedeParam(c)))
+	if err != nil {
+		estado := fiber.StatusBadRequest
+		// Una regla repetida es un conflicto de estado, no un dato mal escrito: la
+		// petición era correcta y ya existe algo que la cubre.
+		if errors.Is(err, application.ErrReglaDuplicada) {
+			estado = fiber.StatusConflict
+		}
+		return c.Status(estado).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+func (s *Server) handleActualizarReglaReabastecimiento(c *fiber.Ctx) error {
+	var in reglaReabastecimientoBody
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.ActualizarReglaReabastecimiento(empresaIDOf(c), c.Params("id"),
+		principalOf(c).UserID, origen(c), in.aDominio(s.sedeParam(c)))
+	if err != nil {
+		estado := fiber.StatusBadRequest
+		if errors.Is(err, application.ErrReglaNoExiste) {
+			estado = fiber.StatusNotFound
+		}
+		return c.Status(estado).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleRevisarReabastecimiento(c *fiber.Ctx) error {
+	return c.JSON(s.svc.RevisarReabastecimiento(empresaIDOf(c), s.sedeParam(c)))
+}
+
+func (s *Server) handleGenerarReabastecimiento(c *fiber.Ctx) error {
+	out, err := s.svc.GenerarSolicitudesDeReabastecimiento(empresaIDOf(c), s.sedeParam(c),
+		principalOf(c).UserID, origen(c))
+	if err != nil {
+		estado := fiber.StatusBadRequest
+		// «Nada bajo mínimos» no es un error de la petición: es que no hace falta.
+		if errors.Is(err, application.ErrSinNadaQuePedir) {
+			estado = fiber.StatusConflict
+		}
+		return c.Status(estado).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"solicitudes": out})
 }
 
 func (s *Server) handleValoracion(c *fiber.Ctx) error {

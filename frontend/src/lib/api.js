@@ -694,6 +694,16 @@ export const api = {
     request(`/api/contabilidad/rubros/${encodeURIComponent(id)}/cuenta/previsualizar`, { method: 'POST', body: JSON.stringify({ cuenta }) }),
   actualizarCuentaRubro: (id, cuenta, confirmado = false) =>
     request(`/api/contabilidad/rubros/${encodeURIComponent(id)}/cuenta`, { method: 'PATCH', body: JSON.stringify({ cuenta, confirmado }) }),
+  // REABASTECIMIENTO: cuándo volver a comprar, y cuánto.
+  reglasReabastecimiento: (sedeId = '') =>
+    request('/api/inventario/reabastecimiento/reglas' + (sedeId ? '?sede=' + encodeURIComponent(sedeId) : '')),
+  crearReglaReabastecimiento: (body) =>
+    request('/api/inventario/reabastecimiento/reglas', { method: 'POST', body: JSON.stringify(body) }),
+  actualizarReglaReabastecimiento: (id, body) =>
+    request(`/api/inventario/reabastecimiento/reglas/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  // Revisar NO escribe: es lo que hay que mirar antes de generar nada.
+  revisarReabastecimiento: () => request('/api/inventario/reabastecimiento/revisar'),
+  generarReabastecimiento: () => request('/api/inventario/reabastecimiento/generar', { method: 'POST' }),
   // APARTADOS: mercancía comprometida que todavía no salió.
   apartados: () => request('/api/inventario/apartados'),
   crearApartado: (body) => request('/api/inventario/apartados', { method: 'POST', body: JSON.stringify(body) }),

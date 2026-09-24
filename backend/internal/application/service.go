@@ -220,6 +220,9 @@ type Service struct {
 	// apartados es la mercancía comprometida que todavía no salió. Se cablea con
 	// ConApartados; sin él nada aparta y el disponible es la existencia.
 	apartados inventario.ApartadoRepo
+	// reglasReabastecimiento dice cuándo volver a comprar. Se cablea con
+	// ConReglasReabastecimiento; sin él no se repone nada solo.
+	reglasReabastecimiento inventario.ReglaReabastecimientoRepo
 	// sedes da acceso a las COORDENADAS del local, para la presencia estricta
 	// (ver presencia.go). Se cablea con ConSedes; sin él la verificación de
 	// presencia no aplica y todo se comporta como antes.

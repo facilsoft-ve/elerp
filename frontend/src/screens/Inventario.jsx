@@ -9,6 +9,7 @@ import { Movimientos } from './Movimientos.jsx'
 import { ComprasRecepcion } from './ComprasRecepcion.jsx'
 import { Conteo } from './Conteo.jsx'
 import { Valoracion } from './Valoracion.jsx'
+import { Reabastecimiento } from './Reabastecimiento.jsx'
 
 // Contenedor del módulo Inventario. Las 4 vistas viven en pestañas. Acepta rutas
 // "inventario", "inventario:<sub>" y "kardex:<sku>" (esta última abre Kardex con
@@ -22,6 +23,7 @@ const TABS = [
   { id: 'transferencias', label: 'Transferencias', icon: <Icon.ArrowLeftRight size={15} /> },
   { id: 'conteo', label: 'Conteo físico', icon: <Icon.ClipboardList size={15} /> },
   { id: 'valoracion', label: 'Valoración', icon: <Icon.Banknote size={15} /> },
+  { id: 'reabastecimiento', label: 'Reabastecimiento', icon: <Icon.Refresh size={15} /> },
 ]
 
 export function Inventario({ route }) {
@@ -54,6 +56,7 @@ export function Inventario({ route }) {
       {tab === 'transferencias' ? <Transferencias /> : null}
       {tab === 'conteo' ? <Conteo /> : null}
       {tab === 'valoracion' ? <Valoracion /> : null}
+      {tab === 'reabastecimiento' ? <Reabastecimiento /> : null}
     </div>
   )
 }

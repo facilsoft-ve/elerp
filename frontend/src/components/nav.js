@@ -129,6 +129,7 @@ export const NAV = [
       { id: 'transferencias', label: 'Transferencias' },
       { id: 'conteo', label: 'Conteo físico' },
       { id: 'valoracion', label: 'Valoración' },
+      { id: 'reabastecimiento', label: 'Reabastecimiento' },
     ],
   },
   {
