@@ -7,6 +7,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/mornix/elerp/internal/adapter/inmem"
+	"github.com/mornix/elerp/internal/domain/cliente"
+	"github.com/mornix/elerp/internal/domain/fiscal"
 	mesadom "github.com/mornix/elerp/internal/domain/mesa"
 )
 
@@ -103,6 +105,7 @@ func sembrarNichos(st *Store, semilla *inmem.Store, refrescar bool) {
 				st.Clientes.c.insert(cl)
 			}
 		}
+		completarDatosFiscalesDemo(st, n.EmpresaID, snap)
 
 		// --- Operación: caja, personal, cobros, proveedores y facturación ---
 		// Sin caja habilitada no se puede facturar, y sin documentos el rubro se ve
@@ -508,5 +511,45 @@ func sembrarContadores(st *Store, empresaID string, contadores map[string]int) {
 	}
 	if n > 0 {
 		log.Printf("Mongo: %s → %d contador(es) de numeración", empresaID, n)
+	}
+}
+
+/* completarDatosFiscalesDemo pone al día lo que la IMPRENTA DIGITAL exige del
+ * cliente y los nichos ya plantados no tienen.
+ *
+ * Son dos cosas y las dos frenan la emisión ANTES de cobrar, que es el peor
+ * momento: la DIRECCIÓN (la factura la exige a todo receptor, también a
+ * consumidor final) y el DÍGITO VERIFICADOR del RIF. Los RIF de demostración se
+ * escribieron a ojo y cuatro de cinco no pasaban el módulo 11 del SENIAT, así
+ * que el recorrido moría con «el dígito verificador del RIF no es correcto».
+ *
+ * El bloque de siembra de clientes solo corre con la cartera VACÍA, así que sin
+ * esto una demo ya plantada nunca se enteraría de la corrección.
+ *
+ * Aditivo y acotado, emparejando por NOMBRE —que es lo estable cuando lo que
+ * cambia es justamente el documento—: la dirección solo se rellena si está
+ * vacía, y el RIF solo se corrige si el guardado NO pasa la validación. Un dato
+ * que alguien editó en la demo se queda como lo dejaron.
+ */
+func completarDatosFiscalesDemo(st *Store, empresaID string, snap inmem.SnapshotEmpresa) {
+	porNombre := make(map[string]cliente.Cliente, len(snap.Clientes))
+	for _, cl := range snap.Clientes {
+		porNombre[strings.TrimSpace(cl.Nombre)] = cl
+	}
+	for _, cl := range st.Clientes.List(empresaID) {
+		ref, ok := porNombre[strings.TrimSpace(cl.Nombre)]
+		if !ok {
+			continue
+		}
+		cambio := false
+		if strings.TrimSpace(cl.Direccion) == "" && strings.TrimSpace(ref.Direccion) != "" {
+			cl.Direccion, cambio = ref.Direccion, true
+		}
+		if fiscal.ValidarDocumento(cl.TipoDocumento, cl.Documento) != nil && cl.Documento != ref.Documento {
+			cl.Documento, cambio = ref.Documento, true
+		}
+		if cambio {
+			st.Clientes.Update(cl)
+		}
 	}
 }

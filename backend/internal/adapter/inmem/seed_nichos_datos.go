@@ -45,8 +45,8 @@ func restauranteDemo() especNicho {
 		},
 		proveedores: []provNicho{
 			{nombre: "Distribuidora de Alimentos Del Valle, C.A.", doc: "J-30871234-5", telefono: "0212-6651122"},
-			{nombre: "Carnicería El Novillo, C.A.", doc: "J-31445566-0", telefono: "0212-7734455"},
-			{nombre: "Frutas y Verduras La Cosecha", doc: "J-29887766-3", telefono: "0414-1239876"},
+			{nombre: "Carnicería El Novillo, C.A.", doc: "J-31445566-4", telefono: "0212-7734455"},
+			{nombre: "Frutas y Verduras La Cosecha", doc: "J-29887766-9", telefono: "0414-1239876"},
 		},
 		// Un mes de servicio: contado, una noche cobrada en divisas (IGTF), una
 		// contingencia y dos cuentas corporativas a crédito.
@@ -64,9 +64,9 @@ func restauranteDemo() especNicho {
 			{diasAtras: 4, serie: "C", cliente: "Consumidor final", sku: "BEB-REFRESCO", cant: 6, contingencia: true},
 			// Almuerzos corporativos a crédito: una VENCIDA con abono parcial (hace que
 			// «Por cobrar vencido» se vea en rojo) y una vigente sin abono.
-			{diasAtras: 38, cliente: "Corporación Andina de Seguros, C.A.", doc: "J-30125678-4",
+			{diasAtras: 38, cliente: "Corporación Andina de Seguros, C.A.", doc: "J-30125678-6",
 				sku: "PLA-POLLO-ARROZ", cant: 25, plazoDias: 15, abono: 200000},
-			{diasAtras: 5, cliente: "Corporación Andina de Seguros, C.A.", doc: "J-30125678-4",
+			{diasAtras: 5, cliente: "Corporación Andina de Seguros, C.A.", doc: "J-30125678-6",
 				sku: "PLA-MILANESA", cant: 18, plazoDias: 30},
 		},
 		rubros:  []string{"Insumos", "Cocina", "Bebidas", "Postres"},
@@ -159,9 +159,11 @@ func restauranteDemo() especNicho {
 		},
 
 		clientes: []cliNicho{
-			{nombre: "Consumidor final", tipoDoc: "V", doc: "00000000", telefono: ""},
-			{nombre: "Corporación Andina de Seguros, C.A.", tipoDoc: "J", doc: "301256784", telefono: "0212-7654321"},
-			{nombre: "Luis Bermúdez", tipoDoc: "V", doc: "14875690", telefono: "0414-3216549"},
+			{nombre: "Consumidor final", tipoDoc: "V", doc: "00000000", telefono: "", direccion: "Caracas, Distrito Capital"},
+			{nombre: "Corporación Andina de Seguros, C.A.", tipoDoc: "J", doc: "301256786", telefono: "0212-7654321",
+				direccion: "Av. Venezuela, Torre Phelps, Piso 12, El Rosal, Caracas"},
+			{nombre: "Luis Bermúdez", tipoDoc: "V", doc: "14875690", telefono: "0414-3216549",
+				direccion: "Calle Sucre, Edif. Don Carlos, Apto. 5-A, Chacao, Caracas"},
 		},
 
 		// Salón 8×6. Bloqueada, la cocina (esquina superior derecha): ahí no puede
@@ -210,16 +212,16 @@ func ferreteriaDemo() especNicho {
 		orgID: nichoFerrOrgID, empID: nichoFerrEmpID, sedeID: nichoFerrSedeID,
 		org:    "Distribuidora Tornillo de Oro",
 		nombre: "Ferretería Tornillo de Oro, C.A.",
-		rif:    "J-31456982-7",
+		rif:    "J-31456982-1",
 		giro:   "ferreteria", direccion: "Av. Intercomunal, Valencia",
 		colorMarca: "#92600A",
 		slug:       "tornillodeoro", telefonoBanco: "0241-8890",
 		cajero: "Wilmer Castillo", supervisor: "Néstor Ramírez",
 		vendedor: "Jhonny Peña", contadora: "Lcda. Yaneth Mora",
 		proveedores: []provNicho{
-			{nombre: "Importadora de Herramientas Andina, C.A.", doc: "J-30556677-8", telefono: "0241-8812233"},
-			{nombre: "Cementos y Agregados del Centro, C.A.", doc: "J-29334455-1", telefono: "0241-8845566"},
-			{nombre: "Electro Suministros Valencia, C.A.", doc: "J-31667788-2", telefono: "0241-8878899"},
+			{nombre: "Importadora de Herramientas Andina, C.A.", doc: "J-30556677-1", telefono: "0241-8812233"},
+			{nombre: "Cementos y Agregados del Centro, C.A.", doc: "J-29334455-7", telefono: "0241-8845566"},
+			{nombre: "Electro Suministros Valencia, C.A.", doc: "J-31667788-5", telefono: "0241-8878899"},
 		},
 		facturas: []emisionNicho{
 			{diasAtras: 28, cliente: "Consumidor final", sku: "HER-MAR-16", cant: 3},
@@ -233,9 +235,9 @@ func ferreteriaDemo() especNicho {
 			{diasAtras: 2, cliente: "Consumidor final", sku: "HER-CIN-5M", cant: 2},
 			{diasAtras: 5, serie: "C", cliente: "Consumidor final", sku: "PLO-COD-PVC", cant: 20, contingencia: true},
 			// Obra a crédito: vencida con abono, y una vigente a 30 días.
-			{diasAtras: 42, cliente: "Constructora Los Andes, C.A.", doc: "J-29876453-1",
+			{diasAtras: 42, cliente: "Constructora Los Andes, C.A.", doc: "J-29876453-8",
 				sku: "CON-CAB-3/8", cant: 80, plazoDias: 15, abono: 500000},
-			{diasAtras: 8, cliente: "Constructora Los Andes, C.A.", doc: "J-29876453-1",
+			{diasAtras: 8, cliente: "Constructora Los Andes, C.A.", doc: "J-29876453-8",
 				sku: "CON-CEM-42", cant: 60, plazoDias: 30},
 		},
 		rubros:  []string{"Herramientas", "Plomería", "Electricidad", "Construcción", "Pinturas", "Tornillería"},
@@ -262,10 +264,13 @@ func ferreteriaDemo() especNicho {
 			{sku: "PIN-SIL-TUB", nombre: "Silicón transparente (tubo)", rubro: "Pinturas", unidad: "unidad", costo: 5200, precio: 9500, stock: 0},
 		},
 		clientes: []cliNicho{
-			{nombre: "Consumidor final", tipoDoc: "V", doc: "00000000", telefono: ""},
-			{nombre: "Constructora Los Andes, C.A.", tipoDoc: "J", doc: "298764531", telefono: "0241-8765432"},
-			{nombre: "Inversiones Mardom, C.A.", tipoDoc: "J", doc: "311209875", telefono: "0241-5551234"},
-			{nombre: "Pedro Rangel (maestro de obra)", tipoDoc: "V", doc: "11298765", telefono: "0424-1122334"},
+			{nombre: "Consumidor final", tipoDoc: "V", doc: "00000000", telefono: "", direccion: "Caracas, Distrito Capital"},
+			{nombre: "Constructora Los Andes, C.A.", tipoDoc: "J", doc: "298764538", telefono: "0241-8765432",
+				direccion: "Zona Industrial Castillito, Galpón 7, San Diego, Valencia"},
+			{nombre: "Inversiones Mardom, C.A.", tipoDoc: "J", doc: "311209875", telefono: "0241-5551234",
+				direccion: "Av. Bolívar Norte, C.C. Camoruco, Nivel 2, Valencia"},
+			{nombre: "Pedro Rangel (maestro de obra)", tipoDoc: "V", doc: "11298765", telefono: "0424-1122334",
+				direccion: "Barrio El Socorro, Calle 3, Casa 18, Valencia"},
 		},
 	}
 }
@@ -280,16 +285,16 @@ func farmaciaDemo() especNicho {
 		orgID: nichoFarmOrgID, empID: nichoFarmEmpID, sedeID: nichoFarmSedeID,
 		org:    "Grupo Farmacéutico Santa Rosa",
 		nombre: "Farmacia Santa Rosa, C.A.",
-		rif:    "J-29873456-1",
+		rif:    "J-29873456-6",
 		giro:   "farmacia", direccion: "Calle 72 con Av. 15, Maracaibo",
 		colorMarca: "#166B41",
 		slug:       "santarosa", telefonoBanco: "0261-7745",
 		cajero: "Mariana Vílchez", supervisor: "Alberto Fuenmayor",
 		vendedor: "Gabriel Urdaneta", contadora: "Lcda. Zaida Pirela",
 		proveedores: []provNicho{
-			{nombre: "Droguería Nacional, C.A.", doc: "J-30112233-4", telefono: "0261-7712345"},
+			{nombre: "Droguería Nacional, C.A.", doc: "J-30112233-0", telefono: "0261-7712345"},
 			{nombre: "Laboratorios Vargas, C.A.", doc: "J-00034567-8", telefono: "0212-2029000"},
-			{nombre: "Distribuidora de Cuidado Personal Zulia, C.A.", doc: "J-31556677-9", telefono: "0261-7756789"},
+			{nombre: "Distribuidora de Cuidado Personal Zulia, C.A.", doc: "J-31556677-0", telefono: "0261-7756789"},
 		},
 		// Mezcla a propósito ventas de EXENTOS (medicinas) y GRAVADOS (cuidado
 		// personal): así los libros fiscales muestran las dos bases separadas.
@@ -305,9 +310,9 @@ func farmaciaDemo() especNicho {
 			{diasAtras: 1, cliente: "Consumidor final", sku: "CUI-CRE-DEN", cant: 6},
 			{diasAtras: 4, serie: "C", cliente: "Consumidor final", sku: "MED-LOR-10", cant: 2, contingencia: true},
 			// Convenios institucionales a crédito.
-			{diasAtras: 40, cliente: "Clínica Materno Infantil, C.A.", doc: "J-30567891-2",
+			{diasAtras: 40, cliente: "Clínica Materno Infantil, C.A.", doc: "J-30567891-0",
 				sku: "MED-INS-FRA", cant: 8, plazoDias: 15, abono: 150000},
-			{diasAtras: 7, cliente: "Seguros Altamira, C.A.", doc: "J-31234567-8",
+			{diasAtras: 7, cliente: "Seguros Altamira, C.A.", doc: "J-31234567-5",
 				sku: "MAT-TEN-DIG", cant: 3, plazoDias: 30},
 		},
 		rubros: []string{"Medicamentos", "Cuidado personal", "Bebé", "Vitaminas", "Material médico",
@@ -417,10 +422,13 @@ func farmaciaDemo() especNicho {
 				}},
 		},
 		clientes: []cliNicho{
-			{nombre: "Consumidor final", tipoDoc: "V", doc: "00000000", telefono: ""},
-			{nombre: "Clínica Materno Infantil, C.A.", tipoDoc: "J", doc: "305678912", telefono: "0261-7778899"},
-			{nombre: "Seguros Altamira, C.A.", tipoDoc: "J", doc: "312345678", telefono: "0261-4443322"},
-			{nombre: "Ana Rodríguez", tipoDoc: "V", doc: "17654321", telefono: "0416-9988776"},
+			{nombre: "Consumidor final", tipoDoc: "V", doc: "00000000", telefono: "", direccion: "Caracas, Distrito Capital"},
+			{nombre: "Clínica Materno Infantil, C.A.", tipoDoc: "J", doc: "305678910", telefono: "0261-7778899",
+				direccion: "Av. 5 de Julio con Calle 72, Maracaibo, Zulia"},
+			{nombre: "Seguros Altamira, C.A.", tipoDoc: "J", doc: "312345675", telefono: "0261-4443322",
+				direccion: "Av. Bella Vista, Torre Banesco, Piso 6, Maracaibo, Zulia"},
+			{nombre: "Ana Rodríguez", tipoDoc: "V", doc: "17654321", telefono: "0416-9988776",
+				direccion: "Urb. La Victoria, Calle 4, Casa 22, Maracaibo, Zulia"},
 		},
 	}
 }

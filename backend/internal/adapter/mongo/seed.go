@@ -109,7 +109,7 @@ import (
 // v32: el salón del restaurante trae sus ÁREAS (Salón, Terraza) y sus
 // MOSTRADORES (caja, barra, postres), que antes eran celdas bloqueadas — el
 // plano decía «acá no va nada» donde hay una barra con su nombre.
-const versionSeedDemo = 46
+const versionSeedDemo = 47
 
 // v34: la demo trae el MÓDULO DE PEDIDOS configurado y trabajando —canales,
 // zonas, repartidores y un tablero con pedidos en todos los estados—. Un módulo

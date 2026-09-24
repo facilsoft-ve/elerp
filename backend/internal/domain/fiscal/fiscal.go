@@ -9,6 +9,7 @@ package fiscal
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -60,6 +61,11 @@ type Linea struct {
 	Cantidad       float64 `json:"cantidad" bson:"cantidad"`
 	PrecioUnitario float64 `json:"precioUnitario" bson:"preciounitario"`
 	Total          float64 `json:"total" bson:"total"`
+	// Unidad es la unidad de medida del renglón (kg, litro, unidad), sellada al
+	// emitir igual que `Exento`. En la venta a granel el renglón no dice nada sin
+	// ella: «0,35 · 4.100,00 · 1.435,00» solo se entiende si además dice «kg».
+	// Vacía en documentos anteriores a este campo ⇒ unidad.
+	Unidad string `json:"unidad,omitempty" bson:"unidad,omitempty"`
 	// SinInventario sella que este renglón NO mueve stock: es un servicio (envío,
 	// instalación, mano de obra). Se copia del producto al emitir, igual que
 	// `Exento`, para que anular o acreditar el documento dentro de un año no
@@ -213,7 +219,16 @@ type Documento struct {
 	BaseExenta    float64 `json:"baseExenta" bson:"baseexenta"`
 	IVA           float64 `json:"iva" bson:"iva"`
 	IGTF          float64 `json:"igtf" bson:"igtf"`
-	Total         float64 `json:"total" bson:"total"`
+	// BaseIGTF es la porción de la factura PAGADA EN DIVISAS, que es lo que grava
+	// el impuesto. NO es el total del documento: quien paga la mitad en divisas y
+	// la mitad en bolívares causa IGTF sobre esa mitad.
+	//
+	// Se graba en vez de derivarse porque la imprenta digital la exige junto al
+	// monto y valida que base × alícuota == monto; reconstruirla dividiendo
+	// reintroduce el redondeo que el cálculo original ya resolvió. En documentos
+	// anteriores a este campo viene en cero y hay que derivarla (ver BaseDelIGTF).
+	BaseIGTF float64 `json:"baseIGTF" bson:"baseigtf"`
+	Total    float64 `json:"total" bson:"total"`
 	// AlicuotaIVA y AlicuotaIGTF son las tasas EFECTIVAMENTE aplicadas al emitir
 	// este documento (fracciones: 0.16 = 16%). Se graban para cumplir el ADR de
 	// tasa histórica: una nota de crédito o la base de IGTF derivan de la tasa DEL
@@ -313,6 +328,36 @@ func (d Documento) Contenido() string {
 		s += fmt.Sprintf("|%s:%.3f:%.2f:%.2f", l.SKU, l.Cantidad, l.PrecioUnitario, l.Total)
 	}
 	return s
+}
+
+// CantidadFraccionada indica si el renglón se vendió en una fracción de su
+// unidad, que es el caso del granel. Los sistemas que imprimen la cantidad sin
+// decimales convierten 0,35 kg en «0», así que hay que decirlo de otra forma.
+func (l Linea) CantidadFraccionada() bool {
+	return math.Abs(l.Cantidad-math.Trunc(l.Cantidad)) > 0.0001
+}
+
+// UnidadNombre es la unidad del renglón. VACÍA en los documentos anteriores al
+// campo, y ahí se deja vacía a propósito: rellenarla con «unidad» haría que una
+// factura vieja de charcutería diga «1,250 unidad» de jamón, que es peor que no
+// decir nada.
+func (l Linea) UnidadNombre() string { return strings.TrimSpace(l.Unidad) }
+
+// BaseDelIGTF devuelve sobre qué monto se causó el IGTF.
+//
+// Los documentos emitidos antes de que la base se grabara no la traen, y para
+// esos el único camino es dividir el impuesto entre su alícuota —que es exacto
+// salvo por el centavo del redondeo original—. Los nuevos la traen grabada y se
+// usa tal cual.
+func (d Documento) BaseDelIGTF() float64 {
+	if d.BaseIGTF != 0 {
+		return d.BaseIGTF
+	}
+	alic := d.AlicuotaIGTF
+	if alic <= 0 {
+		alic = AlicuotaIGTF
+	}
+	return math.Round(d.IGTF/alic*100) / 100
 }
 
 // Repository es el puerto de documentos: solo-anexado (Append) + lectura.

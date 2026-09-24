@@ -95,6 +95,10 @@ type platoNicho struct {
 
 type cliNicho struct {
 	nombre, tipoDoc, doc, telefono string
+	// direccion la exige la IMPRENTA DIGITAL en toda factura, también a
+	// consumidor final. Sin ella el demo del nicho no puede facturar digitalmente:
+	// la emisión se frena antes de cobrar con «le falta la dirección».
+	direccion string
 }
 
 type provNicho struct {
@@ -272,16 +276,15 @@ func (s *Store) seedEmpresaNicho(e especNicho) {
 	}
 
 	for i, c := range e.clientes {
-		// La dirección fiscal NO es decorativa: la factura la exige al cliente
-		// identificado, así que un cliente demo sin ella no se podría facturar y
-		// la demostración quedaría trancada justo en el paso principal. Se compone
-		// a partir de la zona de la propia empresa, que es lo verosímil para una
-		// cartera local.
+		// La dirección fiscal NO es decorativa: la IMPRENTA DIGITAL la exige en toda
+		// factura, también a consumidor final, y la emisión se frena ANTES de cobrar
+		// si falta. Un cliente demo sin dirección deja el recorrido trancado justo
+		// en el paso principal, así que cada uno trae la suya, escrita y verosímil
+		// para la ciudad del nicho — no compuesta, que se leía a máquina.
 		s.Clientes.Create(cliente.Cliente{
 			EmpresaID: e.empID, Nombre: c.nombre, TipoDocumento: c.tipoDoc,
-			Documento: c.doc, Telefono: c.telefono, Activo: true,
-			Direccion: fmt.Sprintf("Sector %d, cerca de %s", i+1, e.direccion),
-			Notas:     fmt.Sprintf("cliente de demostración %d", i+1),
+			Documento: c.doc, Telefono: c.telefono, Direccion: c.direccion, Activo: true,
+			Notas: fmt.Sprintf("cliente de demostración %d", i+1),
 		})
 	}
 

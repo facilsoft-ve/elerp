@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -177,8 +178,16 @@ func CuerpoImprenta(doc fiscal.Documento, cfg facturaciondigital.Config, numero 
 	// base en cero con su 3 % es declarar un impuesto que no ocurrió.
 	cuerpo["IGTFPercentage"] = pctIGTFDeLey(doc.AlicuotaIGTF * 100)
 	hayIGTF := abs(doc.IGTF) > 0
+	// LA BASE DEL IGTF ES LO PAGADO EN DIVISAS, NO EL TOTAL DE LA FACTURA.
+	//
+	// Antes acá iba el total, y la imprenta rechaza la factura entera: valida
+	// base × 3 % == monto, y quien paga 20 US$ de una compra de 22.719 Bs causa
+	// 510 y no 681,57. Solo se ve cuando el pago es MIXTO —si todo se paga en
+	// divisas la base coincide con el total y el error queda tapado—, que es
+	// justo el caso normal del mostrador.
+	baseIGTF := abs(doc.BaseDelIGTF())
 	if hayIGTF {
-		cuerpo["IGTFBaseAmount"] = r2(total)
+		cuerpo["IGTFBaseAmount"] = r2(baseIGTF)
 		cuerpo["IGTFAmount"] = abs(doc.IGTF)
 	}
 
@@ -218,7 +227,7 @@ func CuerpoImprenta(doc fiscal.Documento, cfg facturaciondigital.Config, numero 
 		cuerpo["TaxAmountSumptuaryVES"] = r2(abs(ivaAdicional) * t)
 		cuerpo["DiscountVES"] = 0
 		if hayIGTF {
-			cuerpo["IGTFBaseAmountVES"] = r2(total * t)
+			cuerpo["IGTFBaseAmountVES"] = r2(baseIGTF * t)
 			cuerpo["IGTFAmountVES"] = r2(abs(doc.IGTF) * t)
 		}
 	}
@@ -369,10 +378,55 @@ func monedaDe(doc fiscal.Documento) string {
 }
 
 func nombreRenglon(l fiscal.Linea) string {
-	if n := strings.TrimSpace(l.Nombre); n != "" {
-		return n
+	n := strings.TrimSpace(l.Nombre)
+	if n == "" {
+		n = l.SKU
 	}
-	return l.SKU
+	/* EL PESO VA EN LA DESCRIPCIÓN PORQUE LA IMPRENTA IMPRIME LA CANTIDAD SIN
+	 * DECIMALES.
+	 *
+	 * Verificado contra el sandbox: se envió `Quantity: 0.35` y la imprenta lo
+	 * guardó bien (`OriginalQuantity: 0.35`) pero lo IMPRIME como «0». En la
+	 * factura de una charcutería eso deja un renglón que cobra 1.435 Bs por una
+	 * cantidad de cero, que es justo lo que un cliente reclama.
+	 *
+	 * Su API tiene `UnitMeasureCode` por renglón y un catálogo en
+	 * `GET /companies/unitMeasure`, pero el de esta cuenta trae una sola unidad
+	 * («kg/m²»): hay que pedirle a UniDigital que cargue la tabla real antes de
+	 * poder usarlo. Mientras tanto el dato viaja donde sí se lee entero.
+	 */
+	if l.CantidadFraccionada() {
+		cant, precio := numeroVE(math.Abs(l.Cantidad), 3), numeroVE(math.Abs(l.PrecioUnitario), 2)
+		if u := l.UnidadNombre(); u != "" {
+			return fmt.Sprintf("%s — %s %s a %s por %s", n, cant, u, precio, u)
+		}
+		// Documento anterior al sellado de la unidad: se dice la cantidad, que es
+		// el dato que faltaba, sin inventar en qué se mide.
+		return fmt.Sprintf("%s — %s a %s c/u", n, cant, precio)
+	}
+	return n
+}
+
+// numeroVE formatea un número con la convención venezolana (punto de miles,
+// coma decimal), que es como lo lee quien recibe la factura.
+func numeroVE(v float64, decimales int) string {
+	s := strconv.FormatFloat(v, 'f', decimales, 64)
+	entero, resto := s, ""
+	if i := strings.IndexByte(s, '.'); i >= 0 {
+		entero, resto = s[:i], s[i+1:]
+	}
+	var b strings.Builder
+	for i, c := range entero {
+		if i > 0 && (len(entero)-i)%3 == 0 {
+			b.WriteByte('.')
+		}
+		b.WriteRune(c)
+	}
+	if resto != "" {
+		b.WriteByte(',')
+		b.WriteString(resto)
+	}
+	return b.String()
 }
 
 // condicionDePago es el texto libre que la imprenta imprime como condición.

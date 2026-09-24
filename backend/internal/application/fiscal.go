@@ -343,6 +343,9 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 		doc.Lineas = append(doc.Lineas, fiscal.Linea{
 			ProductoID: p.ID, SKU: p.SKU, Nombre: p.Nombre,
 			Cantidad: l.Cantidad, PrecioUnitario: precio, Total: total,
+			// La unidad se SELLA en el renglón: en el granel «0,35» no dice nada sin
+			// el «kg», y el catálogo puede cambiar de unidad el año que viene.
+			Unidad:         p.UnidadBase,
 			Exento:         !al.Grava(),
 			AlicuotaCodigo: al.Codigo, Alicuota: al.Porcentaje, AlicuotaAdicional: al.Adicional,
 			// Un SERVICIO (envío, instalación, mano de obra) no mueve stock. Se
@@ -422,6 +425,10 @@ func (s *Service) EmitirFactura(empresaID, sedeID, modalidad, actor, origen stri
 	if baseDivisas > docBase {
 		baseDivisas = docBase
 	}
+	// La base se GRABA, no se deja derivar: la imprenta digital la pide junto al
+	// monto y valida base × alícuota == monto. Dividir después mete de vuelta el
+	// centavo que este redondeo acaba de resolver.
+	doc.BaseIGTF = round2(baseDivisas)
 	doc.IGTF = round2(baseDivisas * doc.AlicuotaIGTF)
 	doc.Total = round2(doc.Subtotal + doc.IVA + doc.IGTF)
 
@@ -607,6 +614,7 @@ func (s *Service) AnularDocumento(empresaID, sedeID, actor, origen, refID, motiv
 		ClienteID: orig.ClienteID, ClienteNombre: orig.ClienteNombre, ClienteDocumento: orig.ClienteDocumento,
 		ClienteDireccion: orig.ClienteDireccion,
 		Lineas:           orig.Lineas, Subtotal: -orig.Subtotal, IVA: -orig.IVA, IGTF: -orig.IGTF, Total: -orig.Total,
+		BaseIGTF: -orig.BaseIGTF,
 		// Las dos bases también se revierten: los libros fiscales se cuadran por
 		// base imponible y base exenta, no solo por el total.
 		BaseImponible: -orig.BaseImponible, BaseExenta: -orig.BaseExenta,
@@ -729,7 +737,7 @@ func (s *Service) EmitirNotaCredito(empresaID, sedeID, actor, origen, refID, mot
 		nc.Lineas = append(nc.Lineas, fiscal.Linea{
 			ProductoID: ol.ProductoID, SKU: ol.SKU, Nombre: ol.Nombre,
 			Cantidad: in.Cantidad, PrecioUnitario: ol.PrecioUnitario, Total: total,
-			Exento: ol.Exento,
+			Unidad: ol.Unidad, Exento: ol.Exento,
 			// Hereda el snapshot de receta del renglón original: el reingreso de la NC
 			// devuelve los INSUMOS del plato (por la cantidad acreditada), no el plato.
 			Insumos: ol.Insumos,

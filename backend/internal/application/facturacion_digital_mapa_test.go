@@ -1,6 +1,8 @@
 package application_test
 
 import (
+	"math"
+	"strings"
 	"testing"
 
 	"github.com/mornix/elerp/internal/application"
@@ -159,6 +161,50 @@ func TestImprenta_IGTFSoloSiLoHubo(t *testing.T) {
 	// Total va ANTES del IGTF; GrandTotal lo incluye.
 	if num(t, con, "Total") != 116 || num(t, con, "GrandTotal") != 119.48 {
 		t.Fatalf("Total/GrandTotal mal: %v / %v", con["Total"], con["GrandTotal"])
+	}
+}
+
+/* LA BASE DEL IGTF ES LO PAGADO EN DIVISAS, NO EL TOTAL DE LA FACTURA.
+ *
+ * Acá iba el total del documento y el sandbox rechazó la factura entera:
+ * «IGTFAmount = 510 no coincide con IGTFBaseAmount * 3% = 681,57». Solo se ve
+ * con pago MIXTO —si todo se paga en divisas la base coincide con el total y el
+ * error queda tapado—, que es justamente el caso normal del mostrador.
+ */
+func TestImprenta_LaBaseDelIGTFEsLoPagadoEnDivisas(t *testing.T) {
+	doc := fiscal.Documento{
+		Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00", Moneda: "VES",
+		ClienteDocumento: "V-12345678", ClienteDireccion: "Caracas",
+		BaseImponible: 19585.5, IVA: 3133.68, Subtotal: 19585.5, Total: 23229.18,
+		// 20 US$ a 850 de una compra de 22.719,18: el impuesto grava los 17.000.
+		BaseIGTF: 17000, IGTF: 510, AlicuotaIGTF: 0.03,
+	}
+	m := mapear(t, doc)
+	if got := num(t, m, "IGTFBaseAmount"); got != 17000 {
+		t.Fatalf("la base del IGTF es lo pagado en divisas (17000), no el total: %v", got)
+	}
+	if got := num(t, m, "IGTFBaseAmountVES"); got != 17000 {
+		t.Fatalf("el espejo en bolívares tiene que seguir a la base: %v", got)
+	}
+	// LA REGLA QUE VALIDA LA IMPRENTA, verificada acá antes de que la rechace ella.
+	calculado := math.Round(num(t, m, "IGTFBaseAmount")*num(t, m, "IGTFPercentage")/100*100) / 100
+	if calculado != num(t, m, "IGTFAmount") {
+		t.Fatalf("base × %v%% tiene que dar el monto declarado: %v × %v ≠ %v",
+			m["IGTFPercentage"], m["IGTFBaseAmount"], m["IGTFPercentage"], m["IGTFAmount"])
+	}
+}
+
+// Los documentos anteriores al campo no traen la base grabada: se deriva del
+// impuesto y su alícuota, que es exacto salvo el centavo del redondeo original.
+func TestImprenta_LaBaseDelIGTFSeDerivaEnDocumentosViejos(t *testing.T) {
+	doc := fiscal.Documento{
+		Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00", Moneda: "VES",
+		ClienteDocumento: "V-12345678", ClienteDireccion: "Caracas",
+		BaseImponible: 100, IVA: 16, Subtotal: 100, Total: 119.48,
+		IGTF: 3.48, AlicuotaIGTF: 0.03, // sin BaseIGTF: documento viejo
+	}
+	if got := num(t, mapear(t, doc), "IGTFBaseAmount"); got != 116 {
+		t.Fatalf("sin base grabada se deriva 3,48 / 3%% = 116, no %v", got)
 	}
 }
 
@@ -407,5 +453,51 @@ func TestImprenta_ElEspejoEnBolivaresNoSeSaltaNingunCampo(t *testing.T) {
 		if v != espejo {
 			t.Fatalf("%s (%v) y %sVES (%v) tienen que coincidir en una factura en Bs", campo, v, campo, espejo)
 		}
+	}
+}
+
+/* EL GRANEL TIENE QUE DECIR SU PESO EN EL RENGLÓN.
+ *
+ * La imprenta recibe la cantidad bien (guardó `OriginalQuantity: 0.35`) pero la
+ * IMPRIME sin decimales: el renglón salía cobrando 1.435,00 Bs por una cantidad
+ * de «0». Hasta que su catálogo de unidades esté cargado y se pueda usar
+ * `UnitMeasureCode`, el peso viaja en la descripción, que sí se imprime entera.
+ */
+func TestImprenta_ElGranelDiceSuPesoEnElRenglon(t *testing.T) {
+	doc := fiscal.Documento{
+		Tipo: fiscal.TipoFactura, Fecha: "2026-09-18T10:00:00-04:00", Moneda: "VES",
+		ClienteDocumento: "V-12345678", ClienteDireccion: "Caracas",
+		BaseImponible: 1435, IVA: 229.6, Subtotal: 1435, Total: 1664.6, AlicuotaIVA: 0.16,
+		Lineas: []fiscal.Linea{
+			{Nombre: "Queso blanco duro (granel)", Cantidad: 0.35, Unidad: "kg", PrecioUnitario: 4100, Total: 1435, Alicuota: 0.16},
+			{Nombre: "Café molido premium 500g", Cantidad: 1, Unidad: "unidad", PrecioUnitario: 3350, Total: 3350, Alicuota: 0.16},
+		},
+	}
+	det := mapear(t, doc)["Details"].([]map[string]any)
+	granel, _ := det[0]["Description"].(string)
+	if !strings.Contains(granel, "0,350") || !strings.Contains(granel, "kg") {
+		t.Fatalf("el renglón a granel tiene que decir cuánto pesó: %q", granel)
+	}
+	if !strings.Contains(granel, "4.100,00") {
+		t.Fatalf("y a cuánto el kilo, que es lo que el cliente verifica: %q", granel)
+	}
+	// EL RENGLÓN NORMAL NO SE TOCA: agregarle «1,000 unidad» a cada línea de una
+	// factura de bodega la vuelve ilegible sin resolver nada.
+	if entero, _ := det[1]["Description"].(string); entero != "Café molido premium 500g" {
+		t.Fatalf("una cantidad entera no necesita explicación: %q", entero)
+	}
+}
+
+// Un documento anterior al sellado de la unidad dice la cantidad pero no
+// inventa la medida: «1,250 unidad» de jamón es peor que «1,250».
+func TestImprenta_SinUnidadSelladaNoSeInventaLaMedida(t *testing.T) {
+	doc := docSimple()
+	doc.Lineas = []fiscal.Linea{{Nombre: "Jamón de pierna", Cantidad: 1.25, PrecioUnitario: 6710, Total: 8387.5, Alicuota: 0.16}}
+	d, _ := mapear(t, doc)["Details"].([]map[string]any)[0]["Description"].(string)
+	if !strings.Contains(d, "1,250") {
+		t.Fatalf("la cantidad fraccionada tiene que verse: %q", d)
+	}
+	if strings.Contains(d, "unidad") {
+		t.Fatalf("sin unidad sellada no se inventa una: %q", d)
 	}
 }
