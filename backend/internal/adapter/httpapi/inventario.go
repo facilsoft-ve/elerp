@@ -51,6 +51,13 @@ func (s *Server) registerInventario(r fiber.Router) {
 	// de decidir.
 	g.Post("/conteo/previsualizar", s.handlePrevisualizarConteo)
 	g.Post("/conteo", s.escribirInventario, s.handleAplicarConteo)
+	// PLANES DE CONTEO: qué almacén toca, y cada cuánto. Listar y armar la hoja NO
+	// escriben: son lo que se consulta antes de salir a contar.
+	g.Get("/conteo/planes", s.handlePlanesDeConteo)
+	g.Post("/conteo/planes", s.escribirInventario, s.handleCrearPlanDeConteo)
+	g.Patch("/conteo/planes/:id", s.escribirInventario, s.handleActualizarPlanDeConteo)
+	g.Get("/conteo/planes/:id/hoja", s.handleHojaDeConteo)
+	g.Post("/conteo/planes/:id/aplicar", s.escribirInventario, s.handleAplicarConteoDePlan)
 
 	// APARTADOS: mercancía comprometida que todavía no salió. Crear y despachar
 	// tocan el inventario; listar, no.
@@ -535,6 +542,93 @@ func (s *Server) handleGenerarReabastecimiento(c *fiber.Ctx) error {
 		return c.Status(estado).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"solicitudes": out})
+}
+
+func (s *Server) handlePlanesDeConteo(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"planes": s.svc.PlanesDeConteo(empresaIDOf(c), s.sedeParam(c))})
+}
+
+// planConteoBody es el cuerpo de alta y edición. UltimoConteo NO viaja: es un
+// hecho, no una preferencia — poder retocarlo permitiría aplazar un conteo vencido
+// cambiando una fecha, que es justo lo que el plan existe para evitar.
+type planConteoBody struct {
+	Nombre      string `json:"nombre"`
+	SedeID      string `json:"sedeId"`
+	AlmacenID   string `json:"almacenId"`
+	UbicacionID string `json:"ubicacionId"`
+	Rubro       string `json:"rubro"`
+	CadaDias    int    `json:"cadaDias"`
+	Activo      bool   `json:"activo"`
+}
+
+func (in planConteoBody) aDominio(sedePorDefecto string) inventario.PlanConteo {
+	sede := in.SedeID
+	if sede == "" {
+		sede = sedePorDefecto
+	}
+	return inventario.PlanConteo{
+		Nombre: in.Nombre, SedeID: sede, AlmacenID: in.AlmacenID,
+		UbicacionID: in.UbicacionID, Rubro: in.Rubro,
+		CadaDias: in.CadaDias, Activo: in.Activo,
+	}
+}
+
+func (s *Server) handleCrearPlanDeConteo(c *fiber.Ctx) error {
+	var in planConteoBody
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.CrearPlanDeConteo(empresaIDOf(c), principalOf(c).UserID, origen(c), in.aDominio(s.sedeParam(c)))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+func (s *Server) handleActualizarPlanDeConteo(c *fiber.Ctx) error {
+	var in planConteoBody
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.ActualizarPlanDeConteo(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c),
+		in.aDominio(s.sedeParam(c)))
+	if err != nil {
+		estado := fiber.StatusBadRequest
+		if errors.Is(err, application.ErrPlanNoExiste) {
+			estado = fiber.StatusNotFound
+		}
+		return c.Status(estado).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleHojaDeConteo(c *fiber.Ctx) error {
+	out, err := s.svc.HojaDeConteoDe(empresaIDOf(c), c.Params("id"))
+	if err != nil {
+		estado := fiber.StatusBadRequest
+		if errors.Is(err, application.ErrPlanNoExiste) {
+			estado = fiber.StatusNotFound
+		}
+		return c.Status(estado).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleAplicarConteoDePlan(c *fiber.Ctx) error {
+	var in conteoBody
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.AplicarConteoDePlan(empresaIDOf(c), c.Params("id"), in.Motivo, in.aDominio(),
+		principalOf(c).UserID, origen(c))
+	if err != nil {
+		estado := fiber.StatusBadRequest
+		if errors.Is(err, application.ErrPlanNoExiste) {
+			estado = fiber.StatusNotFound
+		}
+		return c.Status(estado).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
 }
 
 func (s *Server) handleValoracion(c *fiber.Ctx) error {

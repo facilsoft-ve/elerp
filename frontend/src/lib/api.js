@@ -686,6 +686,15 @@ export const api = {
   // CONTEO FÍSICO. Previsualizar NO escribe: es lo que hay que mirar antes de aplicar.
   previsualizarConteo: (body) => request('/api/inventario/conteo/previsualizar', { method: 'POST', body: JSON.stringify(body) }),
   aplicarConteo: (body) => request('/api/inventario/conteo', { method: 'POST', body: JSON.stringify(body) }),
+  // PLANES DE CONTEO: qué almacén toca, y cada cuánto. Listar y armar la hoja no
+  // escriben: son lo que se consulta antes de salir a contar.
+  planesDeConteo: () => request('/api/inventario/conteo/planes'),
+  crearPlanDeConteo: (body) => request('/api/inventario/conteo/planes', { method: 'POST', body: JSON.stringify(body) }),
+  actualizarPlanDeConteo: (id, body) =>
+    request(`/api/inventario/conteo/planes/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  hojaDeConteo: (id) => request(`/api/inventario/conteo/planes/${encodeURIComponent(id)}/hoja`),
+  aplicarConteoDePlan: (id, body) =>
+    request(`/api/inventario/conteo/planes/${encodeURIComponent(id)}/aplicar`, { method: 'POST', body: JSON.stringify(body) }),
   // Cuentas de inventario por rubro (Contabilidad).
   rubrosContables: () => request('/api/contabilidad/rubros'),
   // Qué pasaría al cambiarle la cuenta a un rubro: cuánto inventario se movería y

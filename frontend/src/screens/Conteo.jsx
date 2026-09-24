@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Icon } from '../components/Icon.jsx'
-import { Button, Input, Select, Empty, TableSkeleton, useToast, Field } from '../components/primitives.jsx'
+import { Button, Input, Select, Empty, TableSkeleton, useToast, Field, Modal } from '../components/primitives.jsx'
 import { fmtCurrency, fmtNum } from '../lib/format.js'
 import { useUI } from '../context/UIContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -35,12 +35,42 @@ export function Conteo() {
   const [contado, setContado] = useState({}) // sku → texto tecleado
   const [motivo, setMotivo] = useState('')
   const [previa, setPrevia] = useState(null)
+  // PLANES: qué toca contar. El plan no cuenta por su cuenta —contar es ir al
+  // estante— pero dice cuál toca y deja la hoja preparada.
+  const [planes, setPlanes] = useState([])
+  const [planSel, setPlanSel] = useState('')
+  const [formPlan, setFormPlan] = useState(null)
   const [cargando, setCargando] = useState(false)
   const [existencias, setExistencias] = useState(null)
 
   useEffect(() => {
     if (almacenes.length && !almacenSel) setAlmacenSel(almacenes.find((a) => a.principal)?.id || almacenes[0].id)
   }, [almacenes.length]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const cargarPlanes = async () => {
+    try { setPlanes((await api.planesDeConteo())?.planes || []) } catch { setPlanes([]) }
+  }
+  useEffect(() => { cargarPlanes() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Tomar un plan NO cuenta nada: trae su hoja con lo que el sistema cree que hay,
+  // ya acotada a su almacén y su casilla. Lo que falta es ir a mirar.
+  const tomarPlan = async (id) => {
+    setPlanSel(id)
+    setPrevia(null)
+    setContado({})
+    if (!id) return
+    try {
+      const h = await api.hojaDeConteo(id)
+      if (h.almacenId) setAlmacenSel(h.almacenId)
+      setMotivo(h.nombre || '')
+      toast({
+        title: 'Hoja preparada',
+        body: `${h.lineas.length} producto(s) que deberían estar ${h.ubicacion ? 'en ' + h.ubicacion : 'ahí'}. Ve a contarlos.`,
+      })
+    } catch (e) {
+      toast({ title: 'No se pudo preparar la hoja', body: e?.message || 'Error', kind: 'error' })
+    }
+  }
 
   useEffect(() => {
     if (!almacenSel) { setUbicaciones([]); return }
@@ -69,6 +99,25 @@ export function Conteo() {
     .filter(([, v]) => String(v).trim() !== '' && Number.isFinite(Number(v)))
     .map(([sku, v]) => ({ sku, ubicacionId: ubicacionSel, contado: Number(v) })), [contado, ubicacionSel])
 
+  const guardarPlan = async () => {
+    if (!formPlan.nombre.trim()) return toast({ title: 'Ponle un nombre al plan', kind: 'error' })
+    try {
+      await api.crearPlanDeConteo({
+        nombre: formPlan.nombre.trim(),
+        cadaDias: Number(formPlan.cadaDias) || 0,
+        almacenId: formPlan.almacenId || '',
+        ubicacionId: formPlan.ubicacionId || '',
+        rubro: formPlan.rubro || '',
+        activo: true,
+      })
+      toast({ title: 'Plan creado', body: `${formPlan.nombre.trim()}. Aparecerá arriba cuando toque.` })
+      setFormPlan(null)
+      cargarPlanes()
+    } catch (e) {
+      toast({ title: 'No se pudo crear', body: e?.message || 'Error', kind: 'error' })
+    }
+  }
+
   const previsualizar = async () => {
     if (lineas.length === 0) return toast({ title: 'No has contado nada todavía', kind: 'error' })
     setCargando(true)
@@ -83,7 +132,12 @@ export function Conteo() {
     if (!motivo.trim()) return toast({ title: 'Ponle un nombre al conteo', body: 'Es lo que une todos los ajustes en el Kardex.', kind: 'error' })
     setCargando(true)
     try {
-      const r = await api.aplicarConteo({ almacenId: almacenSel, motivo: motivo.trim(), lineas })
+      // Con un plan elegido se aplica POR EL PLAN: es lo que sella la fecha del
+      // último conteo. Aplicarlo suelto contaría igual pero dejaría el plan
+      // marcado como pendiente para siempre.
+      const r = planSel
+        ? await api.aplicarConteoDePlan(planSel, { motivo: motivo.trim(), lineas })
+        : await api.aplicarConteo({ almacenId: almacenSel, motivo: motivo.trim(), lineas })
       toast({
         title: 'Conteo aplicado',
         body: `${r.conAjuste} ajuste(s), ${r.sinCambio} sin cambio${r.conError ? `, ${r.conError} con error` : ''}.`,
@@ -92,6 +146,7 @@ export function Conteo() {
       setPrevia(r)
       setContado({})
       reload()
+      cargarPlanes()
       api.existencias(activeSedeId, almacenSel || undefined).then(setExistencias).catch(() => {})
     } catch (e) {
       toast({ title: 'No se pudo aplicar', body: e?.message || 'Error', kind: 'error' })
@@ -108,7 +163,42 @@ export function Conteo() {
         <strong> Mira la vista previa antes de aplicar</strong> — los ajustes van al Kardex y no se pueden deshacer.
       </div>
 
+      {/* Lo primero: qué toca contar. Sin esto, se cuenta el almacén que alguien
+          recuerda — y lo que lleva meses sin revisarse es justo lo que nadie
+          recuerda. */}
+      {planes.some((p) => p.vencido) ? (
+        <div className="mb-3 rounded-xl bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-900/40 px-3 py-2.5">
+          <div className="flex items-start gap-2.5 text-[12.5px] text-amber-900 dark:text-amber-200">
+            <Icon.CircleAlert size={15} className="mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <strong>{planes.filter((p) => p.vencido).length} conteo(s) pendiente(s).</strong>
+              <div className="mt-1 space-y-0.5">
+                {planes.filter((p) => p.vencido).slice(0, 5).map((p) => (
+                  <div key={p.id} className="flex items-baseline gap-2 flex-wrap">
+                    <span className="text-[11.5px] font-medium">{p.nombre}</span>
+                    <span className="text-[11.5px] opacity-90">
+                      {p.diasDesde < 0 ? 'nunca contado' : `hace ${p.diasDesde} día(s)`}
+                      {p.ubicacion ? ` · ${p.ubicacion}` : ''} · {p.productos} producto(s)
+                    </span>
+                    <button onClick={() => tomarPlan(p.id)} className="text-[11.5px] underline">preparar la hoja</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex items-center gap-2 flex-wrap mb-3">
+        {planes.length ? (
+          <Select className="!w-60" value={planSel} onChange={(e) => tomarPlan(e.target.value)}
+            title="Contar siguiendo un plan sella su fecha; sin plan, el conteo es suelto">
+            <option value="">Conteo suelto (sin plan)</option>
+            {planes.map((p) => (
+              <option key={p.id} value={p.id}>{p.vencido ? '● ' : ''}{p.nombre}</option>
+            ))}
+          </Select>
+        ) : null}
         <Select className="!w-56" value={almacenSel} onChange={(e) => { setAlmacenSel(e.target.value); setUbicacionSel(''); setPrevia(null) }}>
           {almacenes.map((a) => <option key={a.id} value={a.id}>{a.nombre}{a.principal ? ' ★' : ''}</option>)}
         </Select>
@@ -186,6 +276,87 @@ export function Conteo() {
           <div className="text-[12px] text-slate-500 self-center">Mira primero qué pasaría.</div>
         ) : null}
       </div>
+
+      {/* Los planes se administran aquí, donde se usan: mandarlos a Configuración
+          los convertiría en algo que se define una vez y nadie vuelve a mirar. */}
+      <div className="mt-6">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <div className="text-[12.5px] text-slate-500">
+            Planes de conteo — <span className="text-slate-400">dicen qué toca y cada cuánto. Contar sigue siendo ir al estante.</span>
+          </div>
+          <Button size="sm" variant="ghost" icon={<Icon.Plus size={15} />}
+            onClick={() => setFormPlan({ nombre: '', cadaDias: '30', almacenId: almacenSel, ubicacionId: '', rubro: '' })}>
+            Nuevo plan
+          </Button>
+        </div>
+        {planes.length === 0 ? (
+          <div className="text-[12px] text-slate-400">
+            Sin planes. Crea uno para que el sistema avise cuándo toca revisar cada almacén.
+          </div>
+        ) : (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+            <table className="w-full text-[13px]">
+              <tbody>
+                {planes.map((p) => (
+                  <tr key={p.id} className={`border-b border-slate-100 dark:border-slate-800/70 ${p.activo ? '' : 'opacity-60'}`}>
+                    <td className="px-4 py-2">
+                      {p.vencido ? <span className="text-amber-600 dark:text-amber-400 mr-1.5">●</span> : null}
+                      {p.nombre}
+                      <span className="text-slate-400 text-[11.5px]">
+                        {p.ubicacion ? ` · ${p.ubicacion}` : p.almacenNombre ? ` · ${p.almacenNombre}` : ''}
+                        {p.rubro ? ` · ${p.rubro}` : ''}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-[12px] text-slate-500">
+                      {p.cadaDias > 0 ? `cada ${p.cadaDias} día(s)` : 'a demanda'}
+                    </td>
+                    <td className="px-4 py-2 text-[12px] text-slate-500">
+                      {p.diasDesde < 0 ? 'nunca contado' : `contado hace ${p.diasDesde} día(s)`}
+                    </td>
+                    <td className="px-4 py-2 text-right num text-[12px] text-slate-400">{p.productos} prod.</td>
+                    <td className="px-4 py-2 text-right">
+                      <Button size="sm" variant="ghost" onClick={() => tomarPlan(p.id)}>Preparar hoja</Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {formPlan ? (
+        <Modal open onClose={() => setFormPlan(null)} title="Nuevo plan de conteo">
+          <div className="space-y-3">
+            <Field label="Nombre" hint="Lo que se lee en la lista: «Pasillo A, mensual».">
+              <Input value={formPlan.nombre} autoFocus
+                onChange={(e) => setFormPlan({ ...formPlan, nombre: e.target.value })} />
+            </Field>
+            <Field label="Cada cuántos días" hint="Vacío o 0 = a demanda: la hoja queda preparada pero el plan no vence nunca.">
+              <Input type="number" min="0" value={formPlan.cadaDias}
+                onChange={(e) => setFormPlan({ ...formPlan, cadaDias: e.target.value })} />
+            </Field>
+            <Field label="Almacén">
+              <Select value={formPlan.almacenId} onChange={(e) => setFormPlan({ ...formPlan, almacenId: e.target.value, ubicacionId: '' })}>
+                <option value="">El principal de la sede</option>
+                {almacenes.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+              </Select>
+            </Field>
+            {ubicaciones.length ? (
+              <Field label="Ubicación" hint="Acotar a un pasillo es lo que permite contar por partes sin cerrar el almacén.">
+                <Select value={formPlan.ubicacionId} onChange={(e) => setFormPlan({ ...formPlan, ubicacionId: e.target.value })}>
+                  <option value="">Todo el almacén</option>
+                  {ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>)}
+                </Select>
+              </Field>
+            ) : null}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="ghost" onClick={() => setFormPlan(null)}>Cancelar</Button>
+              <Button onClick={guardarPlan}>Crear plan</Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
 
       {previa ? (
         <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">

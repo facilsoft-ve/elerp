@@ -79,6 +79,7 @@ type Store struct {
 	TiposOperacion         *TipoOperacionRepo
 	Apartados              *ApartadoRepo
 	ReglasReabastecimiento *ReglaReabastecimientoRepo
+	PlanesConteo           *PlanConteoRepo
 	Horarios               *HorarioRepo
 }
 
@@ -125,6 +126,7 @@ func New(db *gomongo.Database) *Store {
 	st.attachTiposOperacion(db)         // definido en operacion.go
 	st.attachApartados(db)              // definido en apartado.go
 	st.attachReglasReabastecimiento(db) // definido en reabastecimiento.go
+	st.attachPlanesConteo(db)           // definido en plan_conteo.go
 	st.attachMesoneros(db)              // definido en mesonero.go (credenciales + turnos)
 	return st
 }

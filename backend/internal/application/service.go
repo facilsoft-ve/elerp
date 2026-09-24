@@ -223,6 +223,8 @@ type Service struct {
 	// reglasReabastecimiento dice cuándo volver a comprar. Se cablea con
 	// ConReglasReabastecimiento; sin él no se repone nada solo.
 	reglasReabastecimiento inventario.ReglaReabastecimientoRepo
+	// planesConteo dice qué almacén toca contar. Sin él el conteo se lanza a mano.
+	planesConteo inventario.PlanConteoRepo
 	// sedes da acceso a las COORDENADAS del local, para la presencia estricta
 	// (ver presencia.go). Se cablea con ConSedes; sin él la verificación de
 	// presencia no aplica y todo se comporta como antes.
