@@ -48,7 +48,17 @@ type UnidadMedida struct {
 	Nombre    string `json:"nombre" bson:"nombre"`       // "Kilogramo"
 	Categoria string `json:"categoria" bson:"categoria"` // conteo | peso | volumen | longitud
 	Activa    bool   `json:"activa" bson:"activa"`       // desactivar sin borrar
-	Creada    string `json:"creada" bson:"creada"`       // RFC3339
+	// Factor es CUÁNTAS UNIDADES DE REFERENCIA de su categoría vale una de ésta.
+	// El kilogramo es la referencia del peso (1); el gramo vale 0,001; un saco de
+	// 50 kg vale 50. Convertir entre dos unidades es cantidad × FactorOrigen ÷
+	// FactorDestino, y por eso basta un número por unidad en vez de una tabla.
+	//
+	// CERO SIGNIFICA «SIN DECLARAR», y es el caso de todo lo que existía antes: esa
+	// unidad no se convierte, y quien la use trabaja como hasta ahora. No se pone 1
+	// por defecto a propósito — un factor inventado convertiría en silencio y con el
+	// número equivocado, que es mucho peor que no convertir.
+	Factor float64 `json:"factor,omitempty" bson:"factor,omitempty"`
+	Creada string  `json:"creada" bson:"creada"` // RFC3339
 }
 
 // Repository persiste unidades de medida, aislado por empresaID. Sin borrado duro:
@@ -66,24 +76,33 @@ type Repository interface {
 // para una empresa nueva: conteo (unidad, docena, par, caja), peso (kg, g),
 // volumen (L, mL) y longitud (m, cm). Todas quedan activas; el ID y la fecha los
 // asigna el adaptador al crearlas.
+// Los factores del juego por defecto. La referencia de cada categoría vale 1.
+//
+// LA CAJA Y LA DOCENA NO SON IGUALES, y ahí está la diferencia que importa: una
+// docena SIEMPRE son 12, así que su factor es universal. Una «caja» son las que
+// quepan, y cambia por producto — por eso se queda SIN factor y se resuelve con las
+// presentaciones del producto, que es donde ese dato pertenece.
 func PorDefecto(empresaID string) []UnidadMedida {
-	defs := []struct{ simbolo, nombre, categoria string }{
-		{"unidad", "Unidad", CategoriaConteo},
-		{"docena", "Docena", CategoriaConteo},
-		{"par", "Par", CategoriaConteo},
-		{"caja", "Caja", CategoriaConteo},
-		{"kg", "Kilogramo", CategoriaPeso},
-		{"g", "Gramo", CategoriaPeso},
-		{"L", "Litro", CategoriaVolumen},
-		{"mL", "Mililitro", CategoriaVolumen},
-		{"m", "Metro", CategoriaLongitud},
-		{"cm", "Centímetro", CategoriaLongitud},
+	defs := []struct {
+		simbolo, nombre, categoria string
+		factor                     float64
+	}{
+		{"unidad", "Unidad", CategoriaConteo, 1},
+		{"docena", "Docena", CategoriaConteo, 12},
+		{"par", "Par", CategoriaConteo, 2},
+		{"caja", "Caja", CategoriaConteo, 0}, // depende del producto: sin factor
+		{"kg", "Kilogramo", CategoriaPeso, 1},
+		{"g", "Gramo", CategoriaPeso, 0.001},
+		{"L", "Litro", CategoriaVolumen, 1},
+		{"mL", "Mililitro", CategoriaVolumen, 0.001},
+		{"m", "Metro", CategoriaLongitud, 1},
+		{"cm", "Centímetro", CategoriaLongitud, 0.01},
 	}
 	out := make([]UnidadMedida, 0, len(defs))
 	for _, d := range defs {
 		out = append(out, UnidadMedida{
 			EmpresaID: empresaID, Simbolo: d.simbolo, Nombre: d.nombre,
-			Categoria: d.categoria, Activa: true,
+			Categoria: d.categoria, Factor: d.factor, Activa: true,
 		})
 	}
 	return out

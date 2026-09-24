@@ -28,6 +28,10 @@ var (
 	// ErrOperacionSinIntermedia: dos pasos sin ubicación intermedia no es un proceso
 	// en dos pasos — es una recepción normal que además pierde el rastro del muelle.
 	ErrOperacionSinIntermedia = errors.New("una operación en dos pasos necesita su ubicación intermedia (muelle o preparación)")
+	// ErrClaseSinDosPasos: esa clase todavía no tiene los dos pasos implementados.
+	// Dejar configurarlos igualmente sería peor que no ofrecerlos: se guardaría, y
+	// el proceso seguiría ocurriendo en uno solo sin que nadie se enterase.
+	ErrClaseSinDosPasos = errors.New("los dos pasos solo están implementados en la recepción: en las demás el proceso ocurre en uno")
 )
 
 // ConTiposOperacion cablea el maestro. Sin él, todo se comporta como antes.
@@ -93,6 +97,9 @@ func (s *Service) ActualizarTipoOperacion(empresaID, id, actor, origen string, c
 		if !almacen.PasosValidos(cambios.Pasos) {
 			return almacen.TipoOperacion{}, ErrOperacionPasos
 		}
+		if cambios.Pasos == 2 && !almacen.ClaseAdmitePasos(t.Clase) {
+			return almacen.TipoOperacion{}, ErrClaseSinDosPasos
+		}
 		t.Pasos = cambios.Pasos
 	}
 	t.AlmacenID = cambios.AlmacenID
@@ -129,6 +136,9 @@ func (s *Service) validarTipoOperacion(empresaID string, t *almacen.TipoOperacio
 	}
 	if !almacen.PasosValidos(t.Pasos) {
 		return ErrOperacionPasos
+	}
+	if t.Pasos == 2 && !almacen.ClaseAdmitePasos(t.Clase) {
+		return ErrClaseSinDosPasos
 	}
 	if t.Pasos == 2 && t.UbicacionIntermediaID == "" {
 		return ErrOperacionSinIntermedia

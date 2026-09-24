@@ -139,6 +139,12 @@ export function ModalRecepcion({ orden, onClose, onSaved, toast }) {
   // no existe.
   const [ubis, setUbis] = useState([])
   const [ubiSel, setUbiSel] = useState('')
+  // UNIDAD EN LA QUE SE CUENTA lo que llegó, por línea. Vacío = la del producto,
+  // que es el caso de siempre. Se ofrecen solo las de su misma naturaleza con
+  // equivalencia declarada: un desplegable que deja elegir litros para algo que se
+  // lleva en kilos solo sirve para que alguien lo elija.
+  const [unidadSel, setUnidadSel] = useState(() => lineasPend.map(() => ''))
+  const [compat, setCompat] = useState({}) // unidad base → [{simbolo, nombre, factor}]
   useEffect(() => {
     let vivo = true
     const alm = (db?.ALMACENES || []).find((a) => a.sedeId === orden.sedeId && a.principal && a.activo)
@@ -148,6 +154,35 @@ export function ModalRecepcion({ orden, onClose, onSaved, toast }) {
       .catch(() => { if (vivo) setUbis([]) })
     return () => { vivo = false }
   }, [db, orden.sedeId])
+
+  // Se pide una vez por unidad base distinta de la orden, no por línea: una orden
+  // de veinte renglones de la misma bodega suele tener una o dos.
+  useEffect(() => {
+    let vivo = true
+    const bases = [...new Set(lineasPend.map((l) => unidadBaseDe(l.sku)).filter(Boolean))]
+    Promise.all(bases.map((b) =>
+      api.unidadesCompatibles(b).then((r) => [b, r?.unidades || []]).catch(() => [b, []])
+    )).then((pares) => { if (vivo) setCompat(Object.fromEntries(pares)) })
+    return () => { vivo = false }
+  }, [db, orden.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const unidadBaseDe = (sku) => (db?.PRODUCTOS || []).find((x) => x.sku === sku)?.unidadBase || ''
+
+  // Cuánto entra al almacén con lo tecleado. El servidor hace la conversión de
+  // verdad; esto solo la ANTICIPA, para que nadie teclee a ciegas y para validar
+  // contra lo pendiente en la unidad correcta.
+  const equivalenteDe = (l, i) => {
+    const n = Number(cant[i])
+    if (!Number.isFinite(n) || n <= 0) return null
+    const u = unidadSel[i]
+    const base = unidadBaseDe(l.sku)
+    if (!u || u === base) return null
+    const lista = compat[base] || []
+    const fu = lista.find((x) => x.simbolo === u)?.factor
+    const fb = lista.find((x) => x.simbolo === base)?.factor
+    if (!fu || !fb) return null
+    return Math.round((n * fu / fb) * 10000) / 10000
+  }
 
   const trazaDe = (sku) => {
     const p = (db?.PRODUCTOS || []).find((x) => x.sku === sku)
@@ -160,7 +195,16 @@ export function ModalRecepcion({ orden, onClose, onSaved, toast }) {
     if (v === '' || v == null) return ''
     const n = Number(v)
     if (isNaN(n) || n < 0) return 'Cantidad inválida.'
-    if (n > pend) return `Máximo ${fmtNum(pend)} (lo pendiente).`
+    // Se compara EN LA UNIDAD DEL PRODUCTO: si se teclean sacos y lo pendiente son
+    // kilos, comparar los números crudos dejaría pasar una recepción de más que el
+    // servidor rechazaría después, sin decir por qué en esta pantalla.
+    const enBase = equivalenteDe(l, i)
+    const aComparar = enBase == null ? n : enBase
+    if (aComparar > pend) {
+      return enBase == null
+        ? `Máximo ${fmtNum(pend)} (lo pendiente).`
+        : `Son ${fmtNum(enBase)} ${unidadBaseDe(l.sku)}, y quedan ${fmtNum(pend)}.`
+    }
     return ''
   }
 
@@ -187,12 +231,15 @@ export function ModalRecepcion({ orden, onClose, onSaved, toast }) {
       if (n <= 0) return
       const lt = String(lote[i] || '').trim()
       const k = l.sku + '\u0000' + lt
-      const prev = porClave[k] || { sku: l.sku, cantidad: 0, lote: lt, vencimiento: venc[i] || '', ubicacionId: ubiSel }
+      const prev = porClave[k] || {
+        sku: l.sku, cantidad: 0, lote: lt, vencimiento: venc[i] || '',
+        ubicacionId: ubiSel, unidad: unidadSel[i] || '',
+      }
       prev.cantidad += n
       porClave[k] = prev
     })
     return Object.values(porClave)
-  }, [lineasPend, cant, lote, venc, ubiSel])
+  }, [lineasPend, cant, lote, venc, ubiSel, unidadSel])
 
   const hayError = lineasPend.some((l, i) => errorDe(l, i))
   const hayErrorLote = lineasPend.some((l, i) => errorLoteDe(l, i))
@@ -266,10 +313,29 @@ export function ModalRecepcion({ orden, onClose, onSaved, toast }) {
                     </td>
                     <td className="py-2 pr-3 text-right num text-slate-500 align-top">{fmtNum(pend)}</td>
                     <td className="py-2 pr-3 align-top">
-                      <input type="number" min="0" max={pend} step="0.01" value={cant[i] ?? ''}
-                        onChange={(e) => setLinea(i, e.target.value)} onBlur={() => setTouched(true)}
-                        className={`w-32 h-8 text-right px-2 rounded-lg border bg-white dark:bg-slate-900 text-sm num ring-focus ml-auto block
-                          ${touched && err ? 'border-red-400 focus:ring-red-300' : 'border-slate-200 dark:border-slate-700'}`} />
+                      <div className="flex items-center justify-end gap-1.5">
+                        <input type="number" min="0" step="0.01" value={cant[i] ?? ''}
+                          onChange={(e) => setLinea(i, e.target.value)} onBlur={() => setTouched(true)}
+                          className={`w-28 h-8 text-right px-2 rounded-lg border bg-white dark:bg-slate-900 text-sm num ring-focus
+                            ${touched && err ? 'border-red-400 focus:ring-red-300' : 'border-slate-200 dark:border-slate-700'}`} />
+                        {/* El selector SOLO sale si el producto tiene a qué convertir.
+                            Ofrecerlo vacío haría pensar que falta configurar algo. */}
+                        {(compat[unidadBaseDe(l.sku)] || []).length > 1 ? (
+                          <select value={unidadSel[i] ?? ''} title="¿En qué unidad viene?"
+                            onChange={(e) => setUnidadSel((c) => c.map((x, j) => (j === i ? e.target.value : x)))}
+                            className="h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1.5 text-[12px] max-w-[7.5rem]">
+                            <option value="">{unidadBaseDe(l.sku) || 'unidad'}</option>
+                            {(compat[unidadBaseDe(l.sku)] || [])
+                              .filter((u) => u.simbolo !== unidadBaseDe(l.sku))
+                              .map((u) => <option key={u.simbolo} value={u.simbolo}>{u.simbolo}</option>)}
+                          </select>
+                        ) : null}
+                      </div>
+                      {equivalenteDe(l, i) != null ? (
+                        <div className="mt-1 text-right text-[11px] text-slate-500 dark:text-slate-400">
+                          = {fmtNum(equivalenteDe(l, i))} {unidadBaseDe(l.sku)} al almacén
+                        </div>
+                      ) : null}
                       {touched && err ? <div className="mt-1 text-right text-[11px] text-red-600 dark:text-red-400">{err}</div> : null}
                     </td>
                     {/* Solo aparece para los productos que lo exigen: un catálogo de

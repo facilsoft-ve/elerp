@@ -303,6 +303,10 @@ func (s *Server) handleRecibirOrdenCompra(c *fiber.Ctx) error {
 			// Ubicación dentro del almacén. Vacío = sin ubicar, que es lo correcto
 			// mientras el almacén no esté dividido.
 			UbicacionID string `json:"ubicacionId"`
+			// Unidad en la que se CUENTA lo que llegó, si no es la del producto:
+			// llegan 2 sacos y el anaquel se lleva en kilos. Se convierte al recibir;
+			// al ledger entra siempre la unidad base.
+			Unidad string `json:"unidad"`
 		} `json:"lineas"`
 	}
 	if err := c.BodyParser(&in); err != nil {
@@ -312,7 +316,7 @@ func (s *Server) handleRecibirOrdenCompra(c *fiber.Ctx) error {
 	for _, l := range in.Lineas {
 		lineas = append(lineas, application.LineaRecepcion{
 			SKU: l.SKU, Cantidad: l.Cantidad, Lote: l.Lote, Vencimiento: l.Vencimiento,
-			UbicacionID: l.UbicacionID,
+			UbicacionID: l.UbicacionID, Unidad: l.Unidad,
 		})
 	}
 	out, err := s.svc.RecibirOrdenCompra(empresaIDOf(c), c.Params("id"), principalOf(c).UserID, origen(c), lineas)

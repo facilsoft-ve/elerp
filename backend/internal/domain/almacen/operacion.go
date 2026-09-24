@@ -76,6 +76,27 @@ func ClaseOperacionValida(c string) bool {
 // error de datos que dejaría la operación sin emitir movimiento.
 func PasosValidos(p int) bool { return p == 1 || p == 2 }
 
+// ClaseAdmitePasos dice si los DOS PASOS están implementados para esa clase.
+//
+// POR QUÉ EXISTE. Un maestro que deja configurar algo que después no ocurre es
+// peor que no tener la opción: alguien pone la entrega en dos pasos, ve que se
+// guarda, y despacha en un paso sin enterarse nunca. Es la clase de fallo que no
+// avisa — y la razón de que esta función sea una lista blanca y no una negra: lo
+// que se implemente después hay que AÑADIRLO aquí a mano, así que olvidarse deja
+// la opción oculta (inofensivo) en vez de mentirosa.
+//
+// POR QUÉ SOLO LA RECEPCIÓN, hoy:
+//
+//   - ENTREGA: la factura descuenta el inventario AL EMITIRSE, así que cuando el
+//     pedido nace la mercancía ya salió del almacén y no queda nada que preparar.
+//     Hacerla en dos pasos exige decidir antes si la factura descuenta al emitir o
+//     al despachar, y eso es el núcleo fiscal del sistema, no un ajuste de almacén.
+//   - AJUSTE: es inmediato por definición. Un conteo que hay que confirmar después
+//     ya existe, y es otra cosa: la vista previa del conteo físico.
+//   - TRANSFERENCIA: ya tiene su propia máquina de cinco estados entre sedes.
+//     Superponerle «pasos» sería un segundo mecanismo para lo mismo.
+func ClaseAdmitePasos(clase string) bool { return clase == ClaseRecepcion }
+
 // NormalizarCodigoOperacion deja el código en mayúsculas y sin espacios.
 func NormalizarCodigoOperacion(c string) string { return strings.ToUpper(strings.TrimSpace(c)) }
 

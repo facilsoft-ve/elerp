@@ -258,6 +258,13 @@ type LineaRecepcion struct {
 	// UbicacionID ubica lo recibido dentro del almacén. Vacío = el almacén sin más
 	// detalle, que es lo correcto mientras nadie lo haya dividido.
 	UbicacionID string
+	// Unidad es la unidad EN LA QUE SE CUENTA LO QUE LLEGÓ, cuando no es la del
+	// producto: llegan 2 sacos y el anaquel se lleva en kilos. Se convierte aquí, en
+	// la puerta, y al ledger entra siempre la unidad base — un ledger con unidades
+	// mezcladas sumaría sacos con kilos y el saldo no significaría nada.
+	//
+	// Vacío = la unidad del producto, que es el caso de siempre.
+	Unidad string
 }
 
 // OrdenesCompra lista las órdenes de compra de la empresa.
@@ -477,6 +484,20 @@ func (s *Service) RecibirOrdenCompra(empresaID, id, actor, origen string, lineas
 	for _, l := range lineas {
 		if l.Cantidad <= 0 {
 			continue
+		}
+		// CONVERSIÓN EN LA PUERTA. Lo que sigue trabaja ya en la unidad del producto;
+		// si fallara aquí no se recibe nada, que es lo correcto: una cantidad mal
+		// convertida es una existencia falsa que no se descubre hasta el conteo.
+		if u := strings.TrimSpace(l.Unidad); u != "" {
+			p, ok := s.productos.BySKU(empresaID, l.SKU)
+			if !ok {
+				return compra.OrdenCompra{}, fmt.Errorf("%w: %s", ErrProductoNoExiste, l.SKU)
+			}
+			conv, err := s.ConvertirCantidad(empresaID, u, p.UnidadBase, l.Cantidad)
+			if err != nil {
+				return compra.OrdenCompra{}, fmt.Errorf("%s: %w", l.SKU, err)
+			}
+			l.Cantidad = conv
 		}
 		k := claveRecepcion{SKU: l.SKU, Lote: strings.TrimSpace(l.Lote)}
 		if _, visto := porLote[k]; !visto {

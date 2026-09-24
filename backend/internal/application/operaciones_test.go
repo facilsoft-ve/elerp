@@ -120,6 +120,62 @@ func TestOperacion_ElMaestroSeDefiende(t *testing.T) {
 	}
 }
 
+// TestOperacion_NoSeConfiguraLoQueNoExiste es la guarda contra la peor clase de
+// opción: la que se guarda y no hace nada.
+//
+// Las cuatro clases se siembran, pero solo la RECEPCIÓN tiene los dos pasos
+// implementados. Dejar ponerle dos pasos a la entrega significaría que alguien la
+// configura, ve que se guarda, y sigue despachando en uno sin enterarse nunca.
+func TestOperacion_NoSeConfiguraLoQueNoExiste(t *testing.T) {
+	svc := servicioConOperaciones(t)
+	alm := almacenPrincipalID(t, svc)
+	muelle := nuevaUbicacion(t, svc, alm, "MUELLE")
+	svc.SembrarTiposOperacion(empDemo, actorA, origenTst)
+
+	// La recepción sí admite dos pasos.
+	rec := tipoPorClase(t, svc, almacen.ClaseRecepcion)
+	if _, err := svc.ActualizarTipoOperacion(empDemo, rec.ID, actorA, origenTst, almacen.TipoOperacion{
+		Nombre: rec.Nombre, Pasos: 2, UbicacionIntermediaID: muelle, PorDefecto: true, Activo: true,
+	}); err != nil {
+		t.Fatalf("la recepción sí tiene dos pasos: %v", err)
+	}
+
+	// Las otras tres, no. Y se dice por qué en vez de aceptarlo en silencio.
+	for _, clase := range []string{almacen.ClaseEntrega, almacen.ClaseAjuste, almacen.ClaseTransferencia} {
+		tipo := tipoPorClase(t, svc, clase)
+		_, err := svc.ActualizarTipoOperacion(empDemo, tipo.ID, actorA, origenTst, almacen.TipoOperacion{
+			Nombre: tipo.Nombre, Pasos: 2, UbicacionIntermediaID: muelle, PorDefecto: true, Activo: true,
+		})
+		if !errors.Is(err, application.ErrClaseSinDosPasos) {
+			t.Errorf("%s no tiene dos pasos implementados: debía rechazarse, no guardarse (%v)", clase, err)
+		}
+		// Y sigue en un paso: un rechazo no puede dejar el maestro a medias.
+		if quedó := tipoPorClase(t, svc, clase); quedó.Pasos != 1 {
+			t.Errorf("%s tenía que seguir en un paso, quedó en %d", clase, quedó.Pasos)
+		}
+	}
+
+	// Crear uno nuevo con dos pasos en una clase sin implementar, igual.
+	if _, err := svc.CrearTipoOperacion(empDemo, actorA, origenTst, almacen.TipoOperacion{
+		Codigo: "ENT2", Nombre: "Entrega en dos pasos", Clase: almacen.ClaseEntrega,
+		Pasos: 2, UbicacionIntermediaID: muelle,
+	}); !errors.Is(err, application.ErrClaseSinDosPasos) {
+		t.Errorf("tampoco se puede crear así: %v", err)
+	}
+}
+
+// tipoPorClase busca el tipo sembrado de una clase.
+func tipoPorClase(t *testing.T, svc *application.Service, clase string) almacen.TipoOperacion {
+	t.Helper()
+	for _, op := range svc.TiposOperacion(empDemo) {
+		if op.Clase == clase {
+			return op
+		}
+	}
+	t.Fatalf("no hay tipo sembrado de clase %q", clase)
+	return almacen.TipoOperacion{}
+}
+
 // TestOperacion_SoloUnPorDefectoPorClase: con dos, la operación dependería de cuál
 // se leyera primero, que es un orden de mapa — o sea, ninguno.
 func TestOperacion_SoloUnPorDefectoPorClase(t *testing.T) {

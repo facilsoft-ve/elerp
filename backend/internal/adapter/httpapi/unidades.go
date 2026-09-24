@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"net/url"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -24,6 +25,13 @@ func (s *Server) registerUnidades(r fiber.Router) {
 	g.Get("/", s.handleUnidades)
 	g.Post("/", edit, s.handleCrearUnidad)
 	g.Patch("/:id", edit, s.handleActualizarUnidad)
+	// El FACTOR va por su propia ruta y no dentro del cuerpo general: cambiarlo
+	// altera cómo se convierte toda recepción futura, así que merece una acción
+	// explícita en vez de viajar de polizón en una edición de nombre.
+	g.Patch("/:id/factor", edit, s.handleFactorUnidad)
+	// Con qué unidades se puede expresar una cantidad de la dada. La pantalla la usa
+	// para no ofrecer una conversión que después se va a rechazar.
+	g.Get("/compatibles/:simbolo", s.handleUnidadesCompatibles)
 	g.Post("/:id/desactivar", edit, s.handleDesactivarUnidad)
 }
 
@@ -72,6 +80,34 @@ func (s *Server) handleActualizarUnidad(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(out)
+}
+
+func (s *Server) handleFactorUnidad(c *fiber.Ctx) error {
+	var in struct {
+		// Cero es válido y significa «sin declarar»: así se vuelve atrás sin borrar
+		// la unidad, que rompería los productos que ya la usan.
+		Factor float64 `json:"factor"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.ActualizarFactorUnidad(empresaIDOf(c), c.Params("id"), in.Factor,
+		principalOf(c).UserID, origen(c))
+	if err != nil {
+		if errors.Is(err, application.ErrUnidadNoExiste) {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleUnidadesCompatibles(c *fiber.Ctx) error {
+	simbolo, err := url.PathUnescape(c.Params("simbolo"))
+	if err != nil {
+		simbolo = c.Params("simbolo")
+	}
+	return c.JSON(fiber.Map{"unidades": s.svc.UnidadesCompatiblesCon(empresaIDOf(c), simbolo)})
 }
 
 func (s *Server) handleDesactivarUnidad(c *fiber.Ctx) error {

@@ -490,6 +490,15 @@ export const api = {
   // el bootstrap (db.UNIDADES) para alimentar el select del editor de producto.
   unidades: () => request('/api/config/unidades'),
   crearUnidad: (body) => request('/api/config/unidades', { method: 'POST', body: JSON.stringify(body) }),
+  // El FACTOR va por su propia ruta: cambia cómo se convierte toda recepción
+  // futura, así que merece una acción explícita y no viajar dentro de una edición
+  // de nombre. Cero = sin declarar (la unidad deja de poder convertirse).
+  actualizarFactorUnidad: (id, factor) =>
+    request(`/api/config/unidades/${encodeURIComponent(id)}/factor`, { method: 'PATCH', body: JSON.stringify({ factor }) }),
+  // Con qué unidades se puede expresar una cantidad de la dada (misma categoría y
+  // con factor declarado). Evita ofrecer una conversión que se va a rechazar.
+  unidadesCompatibles: (simbolo) =>
+    request(`/api/config/unidades/compatibles/${encodeURIComponent(simbolo)}`),
   actualizarUnidad: (id, body) => request(`/api/config/unidades/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
   desactivarUnidad: (id) => request(`/api/config/unidades/${encodeURIComponent(id)}/desactivar`, { method: 'POST' }),
 

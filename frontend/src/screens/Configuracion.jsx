@@ -3757,6 +3757,26 @@ function Unidades() {
 
   const lista = [...(rows || [])].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''))
 
+  // El factor se guarda al salir del campo, no con un botón: es un número suelto
+  // y obligar a abrir un formulario para cambiarlo haría que nadie lo declarara.
+  const guardarFactor = async (u, valor) => {
+    const n = valor === '' ? 0 : Number(valor)
+    if (!Number.isFinite(n) || n < 0) return toast({ title: 'Equivalencia inválida', kind: 'error' })
+    if (Math.abs(n - (u.factor || 0)) < 1e-9) return // no cambió
+    try {
+      await api.actualizarFactorUnidad(u.id, n)
+      toast({
+        title: n ? 'Equivalencia guardada' : 'Equivalencia quitada',
+        body: n
+          ? `1 ${u.simbolo} = ${n} de la unidad de referencia de ${u.categoria}.`
+          : `${u.simbolo} deja de poder convertirse.`,
+      })
+      cargar()
+    } catch (e) {
+      toast({ title: 'No se pudo guardar', body: e?.message || 'Error', kind: 'error' })
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-3">
@@ -3792,6 +3812,7 @@ function Unidades() {
                     <th className="py-2.5 px-3 font-medium">Símbolo</th>
                     <th className="py-2.5 pr-3 font-medium">Nombre</th>
                     <th className="py-2.5 pr-3 font-medium">Categoría</th>
+                    <th className="py-2.5 pr-3 font-medium text-right">Equivale a</th>
                     <th className="py-2.5 pr-3 font-medium text-center">Estado</th>
                     {puedeEditar ? <th className="py-2.5 pr-3 font-medium text-right">Acciones</th> : null}
                   </tr>
@@ -3805,6 +3826,17 @@ function Unidades() {
                         <td className="py-2.5 px-3 font-medium text-[13px]"><span className="font-mono">{u.simbolo}</span></td>
                         <td className="py-2.5 pr-3 text-[12.5px]">{u.nombre}</td>
                         <td className="py-2.5 pr-3"><Badge size="sm" color={meta.chip}>{meta.label}</Badge></td>
+                        <td className="py-2.5 pr-3 text-right">
+                          {puedeEditar ? (
+                            <input type="number" min="0" step="any" defaultValue={u.factor || ''}
+                              placeholder="—" disabled={bloqueado}
+                              onBlur={(e) => guardarFactor(u, e.target.value)}
+                              title="Cuántas unidades de referencia de su categoría vale una de ésta. Vacío = no se convierte."
+                              className="num w-24 text-right rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1 text-[12.5px]" />
+                          ) : (
+                            <span className="num text-slate-500">{u.factor || '—'}</span>
+                          )}
+                        </td>
                         <td className="py-2.5 pr-3 text-center">
                           <Badge size="sm" color={u.activa ? 'emerald' : 'slate'} dot>{u.activa ? 'Activa' : 'Inactiva'}</Badge>
                         </td>
@@ -4162,6 +4194,10 @@ function TiposDeOperacion({ puedeEditar, almacenes, sedeNombre, toast }) {
   }
 
   const NOMBRE_CLASE = { recepcion: 'Recepción', entrega: 'Entrega', ajuste: 'Ajuste', transferencia: 'Transferencia' }
+  // Los dos pasos SOLO están implementados en la recepción. Ofrecerlos donde no
+  // ocurren sería peor que no ofrecerlos: se guardaría la opción y el proceso
+  // seguiría pasando en uno solo sin que nadie se enterara.
+  const admiteDosPasos = (clase) => clase === 'recepcion'
 
   return (
     <div className="mt-6">
@@ -4224,11 +4260,22 @@ function TiposDeOperacion({ puedeEditar, almacenes, sedeNombre, toast }) {
             <Field label="Nombre">
               <Input value={editando.nombre || ''} onChange={(e) => setEditando({ ...editando, nombre: e.target.value })} />
             </Field>
-            <Field label="Pasos" hint="Con dos pasos, lo recibido queda en el muelle hasta que alguien lo ubique.">
-              <Select value={String(editando.pasos || 1)} onChange={(e) => setEditando({ ...editando, pasos: Number(e.target.value) })}>
+            <Field label="Pasos"
+              hint={admiteDosPasos(editando.clase)
+                ? 'Con dos pasos, lo recibido queda en el muelle hasta que alguien lo ubique.'
+                : 'Este proceso ocurre en un solo paso.'}>
+              <Select value={String(editando.pasos || 1)} disabled={!admiteDosPasos(editando.clase)}
+                onChange={(e) => setEditando({ ...editando, pasos: Number(e.target.value) })}>
                 <option value="1">Un paso — directo a su sitio</option>
-                <option value="2">Dos pasos — pasa por un muelle</option>
+                {admiteDosPasos(editando.clase) ? <option value="2">Dos pasos — pasa por un muelle</option> : null}
               </Select>
+              {!admiteDosPasos(editando.clase) ? (
+                <div className="mt-1 text-[11.5px] text-slate-500 dark:text-slate-400">
+                  Los dos pasos hoy solo existen en la <strong>recepción</strong>. En la entrega, la factura
+                  descuenta el inventario al emitirse, así que no queda nada que preparar; el ajuste es
+                  inmediato y la transferencia ya tiene sus propios estados.
+                </div>
+              ) : null}
             </Field>
             <Field label="Almacén" hint="Vacío = el principal de la sede.">
               <Select value={editando.almacenId || ''} onChange={(e) => setEditando({ ...editando, almacenId: e.target.value, ubicacionIntermediaId: '' })}>
