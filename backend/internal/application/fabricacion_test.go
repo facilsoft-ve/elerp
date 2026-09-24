@@ -722,3 +722,83 @@ func TestFabricacion_LosBuenosNoCarganLaMermaAnormal(t *testing.T) {
 			esperado, fuera.CostoUnitario)
 	}
 }
+
+/* EL RESUMEN DEL PERÍODO.
+ *
+ * Orden por orden no se ve lo que importa: una tanda que pierde tres unidades es
+ * mala suerte; veinte tandas perdiendo tres cada una es un problema del proceso.
+ * Y la pérdida anormal, que orden por orden son cifras chicas, junta es una línea
+ * del estado de resultados.
+ */
+func TestFabricacion_ElResumenAgrupaLoQuePasoEnElTaller(t *testing.T) {
+	svc, st := servicioFabricacion(t)
+	p := formulaEstricta(t, svc, st)
+
+	correr := func(objetivo, buena float64, res []fabricacion.Resultado) {
+		o, err := svc.CrearOrdenFabricacion(empDemo, application.EntradaOrden{
+			SedeID: sede1, SKU: p.SKU, Cantidad: objetivo, Actor: actorA, Origen: origenTst,
+		})
+		if err != nil {
+			t.Fatalf("crear: %v", err)
+		}
+		if o, err = svc.IniciarOrden(empDemo, o.ID, actorA, origenTst); err != nil {
+			t.Fatalf("iniciar: %v", err)
+		}
+		if _, err := svc.CerrarOrden(empDemo, o.ID, actorA, origenTst,
+			application.CierreOrden{Producida: buena, Resultados: res}); err != nil {
+			t.Fatalf("cerrar: %v", err)
+		}
+	}
+	correr(8, 8, nil)
+	correr(8, 6, []fabricacion.Resultado{
+		{Cantidad: 2, Destino: fabricacion.DestinoPerdida, Motivo: "se cortó la masa"},
+	})
+	correr(8, 5, []fabricacion.Resultado{
+		{Cantidad: 2, Destino: fabricacion.DestinoPerdida, Motivo: "se cortó la masa"},
+		{Cantidad: 1, Destino: fabricacion.DestinoReproceso, Motivo: "sirve para rehacer"},
+	})
+
+	r := svc.ResumenDeFabricacion(empDemo, sede1, "", "")
+	if r.Ordenes != 3 || r.Terminadas != 3 {
+		t.Fatalf("tres órdenes terminadas: %+v", r)
+	}
+	if r.Producido != 19 || r.Planificado != 24 {
+		t.Fatalf("producido %v de %v planificadas", r.Producido, r.Planificado)
+	}
+	if r.Perdido != 4 || r.Reprocesado != 1 {
+		t.Fatalf("perdido %v · reprocesado %v", r.Perdido, r.Reprocesado)
+	}
+	if r.PerdidaAnormal <= 0 {
+		t.Fatal("hubo tandas fuera de tolerancia: la pérdida anormal del período no puede ser cero")
+	}
+	// EL MOTIVO QUE MÁS PESA, primero: es por donde hay que empezar a mirar.
+	if len(r.Motivos) == 0 || r.Motivos[0].Motivo != "se cortó la masa" || r.Motivos[0].Veces != 2 {
+		t.Fatalf("los motivos se agrupan y se ordenan por lo que más pesa: %+v", r.Motivos)
+	}
+	if len(r.PorProducto) != 1 || r.PorProducto[0].RendimientoPct == 0 {
+		t.Fatalf("el rendimiento REAL por producto tiene que salir: %+v", r.PorProducto)
+	}
+
+	// UNA TANDA EN CURSO NO ES UNA TANDA PERDIDA. Todavía se está cocinando: si
+	// su cantidad entrara en el rendimiento, el resumen acusaría al taller de
+	// haber fallado algo que ni siquiera terminó.
+	o, err := svc.CrearOrdenFabricacion(empDemo, application.EntradaOrden{
+		SedeID: sede1, SKU: p.SKU, Cantidad: 8, Actor: actorA, Origen: origenTst,
+	})
+	if err != nil {
+		t.Fatalf("crear: %v", err)
+	}
+	if _, err := svc.IniciarOrden(empDemo, o.ID, actorA, origenTst); err != nil {
+		t.Fatalf("iniciar: %v", err)
+	}
+	r2 := svc.ResumenDeFabricacion(empDemo, sede1, "", "")
+	if r2.EnCurso != 1 || r2.EnProceso != 8 {
+		t.Fatalf("la tanda en curso se reporta aparte: enCurso=%v enProceso=%v", r2.EnCurso, r2.EnProceso)
+	}
+	if r2.CostoEnProceso <= 0 {
+		t.Fatal("los insumos de la tanda en curso ya salieron del almacén: tienen que verse como trabajo en proceso")
+	}
+	if r2.Planificado != r.Planificado || r2.Producido != r.Producido || r2.CostoInsumos != r.CostoInsumos {
+		t.Fatalf("arrancar una tanda no puede mover el rendimiento del período: %+v vs %+v", r2, r)
+	}
+}

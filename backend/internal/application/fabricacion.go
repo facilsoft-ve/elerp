@@ -3,6 +3,7 @@ package application
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/mornix/elerp/internal/domain/almacen"
@@ -505,4 +506,178 @@ func (s *Service) almacenDeDescarte(empresaID, sedeID string) string {
 		}
 	}
 	return ""
+}
+
+/* ResumenFabricacion es lo que pasó en el taller durante un período.
+ *
+ * Existe porque orden por orden no se ve lo que importa: una tanda que pierde
+ * tres unidades es mala suerte, veinte tandas perdiendo tres cada una es un
+ * problema del proceso. Y el número que nadie mira hasta que duele es cuánto
+ * costó lo que NO se vendió — la pérdida anormal del período, que orden por
+ * orden aparece como cifras chicas y juntas es una línea del estado de
+ * resultados.
+ */
+type ResumenFabricacion struct {
+	Desde string `json:"desde"`
+	Hasta string `json:"hasta"`
+
+	Ordenes    int `json:"ordenes"`
+	Terminadas int `json:"terminadas"`
+	// EnCurso son las que todavía tienen insumos afuera: mercancía comprometida
+	// que ya no está en el almacén y todavía no es producto.
+	EnCurso    int `json:"enCurso"`
+	Canceladas int `json:"canceladas"`
+
+	Producido   float64 `json:"producido"`
+	Perdido     float64 `json:"perdido"`
+	Descartado  float64 `json:"descartado"`
+	Reprocesado float64 `json:"reprocesado"`
+	// Planificado es lo que se esperaba producir EN LAS TANDAS TERMINADAS; la
+	// diferencia contra Producido es el rendimiento real del taller. Las que
+	// siguen en curso no cuentan acá: todavía no tuvieron su oportunidad.
+	Planificado float64 `json:"planificado"`
+	// EnProceso es lo planificado que sigue en el taller, con su costo ya salido
+	// del almacén: mercancía comprometida que todavía no es producto ni pérdida.
+	EnProceso      float64 `json:"enProceso"`
+	CostoEnProceso float64 `json:"costoEnProceso"`
+
+	CostoInsumos   float64 `json:"costoInsumos"`
+	ValorProducido float64 `json:"valorProducido"`
+	PerdidaAnormal float64 `json:"perdidaAnormal"`
+	// FueraDeTolerancia son las tandas que se salieron de lo que su fórmula
+	// declara normal. Es la lista corta que alguien tiene que mirar.
+	FueraDeTolerancia int `json:"fueraDeTolerancia"`
+
+	PorProducto []ResumenProducto `json:"porProducto"`
+	// Motivos agrupa POR QUÉ se perdió, que es lo único que permite arreglarlo.
+	Motivos []MotivoResumen `json:"motivos"`
+}
+
+// ResumenProducto es la fila de un producto dentro del resumen.
+type ResumenProducto struct {
+	SKU         string  `json:"sku"`
+	Nombre      string  `json:"nombre"`
+	Ordenes     int     `json:"ordenes"`
+	Planificado float64 `json:"planificado"`
+	Producido   float64 `json:"producido"`
+	NoLogrado   float64 `json:"noLogrado"`
+	// RendimientoPct es lo producido sobre lo planificado: el rendimiento REAL,
+	// contra el que la fórmula declara.
+	RendimientoPct float64 `json:"rendimientoPct"`
+	CostoInsumos   float64 `json:"costoInsumos"`
+	PerdidaAnormal float64 `json:"perdidaAnormal"`
+}
+
+// MotivoResumen agrupa lo no logrado por su explicación.
+type MotivoResumen struct {
+	Motivo   string  `json:"motivo"`
+	Destino  string  `json:"destino"`
+	Cantidad float64 `json:"cantidad"`
+	Veces    int     `json:"veces"`
+}
+
+// ResumenDeFabricacion agrega las órdenes de una sede en un rango de fechas.
+// Rango vacío = todo lo que haya.
+func (s *Service) ResumenDeFabricacion(empresaID, sedeID, desde, hasta string) ResumenFabricacion {
+	res := ResumenFabricacion{
+		Desde: desde, Hasta: hasta,
+		PorProducto: []ResumenProducto{}, Motivos: []MotivoResumen{},
+	}
+	if s.ordenesFabricacion == nil {
+		return res
+	}
+	porProd := map[string]*ResumenProducto{}
+	orden := []string{}
+	porMotivo := map[string]*MotivoResumen{}
+	ordenMotivo := []string{}
+
+	for _, o := range s.ordenesFabricacion.List(empresaID, sedeID) {
+		// El rango se mide por cuándo se CREÓ: es cuando se decidió producir, y es
+		// la fecha con la que quien planifica piensa el período.
+		if desde != "" && o.Creada < desde {
+			continue
+		}
+		if hasta != "" && o.Creada > hasta+"T23:59:59Z" {
+			continue
+		}
+		res.Ordenes++
+		switch o.Estado {
+		case fabricacion.EstadoTerminada:
+			res.Terminadas++
+		case fabricacion.EstadoCancelada:
+			res.Canceladas++
+		default:
+			res.EnCurso++
+		}
+		// Una cancelada devolvió sus insumos: no produjo ni perdió nada.
+		if o.Estado == fabricacion.EstadoCancelada {
+			continue
+		}
+		// Una tanda en curso todavía no produjo: si su cantidad planificada entrara
+		// en el rendimiento, el resumen diría que se perdió lo que aún se está
+		// cocinando. Va aparte, como trabajo en proceso.
+		if o.Estado != fabricacion.EstadoTerminada {
+			res.EnProceso = round2(res.EnProceso + o.Cantidad)
+			res.CostoEnProceso = round2(res.CostoEnProceso + o.CostoTotal)
+			continue
+		}
+
+		res.Planificado = round2(res.Planificado + o.Cantidad)
+		res.Producido = round2(res.Producido + o.CantidadProducida)
+		res.CostoInsumos = round2(res.CostoInsumos + o.CostoTotal)
+		res.ValorProducido = round2(res.ValorProducido + o.CantidadProducida*o.CostoUnitario)
+		res.PerdidaAnormal = round2(res.PerdidaAnormal + o.PerdidaAnormal)
+		if o.FueraDeTolerancia {
+			res.FueraDeTolerancia++
+		}
+
+		f, ok := porProd[o.SKU]
+		if !ok {
+			f = &ResumenProducto{SKU: o.SKU, Nombre: o.Nombre}
+			porProd[o.SKU] = f
+			orden = append(orden, o.SKU)
+		}
+		f.Ordenes++
+		f.Planificado = round2(f.Planificado + o.Cantidad)
+		f.Producido = round2(f.Producido + o.CantidadProducida)
+		f.CostoInsumos = round2(f.CostoInsumos + o.CostoTotal)
+		f.PerdidaAnormal = round2(f.PerdidaAnormal + o.PerdidaAnormal)
+
+		for _, r := range o.Resultados {
+			f.NoLogrado = round2(f.NoLogrado + r.Cantidad)
+			switch r.Destino {
+			case fabricacion.DestinoPerdida:
+				res.Perdido = round2(res.Perdido + r.Cantidad)
+			case fabricacion.DestinoDescarte:
+				res.Descartado = round2(res.Descartado + r.Cantidad)
+			case fabricacion.DestinoReproceso:
+				res.Reprocesado = round2(res.Reprocesado + r.Cantidad)
+			}
+			k := r.Destino + "|" + strings.ToLower(strings.TrimSpace(r.Motivo))
+			m, ok := porMotivo[k]
+			if !ok {
+				m = &MotivoResumen{Motivo: r.Motivo, Destino: r.Destino}
+				porMotivo[k] = m
+				ordenMotivo = append(ordenMotivo, k)
+			}
+			m.Cantidad = round2(m.Cantidad + r.Cantidad)
+			m.Veces++
+		}
+	}
+
+	for _, sku := range orden {
+		f := porProd[sku]
+		if f.Planificado > 0 {
+			f.RendimientoPct = round2(f.Producido / f.Planificado * 100)
+		}
+		res.PorProducto = append(res.PorProducto, *f)
+	}
+	// Lo que más se pierde, primero: es por donde hay que empezar a mirar.
+	sort.SliceStable(ordenMotivo, func(i, j int) bool {
+		return porMotivo[ordenMotivo[i]].Cantidad > porMotivo[ordenMotivo[j]].Cantidad
+	})
+	for _, k := range ordenMotivo {
+		res.Motivos = append(res.Motivos, *porMotivo[k])
+	}
+	return res
 }

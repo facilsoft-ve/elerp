@@ -21,6 +21,9 @@ func (s *Server) registrarFabricacion(api fiber.Router) {
 		usuario.RolCajero, usuario.RolContadora)
 
 	g.Get("/ordenes", ver, s.handleOrdenesFabricacion)
+	// El resumen del período: orden por orden no se ve que veinte tandas pierdan
+	// tres cada una, y eso es lo que hay que ver.
+	g.Get("/resumen", ver, s.handleResumenFabricacion)
 	g.Get("/ordenes/:id", ver, s.handleOrdenFabricacion)
 	// Planear NO escribe: es lo que deja ver si alcanza y cuánto va a costar
 	// ANTES de sacar los insumos del almacén.
@@ -73,6 +76,11 @@ func (s *Server) handleCrearOrdenFabricacion(c *fiber.Ctx) error {
 		OrigenTipo   string  `json:"origenTipo"`
 		OrigenID     string  `json:"origenId"`
 		Nota         string  `json:"nota"`
+		/* Iniciar arranca la orden en el mismo paso. Lo normal en un taller es
+		 * planificar y empezar de inmediato: separarlo en dos clics es hacerle
+		 * teclear al operario una transición que ya decidió. Queda separable porque
+		 * a veces sí se planifica para después. */
+		Iniciar bool `json:"iniciar"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
@@ -86,7 +94,24 @@ func (s *Server) handleCrearOrdenFabricacion(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
+	if in.Iniciar {
+		/* Si arrancar falla —no alcanzan los insumos— la orden YA quedó creada y se
+		 * devuelve con el motivo. No se deshace: planificarla igual es útil, y
+		 * borrarla obligaría a rehacerla cuando llegue la materia prima. */
+		iniciada, errIni := s.svc.IniciarOrden(empresaIDOf(c), out.ID, principalOf(c).UserID, origen(c))
+		if errIni != nil {
+			return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+				"orden": out, "avisoInicio": errIni.Error(),
+			})
+		}
+		out = iniciada
+	}
 	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+func (s *Server) handleResumenFabricacion(c *fiber.Ctx) error {
+	return c.JSON(s.svc.ResumenDeFabricacion(empresaIDOf(c), sedeIDOf(c),
+		c.Query("desde"), c.Query("hasta")))
 }
 
 func (s *Server) handleIniciarOrden(c *fiber.Ctx) error {

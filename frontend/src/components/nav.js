@@ -56,6 +56,9 @@ export const NAV = [
     id: 'fabricacion', label: 'Fabricación', grupo: 'OPERACIÓN', glyph: Icon.Boxes, roles: TODOS, ready: true, modulo: 'fabricacion',
     subs: [
       { id: 'ordenes', label: 'Órdenes de producción', grupo: 'Operación' },
+      // El resumen del período: orden por orden no se ve que veinte tandas
+      // pierdan tres cada una, y eso es lo que hay que ver.
+      { id: 'resumen', label: 'Resumen de producción', grupo: 'Operación' },
       // Las FÓRMULAS viven acá y no solo en Restaurante: un taller que activa
       // Fabricación tiene que poder definir qué consume lo que produce.
       { id: 'formulas', label: 'Fórmulas', grupo: 'Configuración', roles: ADMIN },

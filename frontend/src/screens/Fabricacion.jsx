@@ -30,7 +30,9 @@ export function Fabricacion({ route, navigate }) {
   const sub = (route || '').split(':')[1] || 'ordenes'
   return (
     <div>
-      {sub === 'formulas' ? <Formulas /> : <Ordenes irA={navigate} />}
+      {sub === 'formulas' ? <Formulas />
+        : sub === 'resumen' ? <Resumen />
+          : <Ordenes irA={navigate} />}
     </div>
   )
 }
@@ -243,14 +245,24 @@ function NuevaOrdenModal({ productos, onClose, onCreada, toast }) {
     return () => { vivo = false }
   }, [sku, cant])
 
-  const crear = async () => {
+  /* CREAR Y ARRANCAR EN UN PASO. Lo normal en un taller es planificar y empezar
+   * de inmediato: separarlo en dos clics le hace teclear al operario una
+   * transición que ya decidió. Queda el botón aparte para cuando de verdad se
+   * planifica para después. */
+  const crear = async (iniciar) => {
     setBusy(true)
     try {
-      await api.crearOrdenFabricacion({
+      const r = await api.crearOrdenFabricacion({
         sku, cantidad: cant, lote: lote.trim(), vencimiento,
-        pesoUnitario: Number(peso) || 0,
+        pesoUnitario: Number(peso) || 0, iniciar,
       })
-      toast({ title: 'Orden creada', body: `${cant} × ${prod?.nombre || sku}` })
+      if (r?.avisoInicio) {
+        // La orden quedó creada; lo que falló fue arrancarla. Se dice cuál de las
+        // dos cosas pasó, no un «no se pudo» que deja sin saber si existe o no.
+        toast({ title: 'Orden creada, pero no arrancó', body: r.avisoInicio, kind: 'warn' })
+      } else {
+        toast({ title: iniciar ? 'Orden arrancada' : 'Orden creada', body: `${cant} × ${prod?.nombre || sku}` })
+      }
       onCreada()
     } catch (e) {
       toast({ title: 'No se pudo crear', body: e?.message || 'Error', kind: 'error' })
@@ -264,7 +276,12 @@ function NuevaOrdenModal({ productos, onClose, onCreada, toast }) {
       sub="Planificar no toca el inventario: los insumos salen al arrancar."
       footer={<>
         <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-        <Button onClick={crear} loading={busy} disabled={!sku || cant <= 0} icon={<Icon.Check size={16} />}>Crear orden</Button>
+        <Button variant="secondary" onClick={() => crear(false)} loading={busy} disabled={!sku || cant <= 0}>
+          Solo planificar
+        </Button>
+        <Button onClick={() => crear(true)} loading={busy} disabled={!sku || cant <= 0 || !plan?.alcanza}
+          title={plan && !plan.alcanza ? 'No alcanzan los insumos para arrancar' : 'Saca los insumos y empieza'}
+          icon={<Icon.Check size={16} />}>Crear y arrancar</Button>
       </>}>
       <div className="space-y-3.5">
         <div className="grid sm:grid-cols-[1fr_140px] gap-3">
@@ -731,5 +748,143 @@ function FormulaModal({ producto, insumos, toast, onClose, onGuardada }) {
         </div>
       </div>
     </Modal>
+  )
+}
+
+
+/* RESUMEN DEL PERÍODO — lo que orden por orden no se ve.
+ *
+ * Una tanda que pierde tres unidades es mala suerte. Veinte tandas perdiendo
+ * tres cada una es un problema del proceso, y esa diferencia solo aparece
+ * sumando. Lo mismo con la pérdida anormal: orden por orden son cifras chicas;
+ * junta es una línea del estado de resultados.
+ */
+function Resumen() {
+  const [r, setR] = useState(null)
+  const [desde, setDesde] = useState('')
+  const [hasta, setHasta] = useState('')
+
+  useEffect(() => {
+    api.resumenFabricacion(desde, hasta).then(setR).catch(() => setR(null))
+  }, [desde, hasta])
+
+  if (!r) {
+    return <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-4"><TableSkeleton rows={4} cols={4} /></div>
+  }
+
+  const rendimiento = r.planificado > 0 ? (r.producido / r.planificado) * 100 : 0
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-end gap-3 flex-wrap">
+        <Field label="Desde"><Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></Field>
+        <Field label="Hasta"><Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></Field>
+        <div className="text-[12px] text-slate-400 pb-2">
+          {desde || hasta ? '' : 'Todo lo que hay. Acota el rango para comparar períodos.'}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Tarjeta label="Producido" valor={fmtNum(r.producido, 2)}
+          sub={`de ${fmtNum(r.planificado, 2)} planificadas · ${fmtNum(rendimiento, 1)}% de rendimiento real`} />
+        <Tarjeta label="Perdido" valor={fmtNum(r.perdido, 2)} tono={r.perdido > 0 ? 'malo' : ''}
+          sub="no quedó nada" />
+        <Tarjeta label="Descartado" valor={fmtNum(r.descartado, 2)} sub="existe, no se vende" />
+        <Tarjeta label="Para reprocesar" valor={fmtNum(r.reprocesado, 2)} tono={r.reprocesado > 0 ? 'bueno' : ''}
+          sub="vuelve a producción" />
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Tarjeta label="Costo de insumos" valor={fmtCurrency(r.costoInsumos, 'VES')} />
+        <Tarjeta label="Valor producido" valor={fmtCurrency(r.valorProducido, 'VES')} />
+        {/* La pérdida anormal es el número que nadie mira hasta que duele. */}
+        <Tarjeta label="Pérdida del período" valor={fmtCurrency(r.perdidaAnormal, 'VES')}
+          tono={r.perdidaAnormal > 0 ? 'malo' : ''} sub="merma que se pasó de la tolerancia" />
+        <Tarjeta label="Tandas a revisar" valor={fmtNum(r.fueraDeTolerancia, 0)}
+          tono={r.fueraDeTolerancia > 0 ? 'malo' : ''} sub={`de ${fmtNum(r.terminadas, 0)} terminadas`} />
+      </div>
+
+      {/* El trabajo en proceso no entra en el rendimiento —todavía no falló ni
+          salió bien— pero sus insumos YA salieron del almacén. Se dice aparte. */}
+      {r.enCurso > 0 ? (
+        <div className="text-[12px] text-slate-500 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2">
+          {fmtNum(r.enCurso, 0)} tanda(s) siguen en el taller: {fmtNum(r.enProceso, 2)} unidades planificadas
+          con <span className="num private-mask">{fmtCurrency(r.costoEnProceso, 'VES')}</span> en insumos ya fuera del almacén.
+          No entran en el rendimiento hasta que se reporte su resultado.
+        </div>
+      ) : null}
+
+      {(r.motivos || []).length ? (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
+          <div className="px-3.5 py-2.5 text-[12px] text-slate-500 border-b border-slate-100 dark:border-slate-800">
+            Por qué no salió — ordenado por lo que más pesa, que es por donde hay que empezar a mirar
+          </div>
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {r.motivos.map((m, i) => (
+              <div key={i} className="px-3.5 py-2 flex justify-between gap-3 text-[13px]">
+                <span>{m.motivo} <span className="text-slate-400">· {DESTINO_CORTO[m.destino] || m.destino}</span></span>
+                <span className="num text-slate-500 whitespace-nowrap">
+                  {fmtNum(m.cantidad, 2)} <span className="text-slate-400">en {m.veces} tanda(s)</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {(r.porProducto || []).length ? (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60">
+                  <th className="py-2.5 px-3 font-medium">Producto</th>
+                  <th className="py-2.5 pr-3 font-medium text-center">Tandas</th>
+                  <th className="py-2.5 pr-3 font-medium text-right">Producido</th>
+                  <th className="py-2.5 pr-3 font-medium text-right">No logrado</th>
+                  <th className="py-2.5 pr-3 font-medium text-right">Rendimiento real</th>
+                  <th className="py-2.5 pr-3 font-medium text-right">Pérdida</th>
+                </tr>
+              </thead>
+              <tbody>
+                {r.porProducto.map((f) => (
+                  <tr key={f.sku} className="border-b border-slate-100 dark:border-slate-800/70">
+                    <td className="py-2.5 px-3">
+                      <div className="font-medium text-[13px]">{f.nombre}</div>
+                      <div className="text-[11px] text-slate-400 num">{f.sku}</div>
+                    </td>
+                    <td className="py-2.5 pr-3 text-center num text-slate-500">{f.ordenes}</td>
+                    <td className="py-2.5 pr-3 text-right num">{fmtNum(f.producido, 2)}
+                      <span className="text-slate-400"> / {fmtNum(f.planificado, 2)}</span></td>
+                    <td className="py-2.5 pr-3 text-right num text-slate-500">{fmtNum(f.noLogrado, 2)}</td>
+                    <td className={`py-2.5 pr-3 text-right num font-medium ${f.rendimientoPct < 90 ? 'text-amber-700 dark:text-amber-400' : ''}`}>
+                      {fmtNum(f.rendimientoPct, 1)}%
+                    </td>
+                    <td className="py-2.5 pr-3 text-right num private-mask">
+                      {f.perdidaAnormal > 0 ? fmtCurrency(f.perdidaAnormal, 'VES') : <span className="text-slate-300 dark:text-slate-600">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <Empty icon={<Icon.Boxes size={22} />} title="Sin producción en este período"
+          body="Cuando haya órdenes terminadas, acá se ve cuánto salió, cuánto se perdió y por qué." />
+      )}
+    </div>
+  )
+}
+
+function Tarjeta({ label, valor, sub, tono }) {
+  const color = tono === 'malo' ? 'text-[#B3362C] dark:text-red-400'
+    : tono === 'bueno' ? 'text-[#166B41] dark:text-emerald-400' : ''
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card p-3.5">
+      <div className="text-[11.5px] text-slate-500">{label}</div>
+      <div className={`text-[19px] font-semibold num mt-0.5 private-mask ${color}`}>{valor}</div>
+      {sub ? <div className="text-[11px] text-slate-400 mt-0.5">{sub}</div> : null}
+    </div>
   )
 }

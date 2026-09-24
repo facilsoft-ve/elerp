@@ -550,6 +550,7 @@ export const api = {
   ordenesFabricacion: () => request('/api/fabricacion/ordenes'),
   planearOrdenFabricacion: (body) => request('/api/fabricacion/planear', { method: 'POST', body: JSON.stringify(body) }),
   crearOrdenFabricacion: (body) => request('/api/fabricacion/ordenes', { method: 'POST', body: JSON.stringify(body) }),
+  resumenFabricacion: (desde, hasta) => request(`/api/fabricacion/resumen?desde=${encodeURIComponent(desde || '')}&hasta=${encodeURIComponent(hasta || '')}`),
   iniciarOrdenFabricacion: (id) => request(`/api/fabricacion/ordenes/${encodeURIComponent(id)}/iniciar`, { method: 'POST' }),
   // El resultado no es una cifra: es un reparto. De una tanda de 15 pueden salir
   // 10 buenos, 3 perdidos y 2 para reprocesar.
