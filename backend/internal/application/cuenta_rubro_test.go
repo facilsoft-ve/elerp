@@ -49,7 +49,7 @@ func rubroPorNombre(t *testing.T, svc *application.Service, nombre string) inven
 func rubroConCuenta(t *testing.T, svc *application.Service, nombre, cuenta string) inventario.Rubro {
 	t.Helper()
 	r := rubroPorNombre(t, svc, nombre)
-	out, err := svc.ActualizarCuentaRubro(empDemo, r.ID, cuenta, actorA, origenTst)
+	out, err := svc.ActualizarCuentaRubro(empDemo, r.ID, cuenta, true, actorA, origenTst)
 	if err != nil {
 		t.Fatalf("asignar cuenta al rubro: %v", err)
 	}
@@ -78,14 +78,91 @@ func TestCuentaRubro_ElMaestroSeDefiende(t *testing.T) {
 	svc, _ := nuevoServicio(t)
 	r := rubroPorNombre(t, svc, "Electrónica")
 
-	if _, err := svc.ActualizarCuentaRubro(empDemo, r.ID, "9999", actorA, origenTst); !errors.Is(err, application.ErrCuentaNoExiste) {
+	if _, err := svc.ActualizarCuentaRubro(empDemo, r.ID, "9999", true, actorA, origenTst); !errors.Is(err, application.ErrCuentaNoExiste) {
 		t.Errorf("una cuenta que no está en el plan debía rechazarse: %v", err)
 	}
-	if _, err := svc.ActualizarCuentaRubro(empDemo, r.ID, contabilidad.CtaVentas, actorA, origenTst); !errors.Is(err, application.ErrCuentaNoEsActivo) {
+	if _, err := svc.ActualizarCuentaRubro(empDemo, r.ID, contabilidad.CtaVentas, true, actorA, origenTst); !errors.Is(err, application.ErrCuentaNoEsActivo) {
 		t.Errorf("el inventario es un activo: una cuenta de ingreso debía rechazarse: %v", err)
 	}
-	if _, err := svc.ActualizarCuentaRubro(empDemo, "rub_inventado", contabilidad.CtaInventario, actorA, origenTst); !errors.Is(err, application.ErrRubroNoExiste) {
+	if _, err := svc.ActualizarCuentaRubro(empDemo, "rub_inventado", contabilidad.CtaInventario, true, actorA, origenTst); !errors.Is(err, application.ErrRubroNoExiste) {
 		t.Errorf("un rubro inventado debía rechazarse: %v", err)
+	}
+}
+
+// TestCuentaRubro_NoReclasificaSinQueAlguienLoPida es la guarda de la decisión.
+//
+// Cambiarle la cuenta a un rubro CON existencia emite un asiento en un libro de
+// solo-anexado: no se borra, se contra-asienta. Que salga solo, por elegir una
+// opción de un desplegable, es pedir que alguien tenga que explicar un asiento que
+// no recuerda haber hecho.
+//
+// La guarda vive en la APLICACIÓN y no en la pantalla a propósito: puesta en la
+// interfaz, cualquier otra llamada al API movería el libro igual.
+func TestCuentaRubro_NoReclasificaSinQueAlguienLoPida(t *testing.T) {
+	svc := servicioCompleto(t)
+	crearCuentaAlterna(t, svc)
+	r := rubroPorNombre(t, svc, "Electrónica") // el seed le trae existencia
+
+	// Primero se puede MIRAR lo que pasaría, sin tocar nada.
+	prev, err := svc.PrevisualizarCuentaRubro(empDemo, r.ID, ctaInvAlterna)
+	if err != nil {
+		t.Fatalf("previsualizar: %v", err)
+	}
+	if !prev.Asiento || prev.Valor <= 0 {
+		t.Fatalf("este rubro tiene existencia: el cambio emite asiento (%+v)", prev)
+	}
+	if prev.CuentaActual != contabilidad.CtaInventario || prev.CuentaNueva != ctaInvAlterna {
+		t.Errorf("la vista previa tiene que decir de dónde a dónde: %+v", prev)
+	}
+	if prev.Productos == 0 {
+		t.Error("y cuántos productos arrastra")
+	}
+	asientosAntes := len(svc.LibroDiario(empDemo))
+
+	// Sin confirmar, no se hace nada. NI el cambio NI el asiento.
+	if _, err := svc.ActualizarCuentaRubro(empDemo, r.ID, ctaInvAlterna, false, actorA, origenTst); !errors.Is(err, application.ErrReclasificacionNoConfirmada) {
+		t.Fatalf("sin confirmar tenía que negarse: %v", err)
+	}
+	if got := len(svc.LibroDiario(empDemo)); got != asientosAntes {
+		t.Errorf("una negativa no puede dejar asientos: %d → %d", asientosAntes, got)
+	}
+	if rr := rubroPorNombre(t, svc, "Electrónica"); rr.CuentaInventario != "" {
+		t.Errorf("tampoco puede haber cambiado la configuración: %q", rr.CuentaInventario)
+	}
+
+	// Confirmado sí.
+	if _, err := svc.ActualizarCuentaRubro(empDemo, r.ID, ctaInvAlterna, true, actorA, origenTst); err != nil {
+		t.Fatalf("confirmado tenía que aplicarse: %v", err)
+	}
+	if got := len(svc.LibroDiario(empDemo)); got != asientosAntes+1 {
+		t.Errorf("tenía que emitirse exactamente un asiento: %d → %d", asientosAntes, got)
+	}
+}
+
+// TestCuentaRubro_SinExistenciaNoPideConfirmacion: si el rubro no tiene mercancía,
+// el cambio es solo configuración y no mueve el libro. Pedir confirmación ahí sería
+// un trámite sin contenido, y los trámites sin contenido enseñan a aceptarlos sin
+// leerlos — que es justo lo que no se quiere el día que sí importa.
+func TestCuentaRubro_SinExistenciaNoPideConfirmacion(t *testing.T) {
+	svc, st := nuevoServicio(t)
+	svc.ConAlmacenes(st.Almacenes)
+	crearCuentaAlterna(t, svc)
+	// Un rubro nuevo, sin productos: nada que reclasificar.
+	vacio := st.Rubros.Create(inventario.Rubro{EmpresaID: empDemo, Nombre: "Rubro sin mercancía"})
+
+	prev, err := svc.PrevisualizarCuentaRubro(empDemo, vacio.ID, ctaInvAlterna)
+	if err != nil {
+		t.Fatalf("previsualizar: %v", err)
+	}
+	if prev.Asiento {
+		t.Errorf("sin existencia no hay asiento que emitir: %+v", prev)
+	}
+	asientosAntes := len(svc.LibroDiario(empDemo))
+	if _, err := svc.ActualizarCuentaRubro(empDemo, vacio.ID, ctaInvAlterna, false, actorA, origenTst); err != nil {
+		t.Fatalf("sin asiento de por medio no hace falta confirmar: %v", err)
+	}
+	if got := len(svc.LibroDiario(empDemo)); got != asientosAntes {
+		t.Errorf("no podía emitirse ningún asiento: %d → %d", asientosAntes, got)
 	}
 }
 

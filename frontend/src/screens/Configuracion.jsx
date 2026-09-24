@@ -4890,6 +4890,7 @@ function CuentasPorRubro({ puedeEditar, toast }) {
   const [rubros, setRubros] = useState(null)
   const [cuentas, setCuentas] = useState([])
   const [guardando, setGuardando] = useState('')
+  const [confirmar, setConfirmar] = useState(null)
 
   const cargar = async () => {
     try { setRubros((await api.rubrosContables())?.rubros || []) } catch { setRubros([]) }
@@ -4901,14 +4902,38 @@ function CuentasPorRubro({ puedeEditar, toast }) {
       .catch(() => setCuentas([]))
   }, [])
 
-  const asignar = async (rubro, cuenta) => {
+  // Elegir una cuenta NO la aplica: primero se mira qué movería. Un cambio que
+  // arrastra inventario emite un asiento en un libro de solo-anexado —no se borra,
+  // se contra-asienta—, así que no puede salir de elegir una opción de una lista.
+  const proponer = async (rubro, cuenta) => {
     setGuardando(rubro.id)
     try {
-      await api.actualizarCuentaRubro(rubro.id, cuenta)
+      const prev = await api.previsualizarCuentaRubro(rubro.id, cuenta)
+      if (!prev.asiento) {
+        // Sin mercancía que mover es solo configuración: pedir confirmación aquí
+        // sería un trámite vacío, y los trámites vacíos enseñan a aceptarlos sin
+        // leerlos — justo lo que no se quiere el día que sí importa.
+        await api.actualizarCuentaRubro(rubro.id, cuenta, false)
+        toast({ title: cuenta ? 'Cuenta asignada' : 'Vuelve a la cuenta general', body: rubro.nombre })
+        cargar()
+        return
+      }
+      setConfirmar({ rubro, cuenta, prev })
+    } catch (e) {
+      toast({ title: 'No se pudo', body: e?.message || 'Error', kind: 'error' })
+    } finally { setGuardando('') }
+  }
+
+  const aplicar = async () => {
+    const { rubro, cuenta } = confirmar
+    setGuardando(rubro.id)
+    try {
+      await api.actualizarCuentaRubro(rubro.id, cuenta, true)
       toast({
         title: cuenta ? 'Cuenta asignada' : 'Vuelve a la cuenta general',
-        body: `${rubro.nombre}. El inventario que ya tenía se reclasificó con un asiento.`,
+        body: `${rubro.nombre}. Se emitió el asiento de reclasificación.`,
       })
+      setConfirmar(null)
       cargar()
     } catch (e) {
       toast({ title: 'No se pudo asignar', body: e?.message || 'Error', kind: 'error' })
@@ -4944,7 +4969,7 @@ function CuentasPorRubro({ puedeEditar, toast }) {
                   <td className="px-4 py-2">
                     {puedeEditar ? (
                       <Select value={r.cuentaInventario || ''} disabled={guardando === r.id}
-                        onChange={(e) => asignar(r, e.target.value)} className="!w-72">
+                        onChange={(e) => proponer(r, e.target.value)} className="!w-72">
                         <option value="">La general (1201)</option>
                         {cuentas.map((c) => <option key={c.codigo} value={c.codigo}>{c.codigo} · {c.nombre}</option>)}
                       </Select>
@@ -4958,6 +4983,46 @@ function CuentasPorRubro({ puedeEditar, toast }) {
           </table>
         </div>
       )}
+
+      {confirmar ? (
+        <Modal open onClose={() => setConfirmar(null)} title={`Mover el inventario de ${confirmar.rubro.nombre}`}>
+          <div className="space-y-3 text-[13px]">
+            <div className="rounded-lg bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-900/40 px-3 py-2.5 text-[12.5px] text-amber-900 dark:text-amber-200">
+              Este cambio <strong>emite un asiento</strong> en el libro diario. Los asientos no se borran:
+              si te equivocas, hay que contra-asentarlo.
+            </div>
+            <div className="space-y-1.5">
+              <Linea rotulo="Categoría" valor={confirmar.prev.rubro} />
+              <Linea rotulo="Productos que arrastra" valor={`${fmtNum(confirmar.prev.productos, 0)}`} />
+              <Linea rotulo="Sale de"
+                valor={`${confirmar.prev.cuentaActual}${confirmar.prev.nombreActual ? ' · ' + confirmar.prev.nombreActual : ''}`} />
+              <Linea rotulo="Entra en"
+                valor={`${confirmar.prev.cuentaNueva}${confirmar.prev.nombreNueva ? ' · ' + confirmar.prev.nombreNueva : ''}`} />
+              <Linea rotulo="Importe del asiento" valor={fmtCurrency(confirmar.prev.valor, 'VES')} fuerte />
+            </div>
+            <div className="text-[12px] text-slate-500 dark:text-slate-400">
+              A partir de ahora, <strong>todos</strong> los movimientos de esta categoría irán a la cuenta
+              nueva: compras, ventas, mermas y devoluciones.
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="ghost" onClick={() => setConfirmar(null)}>Cancelar</Button>
+              <Button onClick={aplicar} disabled={guardando === confirmar.rubro.id}>
+                {guardando === confirmar.rubro.id ? 'Aplicando…' : 'Sí, mover y asentar'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+    </div>
+  )
+}
+
+// Linea es un renglón rótulo/valor del resumen de confirmación.
+function Linea({ rotulo, valor, fuerte }) {
+  return (
+    <div className="flex items-baseline gap-3">
+      <span className="text-slate-500 dark:text-slate-400 w-48 shrink-0">{rotulo}</span>
+      <span className={fuerte ? 'num font-semibold' : 'num'}>{valor}</span>
     </div>
   )
 }

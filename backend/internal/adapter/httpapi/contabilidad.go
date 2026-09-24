@@ -27,7 +27,11 @@ func (s *Server) registerContabilidad(r fiber.Router) {
 	// En qué cuenta se acumula cada rubro. Cuelga de Contabilidad y no de Inventario
 	// porque la decisión es contable: quién la toma es la contadora, no el almacén.
 	g.Get("/rubros", s.handleRubrosContables)
-	g.Patch("/rubros/:id/cuenta", s.requireRoles(usuario.RolDueno, usuario.RolDesarrollador, usuario.RolContadora), s.handleCuentaRubro)
+	contable := s.requireRoles(usuario.RolDueno, usuario.RolDesarrollador, usuario.RolContadora)
+	// La previsualización NO escribe: dice cuánto inventario cambiaría de cuenta y
+	// si el cambio emitirá asiento. Es lo que hay que poder mirar antes de decidir.
+	g.Post("/rubros/:id/cuenta/previsualizar", contable, s.handlePreviewCuentaRubro)
+	g.Patch("/rubros/:id/cuenta", contable, s.handleCuentaRubro)
 	// Edición del plan de cuentas (maestro editable; mismo gate del grupo). No hay
 	// borrado: solo desactivar. El código es inmutable.
 	g.Post("/plan", s.handleCrearCuenta)
@@ -62,20 +66,46 @@ func (s *Server) handleRubrosContables(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"rubros": s.svc.Rubros(empresaIDOf(c))})
 }
 
-func (s *Server) handleCuentaRubro(c *fiber.Ctx) error {
+func (s *Server) handlePreviewCuentaRubro(c *fiber.Ctx) error {
 	var in struct {
-		// Cuenta vacía devuelve el rubro a la cuenta general, que es un cambio
-		// legítimo: nadie queda atado a haber separado una categoría.
 		Cuenta string `json:"cuenta"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
-	out, err := s.svc.ActualizarCuentaRubro(empresaIDOf(c), c.Params("id"), in.Cuenta, principalOf(c).UserID, origen(c))
+	out, err := s.svc.PrevisualizarCuentaRubro(empresaIDOf(c), c.Params("id"), in.Cuenta)
 	if err != nil {
 		estado := fiber.StatusBadRequest
 		if errors.Is(err, application.ErrRubroNoExiste) {
 			estado = fiber.StatusNotFound
+		}
+		return c.Status(estado).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(out)
+}
+
+func (s *Server) handleCuentaRubro(c *fiber.Ctx) error {
+	var in struct {
+		// Cuenta vacía devuelve el rubro a la cuenta general, que es un cambio
+		// legítimo: nadie queda atado a haber separado una categoría.
+		Cuenta string `json:"cuenta"`
+		// Confirmado es obligatorio cuando el cambio mueve inventario ya registrado:
+		// ese caso emite un asiento de reclasificación en un libro de solo-anexado.
+		Confirmado bool `json:"confirmado"`
+	}
+	if err := c.BodyParser(&in); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
+	}
+	out, err := s.svc.ActualizarCuentaRubro(empresaIDOf(c), c.Params("id"), in.Cuenta, in.Confirmado,
+		principalOf(c).UserID, origen(c))
+	if err != nil {
+		estado := fiber.StatusBadRequest
+		switch {
+		case errors.Is(err, application.ErrRubroNoExiste):
+			estado = fiber.StatusNotFound
+		case errors.Is(err, application.ErrReclasificacionNoConfirmada):
+			// 409: la petición es válida; lo que falta es la decisión de una persona.
+			estado = fiber.StatusConflict
 		}
 		return c.Status(estado).JSON(fiber.Map{"error": err.Error()})
 	}

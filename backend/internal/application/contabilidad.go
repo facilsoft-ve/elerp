@@ -894,7 +894,8 @@ func (s *Service) Resultados(empresaID, desde, hasta string) EstadoResultados {
  */
 
 // asentarMovimientoInventario asienta un movimiento del ledger que no viene de un
-// documento fiscal: la entrada inicial de mercancía y los ajustes.
+// documento fiscal: la entrada inicial de mercancía, los ajustes y las salidas
+// que ningún documento explica.
 //
 // Sin esto el inventario del balance sale NEGATIVO: las ventas descargan la cuenta
 // 1201 pero nada la había cargado. Las compras a proveedores llegarán con el

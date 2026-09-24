@@ -679,8 +679,12 @@ export const api = {
   aplicarConteo: (body) => request('/api/inventario/conteo', { method: 'POST', body: JSON.stringify(body) }),
   // Cuentas de inventario por rubro (Contabilidad).
   rubrosContables: () => request('/api/contabilidad/rubros'),
-  actualizarCuentaRubro: (id, cuenta) =>
-    request(`/api/contabilidad/rubros/${encodeURIComponent(id)}/cuenta`, { method: 'PATCH', body: JSON.stringify({ cuenta }) }),
+  // Qué pasaría al cambiarle la cuenta a un rubro: cuánto inventario se movería y
+  // si el cambio emite asiento. NO escribe.
+  previsualizarCuentaRubro: (id, cuenta) =>
+    request(`/api/contabilidad/rubros/${encodeURIComponent(id)}/cuenta/previsualizar`, { method: 'POST', body: JSON.stringify({ cuenta }) }),
+  actualizarCuentaRubro: (id, cuenta, confirmado = false) =>
+    request(`/api/contabilidad/rubros/${encodeURIComponent(id)}/cuenta`, { method: 'PATCH', body: JSON.stringify({ cuenta, confirmado }) }),
   // APARTADOS: mercancía comprometida que todavía no salió.
   apartados: () => request('/api/inventario/apartados'),
   crearApartado: (body) => request('/api/inventario/apartados', { method: 'POST', body: JSON.stringify(body) }),

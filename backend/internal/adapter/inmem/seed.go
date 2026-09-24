@@ -403,6 +403,12 @@ func (s *Store) seedDemo() {
 		})
 	}
 	// Una venta (salida) para que el Kardex de la harina muestre movimiento.
+	//
+	// LLEVA COSTO, y no es cosmético: una salida sin costo sale del almacén sin
+	// rebajar la cuenta contable, y la demo arrancaba con el inventario y la
+	// contabilidad contando historias distintas. El balance cuadraba igual —faltaba
+	// el asiento entero, no una de sus patas—, así que nada lo delataba hasta que el
+	// informe de valoración las comparó.
 	if p, ok := s.Productos.BySKU(demoEmpID, "HAR-001"); ok {
 		s.Movimientos.Append(inventario.Movimiento{
 			EmpresaID: demoEmpID, SedeID: demoSede1ID, ProductoID: p.ID, SKU: p.SKU,

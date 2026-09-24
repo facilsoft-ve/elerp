@@ -40,31 +40,120 @@ var (
 	// otro tipo descuadra el balance por clasificación, que es un error que los
 	// totales no delatan.
 	ErrCuentaNoEsActivo = errors.New("la cuenta de inventario tiene que ser de tipo activo")
+	// ErrReclasificacionNoConfirmada: cambiar la cuenta de un rubro CON EXISTENCIA
+	// emite un asiento de reclasificación. Se exige confirmarlo explícitamente, y la
+	// guarda vive aquí y no solo en la pantalla: puesta en la interfaz, cualquier
+	// otra llamada al API movería el libro diario sin que nadie lo hubiera aprobado
+	// — y en un libro de solo-anexado ese asiento ya no se quita, se contra-asienta.
+	ErrReclasificacionNoConfirmada = errors.New("este cambio mueve inventario ya registrado de una cuenta a otra: confírmalo para continuar")
 )
+
+// PreviewCuentaRubro dice qué pasaría al cambiarle la cuenta a un rubro, sin
+// tocar nada. Es lo que se le enseña a quien va a decidirlo.
+type PreviewCuentaRubro struct {
+	RubroID      string `json:"rubroId"`
+	Rubro        string `json:"rubro"`
+	CuentaActual string `json:"cuentaActual"`
+	NombreActual string `json:"nombreActual"`
+	CuentaNueva  string `json:"cuentaNueva"`
+	NombreNueva  string `json:"nombreNueva"`
+	// Valor es el inventario que cambiaría de cuenta, y por tanto el importe del
+	// asiento. Cero significa que el cambio no mueve nada: el rubro no tiene
+	// existencia y no hace falta confirmar.
+	Valor     float64 `json:"valor"`
+	Productos int     `json:"productos"`
+	// Asiento dice si el cambio emitirá uno. Cuando es falso, el cambio es solo de
+	// configuración y se aplica sin más.
+	Asiento bool `json:"asiento"`
+}
+
+// PrevisualizarCuentaRubro calcula el efecto del cambio SIN aplicarlo.
+func (s *Service) PrevisualizarCuentaRubro(empresaID, rubroID, cuenta string) (PreviewCuentaRubro, error) {
+	r, ok := s.rubroPorID(empresaID, rubroID)
+	if !ok {
+		return PreviewCuentaRubro{}, ErrRubroNoExiste
+	}
+	cuenta = strings.TrimSpace(cuenta)
+	if err := s.validarCuentaDeInventario(empresaID, cuenta); err != nil {
+		return PreviewCuentaRubro{}, err
+	}
+	out := PreviewCuentaRubro{
+		RubroID: r.ID, Rubro: r.Nombre,
+		CuentaActual: r.CuentaInventario, CuentaNueva: cuenta,
+	}
+	if out.CuentaActual == "" {
+		out.CuentaActual = contabilidad.CtaInventario
+	}
+	if out.CuentaNueva == "" {
+		out.CuentaNueva = contabilidad.CtaInventario
+	}
+	if c, ok := s.cuentaContable(empresaID, out.CuentaActual); ok {
+		out.NombreActual = c.Nombre
+	}
+	if c, ok := s.cuentaContable(empresaID, out.CuentaNueva); ok {
+		out.NombreNueva = c.Nombre
+	}
+	if out.CuentaActual == out.CuentaNueva {
+		return out, nil // no mueve nada
+	}
+	out.Valor = s.valorDelRubro(empresaID, r.Nombre)
+	for _, p := range s.productos.List(empresaID) {
+		if p.Rubro == r.Nombre && !p.EsCombo && !p.EsPlato {
+			out.Productos++
+		}
+	}
+	out.Asiento = out.Valor > 0.004
+	return out, nil
+}
+
+// rubroPorID busca un rubro de la empresa.
+func (s *Service) rubroPorID(empresaID, rubroID string) (inventario.Rubro, bool) {
+	for _, x := range s.Rubros(empresaID) {
+		if x.ID == rubroID {
+			return x, true
+		}
+	}
+	return inventario.Rubro{}, false
+}
+
+// validarCuentaDeInventario comprueba que la cuenta exista y sea de activo. Vacío
+// es válido: significa volver a la cuenta general.
+func (s *Service) validarCuentaDeInventario(empresaID, cuenta string) error {
+	if strings.TrimSpace(cuenta) == "" {
+		return nil
+	}
+	c, ok := s.cuentaContable(empresaID, cuenta)
+	if !ok {
+		return ErrCuentaNoExiste
+	}
+	if c.Tipo != contabilidad.TipoActivo {
+		return ErrCuentaNoEsActivo
+	}
+	return nil
+}
 
 // ActualizarCuentaRubro asigna (o quita, con cuenta vacía) la cuenta de inventario
 // de un rubro.
-func (s *Service) ActualizarCuentaRubro(empresaID, rubroID, cuenta, actor, origen string) (inventario.Rubro, error) {
-	var r inventario.Rubro
-	encontrado := false
-	for _, x := range s.Rubros(empresaID) {
-		if x.ID == rubroID {
-			r, encontrado = x, true
-			break
-		}
-	}
+//
+// `confirmado` es obligatorio cuando el cambio mueve inventario ya registrado: ese
+// caso emite un asiento de reclasificación, y un asiento que nadie pidió es un
+// asiento que alguien tendrá que explicar. Cuando el rubro no tiene existencia el
+// cambio es solo configuración y no hace falta confirmar nada.
+func (s *Service) ActualizarCuentaRubro(empresaID, rubroID, cuenta string, confirmado bool, actor, origen string) (inventario.Rubro, error) {
+	r, encontrado := s.rubroPorID(empresaID, rubroID)
 	if !encontrado {
 		return inventario.Rubro{}, ErrRubroNoExiste
 	}
 	cuenta = strings.TrimSpace(cuenta)
-	if cuenta != "" {
-		c, ok := s.cuentaContable(empresaID, cuenta)
-		if !ok {
-			return inventario.Rubro{}, ErrCuentaNoExiste
-		}
-		if c.Tipo != contabilidad.TipoActivo {
-			return inventario.Rubro{}, ErrCuentaNoEsActivo
-		}
+	if err := s.validarCuentaDeInventario(empresaID, cuenta); err != nil {
+		return inventario.Rubro{}, err
+	}
+	previo, err := s.PrevisualizarCuentaRubro(empresaID, rubroID, cuenta)
+	if err != nil {
+		return inventario.Rubro{}, err
+	}
+	if previo.Asiento && !confirmado {
+		return inventario.Rubro{}, ErrReclasificacionNoConfirmada
 	}
 	anterior := r.CuentaInventario
 	if anterior == "" {
