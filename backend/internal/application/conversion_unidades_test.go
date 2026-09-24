@@ -160,6 +160,53 @@ func TestConversion_UnaUnidadImposibleNoRecibeNada(t *testing.T) {
 	}
 }
 
+// TestConversion_ElBackfillRellenaSoloLoQueFalta cubre el fallo que solo apareció
+// en producción: el campo nació después que los datos, así que las empresas que ya
+// existían tenían sus unidades sin factor y la conversión quedaba viva y VACÍA —
+// el selector no aparecía nunca y nada fallaba.
+func TestConversion_ElBackfillRellenaSoloLoQueFalta(t *testing.T) {
+	svc, st := servicioConUnidades(t)
+
+	// Se simula el estado de una empresa anterior al campo: todas sin equivalencia.
+	for _, u := range svc.Unidades(empDemo) {
+		u.Factor = 0
+		st.Unidades.Update(u)
+	}
+	if n := len(svc.UnidadesCompatiblesCon(empDemo, "kg")); n != 0 {
+		t.Fatalf("de partida no se puede convertir nada: %d", n)
+	}
+
+	if n := svc.AsegurarFactoresDeUnidades(empDemo, "sistema", "prueba"); n == 0 {
+		t.Fatal("tenía que rellenar las equivalencias del juego por defecto")
+	}
+	compat := map[string]bool{}
+	for _, u := range svc.UnidadesCompatiblesCon(empDemo, "kg") {
+		compat[u.Simbolo] = true
+	}
+	if !compat["kg"] || !compat["g"] {
+		t.Errorf("kg y g tenían que quedar convertibles: %v", compat)
+	}
+	// «caja» sigue sin factor: son las que quepan, y eso depende del producto.
+	if _, err := svc.ConvertirCantidad(empDemo, "caja", "unidad", 1); !errors.Is(err, application.ErrUnidadSinFactor) {
+		t.Errorf("«caja» no tiene equivalencia universal, el backfill no se la inventa: %v", err)
+	}
+
+	// SEGUNDA PASADA: no toca nada. Y si alguien pone un factor a cero a propósito
+	// —«esta unidad no se convierte»— no se lo deshace en el siguiente arranque.
+	if n := svc.AsegurarFactoresDeUnidades(empDemo, "sistema", "prueba"); n != 0 {
+		t.Errorf("con equivalencias ya declaradas no vuelve a intervenir: %d", n)
+	}
+	for _, u := range svc.Unidades(empDemo) {
+		if u.Simbolo == "g" {
+			u.Factor = 0
+			st.Unidades.Update(u)
+		}
+	}
+	if n := svc.AsegurarFactoresDeUnidades(empDemo, "sistema", "prueba"); n != 0 {
+		t.Errorf("un cero deliberado no se deshace solo: %d", n)
+	}
+}
+
 // TestConversion_SoloSeOfreceLoQueSePuede: la pantalla no debe ofrecer una
 // conversión que después se va a rechazar.
 func TestConversion_SoloSeOfreceLoQueSePuede(t *testing.T) {

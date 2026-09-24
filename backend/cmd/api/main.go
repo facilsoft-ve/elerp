@@ -125,6 +125,13 @@ func main() {
 		if n := svc.RecontabilizarPendientes(emp.ID, "sistema"); n > 0 {
 			log.Printf("Contabilidad: %d documento(s) de %s recibieron su asiento", n, emp.ID)
 		}
+		// Unidades de medida: las equivalencias del juego por defecto (kg=1, g=0,001…)
+		// para las empresas cuyas unidades se sembraron antes de que el campo
+		// existiera. Sin esto la conversión queda viva pero inerte: el selector no
+		// aparece nunca y nada falla. Solo actúa si la empresa no declaró ninguna.
+		if n := svc.AsegurarFactoresDeUnidades(emp.ID, "sistema", "arranque"); n > 0 {
+			log.Printf("Unidades: %d equivalencia(s) iniciales puestas en %s", n, emp.ID)
+		}
 		// Almacenes: toda sede debe tener ≥1 almacén principal. Idempotente: crea el
 		// "Almacén Principal" a las sedes que aún no tienen ninguno (seed y tenants
 		// previos a esta función).

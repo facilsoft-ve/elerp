@@ -133,6 +133,55 @@ func (s *Service) ActualizarFactorUnidad(empresaID, id string, factor float64, a
 	return out, nil
 }
 
+// AsegurarFactoresDeUnidades rellena las equivalencias que faltan en las unidades
+// del juego por defecto.
+//
+// POR QUÉ HACE FALTA. El campo nació después que los datos: las empresas que ya
+// existían tienen sus unidades sin factor, y sin factor no se convierte nada. La
+// función se desplegó VIVA Y VACÍA — el selector no aparecía nunca, y no fallaba:
+// simplemente no estaba. Lo detectó una comprobación en producción, no una prueba.
+//
+// SOLO ACTÚA SI LA EMPRESA NO TIENE NINGUNA EQUIVALENCIA DECLARADA. En cuanto
+// alguien toca una, el backfill no vuelve a intervenir: si no, poner deliberadamente
+// un factor a cero —«esta unidad no se convierte»— se desharía solo en el siguiente
+// arranque, que es la clase de cosa que hace desconfiar de un sistema.
+//
+// Y solo toca los SÍMBOLOS CONOCIDOS. Una unidad propia del cliente («bulto»,
+// «paca») no tiene equivalencia universal: la declara quien sabe cuánto mide.
+func (s *Service) AsegurarFactoresDeUnidades(empresaID, actor, origen string) int {
+	if s.unidades == nil {
+		return 0
+	}
+	actuales := s.Unidades(empresaID)
+	for _, u := range actuales {
+		if u.Factor > 0 {
+			return 0 // ya hay equivalencias declaradas: no se toca nada
+		}
+	}
+	conocidos := map[string]float64{}
+	for _, d := range unidadmedida.PorDefecto(empresaID) {
+		if d.Factor > 0 {
+			conocidos[d.Simbolo] = d.Factor
+		}
+	}
+	n := 0
+	for _, u := range actuales {
+		f, ok := conocidos[u.Simbolo]
+		if !ok {
+			continue
+		}
+		u.Factor = f
+		if _, ok := s.unidades.Update(u); ok {
+			n++
+		}
+	}
+	if n > 0 {
+		s.audit.Append(evento(empresaID, actor, origen, "inventario.unidad.factores_iniciales",
+			fmt.Sprintf("%d unidad(es)", n), "equivalencias del juego por defecto"))
+	}
+	return n
+}
+
 // round4 redondea a cuatro decimales. Las cantidades convertidas no son dinero: un
 // gramo expresado en kilos son 0,001 y redondearlo a céntimos lo dejaría en cero.
 func round4(v float64) float64 {
