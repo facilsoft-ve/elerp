@@ -2444,11 +2444,12 @@ function FijarNumeracionModal({ tipo, contador, onClose, onSaved }) {
 /* --- Usuarios y roles ---------------------------------------------------- */
 
 // linkDeInvitacion arma el enlace de aceptación desde el origin actual del
-// navegador (siempre correcto, sea dev o prod) usando el token que devuelve el
-// backend. El backend también manda `enlace` absoluto (con FRONTEND_URL) como
-// respaldo por si el token no viniera.
+// navegador usando el token que devuelve el backend. Va con BASE_URL (`/app/`):
+// la raíz la sirve la landing, y un enlace a `/?invite=` dejaba al invitado en la
+// página de ventas sin ver nunca AcceptInvite. El backend también manda `enlace`
+// absoluto (con FRONTEND_URL) como respaldo por si el token no viniera.
 function linkDeInvitacion(res) {
-  if (res?.token) return `${window.location.origin}/?invite=${encodeURIComponent(res.token)}`
+  if (res?.token) return `${window.location.origin}${import.meta.env.BASE_URL}?invite=${encodeURIComponent(res.token)}`
   return res?.enlace || ''
 }
 
