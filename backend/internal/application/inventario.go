@@ -903,16 +903,25 @@ func (s *Service) ajustar(empresaID, sedeID, almacenID, ubicacionID, sku, motivo
 		UbicacionID: s.ubicacionParaEscritura(empresaID, almacenID, ubicacionID),
 		Cantidad:    cantidad,
 	}}
-	// Al RESTAR sin decir de dónde, se reparte por FEFO entre las casillas reales
-	// (lote y ubicación): una merma sin más datos se imputa a lo que vence antes y,
-	// a igualdad, a lo que el sistema no sabe dónde está.
-	//
-	// OJO: esto vale para TODO producto, no solo los que llevan lote. Si un ajuste
-	// negativo saliera siempre «sin ubicar», esa casilla se iría a negativo mientras
-	// las ubicaciones quedan intactas: la suma cuadraría y el sitio sería mentira.
-	if cantidad < 0 && lote == "" && ubicacionID == "" {
+	/* AL RESTAR SIN DECIR DE DÓNDE, se reparte entre las casillas REALES.
+	 *
+	 * Una merma sin más datos se imputa por FEFO —a lo que vence antes y, a
+	 * igualdad, a lo que el sistema no sabe dónde está—, que es lo más probable y lo
+	 * que además conviene sacar.
+	 *
+	 * Vale para TODO producto, lleve lote o no. Si un ajuste negativo saliera
+	 * siempre «sin ubicar», esa casilla se iría a negativo mientras las ubicaciones
+	 * quedan intactas: la suma del producto cuadraría y el sitio sería mentira.
+	 *
+	 * Y VALE TAMBIÉN CON EL LOTE DECLARADO. Antes solo se repartía cuando faltaban
+	 * los dos datos, así que contar un lote concreto sin decir el estante —que es
+	 * como se cuenta: se lee la etiqueta de la caja, no el número del anaquel—
+	 * descontaba de una casilla «sin ubicar» que estaba vacía. El saldo del lote
+	 * quedaba bien y la vista por ubicación decía que seguía habiendo de todo.
+	 */
+	if cantidad < 0 && ubicacionID == "" {
 		tramos = tramos[:0]
-		for _, t := range s.repartirSalidaFEFOTolerante(empresaID, sedeID, almacenPedido, p.ID, -cantidad) {
+		for _, t := range s.repartirSalidaEntreCasillas(empresaID, sedeID, almacenPedido, p.ID, lote, -cantidad) {
 			tramos = append(tramos, TramoSalida{
 				Lote: t.Lote, Vencimiento: t.Vencimiento,
 				AlmacenID: t.AlmacenID, UbicacionID: t.UbicacionID, Cantidad: -t.Cantidad,

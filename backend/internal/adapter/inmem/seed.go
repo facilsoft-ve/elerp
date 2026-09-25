@@ -1192,7 +1192,11 @@ type Snapshot struct {
 	// Los ALMACENES van con los movimientos y no después: cada movimiento sembrado
 	// referencia el suyo, y un almacenId que no resuelve deja el stock bajo «Sin
 	// almacén» —con los datos diciendo lo contrario— en vez de fallar.
-	Almacenes      []almacen.Almacen
+	Almacenes []almacen.Almacen
+	// Las UBICACIONES viajan con los almacenes y por lo mismo: los movimientos las
+	// referencian, y una ubicacionId que no resuelve deja el stock «SIN UBICAR» con
+	// el dato diciendo lo contrario.
+	Ubicaciones    []almacen.Ubicacion
 	Clientes       []cliente.Cliente
 	CuentasCobro   []fiscal.CuentaCobro
 	MetodosPago    []fiscal.MetodoPago
@@ -1237,6 +1241,7 @@ func (s *Store) Snapshot() Snapshot {
 		Productos:      s.Productos.List(demoEmpID),
 		Movimientos:    s.Movimientos.List(demoEmpID, inventario.FiltroMovimiento{}),
 		Almacenes:      s.Almacenes.List(demoEmpID),
+		Ubicaciones:    s.Ubicaciones.List(demoEmpID),
 		Clientes:       s.Clientes.List(demoEmpID),
 		CuentasCobro:   s.CuentasCobro.List(demoEmpID),
 		MetodosPago:    s.MetodosPago.List(demoEmpID),

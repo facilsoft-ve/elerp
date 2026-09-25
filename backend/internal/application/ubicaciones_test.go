@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/mornix/elerp/internal/application"
@@ -40,8 +41,19 @@ func almacenPrincipalID(t *testing.T, svc *application.Service) string {
 }
 
 // nuevaUbicacion da de alta una ubicación y devuelve su id.
+//
+// Si el almacén YA tiene una con ese código, devuelve la que hay en vez de fallar.
+// El seed siembra estantes y un muelle en el almacén principal —para que la
+// demostración enseñe el reparto por ubicación y no una columna de «SIN UBICAR»—, y
+// una prueba no tiene por qué romperse porque la demo traiga datos de más: lo que
+// necesita es UNA ubicación con ese código, no haberla creado ella.
 func nuevaUbicacion(t *testing.T, svc *application.Service, almacenID, codigo string) string {
 	t.Helper()
+	for _, u := range svc.UbicacionesDe(empDemo, almacenID) {
+		if strings.EqualFold(u.Codigo, codigo) {
+			return u.ID
+		}
+	}
 	u, err := svc.CrearUbicacion(empDemo, actorA, origenTst, almacen.Ubicacion{
 		AlmacenID: almacenID, Codigo: codigo, Nombre: "Ubicación " + codigo,
 	})

@@ -500,6 +500,23 @@ function AjustarModal({ existencia, sedeNombre, almacenId, almacenNombre, onClos
   const [cantidad, setCantidad] = useState('')
   const [touched, setTouched] = useState(false)
   const [busy, setBusy] = useState(false)
+  /* DÓNDE APARECIÓ O DÓNDE FALTÓ.
+   *
+   * El backend sabía ajustar en una ubicación concreta desde la tanda de
+   * ubicaciones; lo que no había era dónde decirlo, así que todo ajuste caía en
+   * «sin ubicar» por muchos estantes que tuviera el almacén — y cada ajuste dejaba
+   * el inventario un poco menos ubicado que antes.
+   *
+   * Solo se ofrece con un almacén ELEGIDO: viendo «todos los almacenes de la sede»
+   * no hay estante que apuntar, porque no se sabe ni en cuál de ellos está. */
+  const [ubicaciones, setUbicaciones] = useState([])
+  const [ubicacionId, setUbicacionId] = useState('')
+  useEffect(() => {
+    if (!almacenId) return setUbicaciones([])
+    api.ubicaciones(almacenId)
+      .then((us) => setUbicaciones((us || []).filter((u) => u.activa)))
+      .catch(() => setUbicaciones([]))
+  }, [almacenId])
 
   const nCant = Number(cantidad)
   const errMotivo = !motivo.trim() ? 'El motivo es obligatorio (queda en el historial).' : ''
@@ -512,8 +529,9 @@ function AjustarModal({ existencia, sedeNombre, almacenId, almacenNombre, onClos
     if (!valid) return
     setBusy(true)
     try {
-      await api.ajustarExistencia(existencia.sku, { motivo: motivo.trim(), cantidad: nCant }, almacenId)
-      toast({ title: 'Existencia ajustada', body: `${existencia.nombre}: ${nCant > 0 ? '+' : ''}${nCant}${almacenNombre ? ' en ' + almacenNombre : ''}. Registrado en el Kardex.` })
+      await api.ajustarExistencia(existencia.sku, { motivo: motivo.trim(), cantidad: nCant, ubicacionId }, almacenId)
+      const donde = ubicaciones.find((u) => u.id === ubicacionId)
+      toast({ title: 'Existencia ajustada', body: `${existencia.nombre}: ${nCant > 0 ? '+' : ''}${nCant}${donde ? ' en ' + donde.codigo : almacenNombre ? ' en ' + almacenNombre : ''}. Registrado en el Kardex.` })
       await onSaved()
       onClose()
     } catch (e) {
@@ -542,6 +560,16 @@ function AjustarModal({ existencia, sedeNombre, almacenId, almacenNombre, onClos
           <Input value={motivo} onChange={(e) => setMotivo(e.target.value)} onBlur={() => setTouched(true)}
             invalid={touched && !!errMotivo} placeholder="Ej: Merma por vencimiento, conteo físico…" />
         </Field>
+        {ubicaciones.length > 0 ? (
+          <Field label="Ubicación" hint="dónde apareció o dónde faltó; opcional">
+            <Select value={ubicacionId} onChange={(e) => setUbicacionId(e.target.value)}>
+              <option value="">Sin indicar (el almacén, sin más detalle)</option>
+              {ubicaciones.map((u) => (
+                <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
         {!errCant && cantidad !== '' ? (
           <div className="flex items-center justify-between text-[13px] p-3 rounded-lg bg-elerp-50 dark:bg-elerp-900/30">
             <span className="text-elerp-700 dark:text-elerp-200">Nuevo saldo</span>

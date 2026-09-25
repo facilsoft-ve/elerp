@@ -94,10 +94,58 @@ export function Conteo() {
     return (existencias || []).filter((e) => !t || e.sku.toLowerCase().includes(t) || (e.nombre || '').toLowerCase().includes(t))
   }, [existencias, q])
 
+  /* CONTAR POR LOTE.
+   *
+   * Un producto con trazabilidad no se cuenta «en total»: en el anaquel hay tres
+   * cajas de tres lotes distintos, y si el conteo solo dice cuántas unidades hay,
+   * el ajuste tiene que adivinar de cuál sobran o faltan — y adivina por FEFO, que
+   * es una regla para VENDER, no para corregir lo que alguien acaba de mirar.
+   *
+   * Al desplegar un producto se cuenta lote a lote y su casilla total se apaga: o
+   * se cuenta el producto, o se cuentan sus lotes. Sumar ambas cosas contaría dos
+   * veces la misma caja. */
+  const [porLote, setPorLote] = useState({})     // sku → [{lote, vencimiento, cantidad}]
+  const [contadoLote, setContadoLote] = useState({}) // "sku|lote" → texto
+
+  const desplegarLotes = async (sku) => {
+    if (porLote[sku]) {
+      setPorLote(({ [sku]: _, ...resto }) => resto)
+      setContadoLote((c) => Object.fromEntries(Object.entries(c).filter(([k]) => !k.startsWith(sku + '|'))))
+      setPrevia(null)
+      return
+    }
+    try {
+      // La respuesta viene envuelta ({lotes: [...]}), no como array suelto.
+      const r = await api.lotesDeProducto(sku, activeSedeId)
+      const saldos = (r?.lotes || []).filter((l) => Number(l.cantidad) > 0 && l.lote)
+      if (saldos.length === 0) {
+        return toast({
+          title: 'Este producto no se lleva por lote',
+          body: 'Su existencia no está separada en lotes, así que se cuenta en la casilla de la derecha.',
+        })
+      }
+      setPorLote((m) => ({ ...m, [sku]: saldos }))
+      setPrevia(null)
+    } catch (e) {
+      toast({ title: 'No se pudieron cargar los lotes', body: e?.message || 'Error', kind: 'error' })
+    }
+  }
+
   // Solo las filas TECLEADAS entran en la hoja. Una casilla vacía no es un cero.
-  const lineas = useMemo(() => Object.entries(contado)
-    .filter(([, v]) => String(v).trim() !== '' && Number.isFinite(Number(v)))
-    .map(([sku, v]) => ({ sku, ubicacionId: ubicacionSel, contado: Number(v) })), [contado, ubicacionSel])
+  const lineas = useMemo(() => {
+    const out = []
+    for (const [sku, v] of Object.entries(contado)) {
+      if (porLote[sku]) continue // se cuenta por lote: su total no viaja
+      if (String(v).trim() === '' || !Number.isFinite(Number(v))) continue
+      out.push({ sku, ubicacionId: ubicacionSel, contado: Number(v) })
+    }
+    for (const [clave, v] of Object.entries(contadoLote)) {
+      if (String(v).trim() === '' || !Number.isFinite(Number(v))) continue
+      const corte = clave.indexOf('|')
+      out.push({ sku: clave.slice(0, corte), lote: clave.slice(corte + 1), ubicacionId: ubicacionSel, contado: Number(v) })
+    }
+    return out
+  }, [contado, contadoLote, porLote, ubicacionSel])
 
   const guardarPlan = async () => {
     if (!formPlan.nombre.trim()) return toast({ title: 'Ponle un nombre al plan', kind: 'error' })
@@ -235,25 +283,67 @@ export function Conteo() {
               </thead>
               <tbody>
                 {filas.map((e) => {
-                  const v = contado[e.sku] ?? ''
+                  const lotes = porLote[e.sku]
+                  const v = lotes ? '' : (contado[e.sku] ?? '')
                   const dif = String(v).trim() === '' ? null : Number(v) - (Number(e.cantidad) || 0)
-                  return (
+                  const fila = (
                     <tr key={e.sku} className="border-t border-slate-100 dark:border-slate-800/70">
                       <td className={`${pad} pr-3 num text-[12.5px] text-slate-500`}>{e.sku}</td>
-                      <td className={`${pad} pr-3 text-[13px]`}>{e.nombre}</td>
+                      <td className={`${pad} pr-3 text-[13px]`}>
+                        {e.nombre}
+                        <button type="button" onClick={() => desplegarLotes(e.sku)}
+                          className="ml-2 text-[11.5px] underline text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                          title="Contar lote a lote en vez del total">
+                          {lotes ? 'contar el total' : 'por lote'}
+                        </button>
+                      </td>
                       <td className={`${pad} pr-3 text-right num text-slate-500`}>{fmtNum(e.cantidad)}</td>
                       <td className={`${pad} pr-4 text-right`}>
-                        <input type="number" step="any" min="0" value={v}
-                          onChange={(ev) => { setContado((c) => ({ ...c, [e.sku]: ev.target.value })); setPrevia(null) }}
-                          className="num w-24 text-right rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1" />
-                        {dif !== null && Math.abs(dif) > 0.0001 ? (
-                          <div className={`text-[11px] ${dif < 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                            {dif > 0 ? '+' : ''}{fmtNum(dif)}
-                          </div>
-                        ) : null}
+                        {lotes ? (
+                          <span className="text-[11.5px] text-slate-400">se cuenta por lote</span>
+                        ) : (
+                          <>
+                            <input type="number" step="any" min="0" value={v}
+                              onChange={(ev) => { setContado((c) => ({ ...c, [e.sku]: ev.target.value })); setPrevia(null) }}
+                              className="num w-24 text-right rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1" />
+                            {dif !== null && Math.abs(dif) > 0.0001 ? (
+                              <div className={`text-[11px] ${dif < 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                                {dif > 0 ? '+' : ''}{fmtNum(dif)}
+                              </div>
+                            ) : null}
+                          </>
+                        )}
                       </td>
                     </tr>
                   )
+                  if (!lotes) return fila
+                  // Una sub-fila por lote, con su vencimiento a la vista: es el dato
+                  // por el que quien cuenta distingue una caja de otra.
+                  return [fila, ...lotes.map((l) => {
+                    const clave = e.sku + '|' + l.lote
+                    const vl = contadoLote[clave] ?? ''
+                    const dl = String(vl).trim() === '' ? null : Number(vl) - (Number(l.cantidad) || 0)
+                    return (
+                      <tr key={clave} className="bg-slate-50/60 dark:bg-slate-800/40">
+                        <td className={`${pad} pr-3`}></td>
+                        <td className={`${pad} pr-3 text-[12.5px] text-slate-500`}>
+                          <span className="num">{l.lote || '(sin lote)'}</span>
+                          {l.vencimiento ? <span className="ml-2 text-[11.5px]">vence {l.vencimiento.slice(0, 10)}</span> : null}
+                        </td>
+                        <td className={`${pad} pr-3 text-right num text-slate-500`}>{fmtNum(l.cantidad)}</td>
+                        <td className={`${pad} pr-4 text-right`}>
+                          <input type="number" step="any" min="0" value={vl}
+                            onChange={(ev) => { setContadoLote((c) => ({ ...c, [clave]: ev.target.value })); setPrevia(null) }}
+                            className="num w-24 text-right rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1" />
+                          {dl !== null && Math.abs(dl) > 0.0001 ? (
+                            <div className={`text-[11px] ${dl < 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                              {dl > 0 ? '+' : ''}{fmtNum(dl)}
+                            </div>
+                          ) : null}
+                        </td>
+                      </tr>
+                    )
+                  })]
                 })}
               </tbody>
             </table>

@@ -55,21 +55,19 @@ func sembrarNichos(st *Store, semilla *inmem.Store, refrescar bool) {
 			limpiarDemo(st, n.EmpresaID)
 		}
 
-		/* NO SE BORRAN LOS ASIENTOS DEL NICHO AL REGENERAR, y se intentó.
+		/* LOS ASIENTOS SÍ SE BORRAN AL REGENERAR, y durante un tiempo no se pudo.
 		 *
-		 * Parecía correcto —el libro es una proyección, que se rehaga— y el
-		 * resultado fue peor: el demo del restaurante tiene un PERÍODO CERRADO hasta
-		 * agosto, y su inventario inicial está fechado dentro de él. Borrados los
-		 * asientos, el backfill no puede recrearlos: el período los rechaza, uno por
-		 * uno, y el tenant queda sin libro en vez de con un libro viejo.
+		 * El primer intento salió peor que no hacerlo: el demo del restaurante tenía
+		 * un PERÍODO CERRADO hasta agosto y su inventario inicial está fechado en
+		 * julio, o sea dentro. Borrados los asientos, el recontabilizado no podía
+		 * recrear ni uno —el período los rechazaba uno por uno— y el tenant quedaba
+		 * SIN LIBRO en vez de con un libro viejo.
 		 *
-		 * La lección es del diseño, no del seed: reconstruir un libro append-only
-		 * solo es seguro si nada bloquea la reconstrucción. Con períodos cerrados de
-		 * por medio, borrar es un camino de ida.
-		 *
-		 * Queda pendiente de verdad: la valoración del restaurante no cuadra contra
-		 * su cuenta 1201 (ver docs). La causa es el cruce entre el período cerrado y
-		 * datos sembrados, y se resuelve en Contabilidad, no acá. */
+		 * La lección era del diseño y no del seed: reconstruir un libro de
+		 * solo-anexado solo es seguro si nada bloquea la reconstrucción. Por eso
+		 * ahora `limpiarDemo` borra también los períodos del tenant y estos se
+		 * vuelven a cerrar AL FINAL del arranque, cuando el libro ya existe (ver
+		 * periodos_demo.go). Con eso, regenerar dejó de ser un camino de ida. */
 
 		// Identidad y estructura: organización, empresa, sedes y membresías.
 		if _, existe := st.Empresas.ByID(n.EmpresaID); !existe {
@@ -102,6 +100,9 @@ func sembrarNichos(st *Store, semilla *inmem.Store, refrescar bool) {
 			// stock bajo «Sin almacén» mientras el dato dice otra cosa—.
 			for _, a := range snap.Almacenes {
 				st.Almacenes.c.insert(a)
+			}
+			for _, u := range snap.Ubicaciones {
+				st.Ubicaciones.c.insert(u)
 			}
 			for _, mv := range snap.Movimientos {
 				st.Movimientos.c.insert(mv)

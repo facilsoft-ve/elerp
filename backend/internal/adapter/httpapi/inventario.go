@@ -746,14 +746,25 @@ func (s *Server) handleAjustar(c *fiber.Ctx) error {
 	var in struct {
 		Motivo   string  `json:"motivo"`
 		Cantidad float64 `json:"cantidad"`
+		// DÓNDE, y de qué lote. El ajuste ya sabía ponerlos —AjustarEnUbicacion
+		// existe desde la tanda de ubicaciones— pero la API no los pedía, así que
+		// todo ajuste caía en «sin ubicar» y sin lote por mucho que el almacén
+		// tuviera estantes. Un sobrante encontrado en el pasillo B entraba al
+		// sistema sin decir que estaba en el pasillo B.
+		UbicacionID string `json:"ubicacionId"`
+		Lote        string `json:"lote"`
+		Vencimiento string `json:"vencimiento"`
 	}
 	if err := c.BodyParser(&in); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "datos inválidos"})
 	}
 	sede := s.sedeParam(c)
 	// El ajuste va al almacén indicado (X-Almacen-ID/?almacen=) o, si no viene, al
-	// principal de la sede.
-	out, err := s.svc.Ajustar(empresaIDOf(c), sede, s.almacenParam(c), c.Params("sku"), in.Motivo, in.Cantidad, principalOf(c).UserID, origen(c))
+	// principal de la sede. La ubicación y el lote son opcionales: sin ellos el
+	// comportamiento es exactamente el de antes.
+	out, err := s.svc.AjustarEnUbicacion(empresaIDOf(c), sede, s.almacenParam(c), in.UbicacionID,
+		c.Params("sku"), in.Motivo, in.Cantidad, in.Lote, in.Vencimiento,
+		principalOf(c).UserID, origen(c))
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}

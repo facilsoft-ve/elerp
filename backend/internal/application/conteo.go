@@ -173,11 +173,26 @@ func (s *Service) conteo(empresaID, sedeID, almacenID, motivo string, lineas []L
 // después se ajusta. Comparar contra el total del producto y ajustar una casilla
 // haría que cada conteo parcial arrastrara a esa casilla la diferencia de todas
 // las demás.
+/* CONTRA QUÉ SE COMPARA LO CONTADO.
+ *
+ * SIN UBICACIÓN INDICADA SE COMPARA CONTRA TODO EL ALMACÉN, no contra la casilla
+ * «sin ubicar». Es la diferencia entre «conté el pasillo B» y «conté este producto,
+ * sin entrar en qué estante» — y la hoja de conteo ofrece lo segundo por defecto,
+ * que es como cuenta cualquiera que no lleva ubicaciones al día.
+ *
+ * Filtrando exacto, en cuanto el almacén tenía estantes el sistema respondía CERO a
+ * todo: quien contaba 140 y tenía 140 recibía «faltan 140 por sumar», y aplicarlo
+ * DUPLICABA la existencia. No fallaba nada —la cuenta de una casilla vacía es cero,
+ * y eso es cierto—, solo que respondía a una pregunta que nadie había hecho.
+ *
+ * No lo trajo la demostración con sus estantes sembrados: eso solo lo hizo visible.
+ * Cualquier empresa que hubiera dividido su almacén y contara tenía lo mismo.
+ */
 func (s *Service) existenciaEnCasilla(empresaID, sedeID, almacenID, ubicacionID, productoID, lote string) float64 {
 	alm := s.almacenParaEscritura(empresaID, sedeID, almacenID)
 	total := 0.0
 	for _, b := range s.bucketsDe(empresaID, sedeID, alm, productoID) {
-		if b.UbicacionID != ubicacionID {
+		if ubicacionID != "" && b.UbicacionID != ubicacionID {
 			continue
 		}
 		if lote != "" && b.Lote != lote {

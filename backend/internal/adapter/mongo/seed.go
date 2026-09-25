@@ -265,6 +265,9 @@ func Seed(db *gomongo.Database) {
 		for _, a := range snap.Almacenes {
 			st.Almacenes.c.insert(a)
 		}
+		for _, u := range snap.Ubicaciones {
+			st.Ubicaciones.c.insert(u)
+		}
 		for _, mv := range snap.Movimientos {
 			st.Movimientos.c.insert(mv)
 		}

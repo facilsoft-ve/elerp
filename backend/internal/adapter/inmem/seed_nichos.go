@@ -342,12 +342,16 @@ type SnapshotEmpresa struct {
 	// Los ALMACENES van con los movimientos y no después: cada movimiento sembrado
 	// referencia el suyo, y un almacenId que no resuelve deja el stock bajo «Sin
 	// almacén» —con los datos diciendo lo contrario— en vez de fallar.
-	Almacenes  []almacen.Almacen
-	Clientes   []cliente.Cliente
-	Modulos    []aplicacion.Instalacion
-	Mesas      []mesa.Mesa
-	Plano      mesa.Plano
-	TienePlano bool
+	Almacenes []almacen.Almacen
+	// Las UBICACIONES viajan con los almacenes y por lo mismo: los movimientos las
+	// referencian, y una ubicacionId que no resuelve deja el stock «SIN UBICAR» con
+	// el dato diciendo lo contrario.
+	Ubicaciones []almacen.Ubicacion
+	Clientes    []cliente.Cliente
+	Modulos     []aplicacion.Instalacion
+	Mesas       []mesa.Mesa
+	Plano       mesa.Plano
+	TienePlano  bool
 
 	// Operación (ver seed_nichos_operacion.go).
 	Usuarios     []usuario.Usuario
@@ -425,6 +429,7 @@ func (s *Store) SnapshotNicho(n NichoDemo) SnapshotEmpresa {
 		Productos:   s.Productos.List(n.EmpresaID),
 		Movimientos: s.Movimientos.List(n.EmpresaID, inventario.FiltroMovimiento{}),
 		Almacenes:   s.Almacenes.List(n.EmpresaID),
+		Ubicaciones: s.Ubicaciones.List(n.EmpresaID),
 		Clientes:    s.Clientes.List(n.EmpresaID),
 		Modulos:     s.Modulos.List(n.EmpresaID),
 		Mesas:       s.Mesas.List(n.EmpresaID, ""),

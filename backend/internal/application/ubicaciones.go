@@ -190,9 +190,20 @@ func (s *Service) ExistenciaPorUbicacion(empresaID, sedeID, sku string) []SaldoU
 		if a, ok := s.almacenes.ByID(empresaID, k.Almacen); ok {
 			fila.AlmacenNombre = a.Nombre
 		}
-		if k.Ubicacion == "" {
+		switch {
+		case k.Ubicacion == "":
 			fila.Codigo, fila.Nombre = "SIN UBICAR", "El almacén, sin más detalle"
-		} else if s.ubicaciones != nil {
+		case s.ubicaciones == nil:
+			/* SIN EL MAESTRO CABLEADO, LA UBICACIÓN NO SE MUESTRA: se lee como el
+			 * almacén a secas.
+			 *
+			 * El movimiento puede traer una ubicación aunque esta instancia no tenga
+			 * el maestro —los datos sembrados la traen—, y el código quedaba VACÍO:
+			 * una fila sin nombre en la columna, que no es «sin ubicar» ni un sitio.
+			 * Decir «SIN UBICAR» es lo honesto cuando el sistema no puede saber qué
+			 * sitio es. */
+			fila.Codigo, fila.Nombre = "SIN UBICAR", "El almacén, sin más detalle"
+		default:
 			if u, ok := s.ubicaciones.ByID(empresaID, k.Ubicacion); ok {
 				fila.Codigo, fila.Nombre = u.Codigo, u.Nombre
 			} else {

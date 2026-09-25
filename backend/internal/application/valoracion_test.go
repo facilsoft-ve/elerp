@@ -421,3 +421,54 @@ func TestCuentasDeInventario_LasListaTodas(t *testing.T) {
 		t.Errorf("tenían que salir las dos, ordenadas: %v", got)
 	}
 }
+
+// TestConteo_ContarSinDecirElEstanteComparaContraTodoElAlmacen.
+//
+// Es el fallo más caro que podía tener el conteo: quien contaba 10 y tenía 10
+// recibía «faltan 10 por sumar», y aplicarlo DUPLICABA la existencia. Pasaba en
+// cuanto el almacén tenía estantes, porque la hoja cuenta «sin entrar en detalle» y
+// la comparación se hacía contra la casilla «sin ubicar», que está vacía.
+//
+// No fallaba nada: la cuenta de una casilla vacía es cero. Solo que respondía a una
+// pregunta que nadie había hecho.
+func TestConteo_ContarSinDecirElEstanteComparaContraTodoElAlmacen(t *testing.T) {
+	svc := servicioCompleto(t)
+	alm := almacenPrincipalID(t, svc)
+	a01 := nuevaUbicacion(t, svc, alm, "A-01")
+	sku := primerSKU(t, svc)
+
+	// Diez unidades EN UN ESTANTE: el caso de cualquier almacén ordenado.
+	if _, err := svc.AjustarEnUbicacion(empDemo, sede1, alm, a01, sku, "carga", 10, "", "", actorA, origenTst); err != nil {
+		t.Fatalf("cargar en A-01: %v", err)
+	}
+	enElAlmacen := 0.0
+	for _, e := range svc.Existencias(empDemo, sede1) {
+		if e.SKU == sku {
+			enElAlmacen = e.Cantidad
+		}
+	}
+	if enElAlmacen <= 0 {
+		t.Fatal("la carga no dejó existencia; el test no prueba nada")
+	}
+
+	// Se cuenta EXACTAMENTE lo que hay, sin decir el estante.
+	previa, err := svc.PrevisualizarConteo(empDemo, sede1, alm, []application.LineaConteo{
+		{SKU: sku, Contado: enElAlmacen},
+	})
+	if err != nil {
+		t.Fatalf("previsualizar: %v", err)
+	}
+	if len(previa.Lineas) != 1 {
+		t.Fatalf("esperaba una línea, hay %d", len(previa.Lineas))
+	}
+	l := previa.Lineas[0]
+	if !casi(l.Sistema, enElAlmacen) {
+		t.Errorf("el sistema debía decir %v (lo que hay en el almacén), dice %v", enElAlmacen, l.Sistema)
+	}
+	if !casi(l.Diferencia, 0) {
+		t.Errorf("contar lo mismo que hay no puede dar diferencia, dio %v", l.Diferencia)
+	}
+	if previa.ConAjuste != 0 {
+		t.Errorf("no había nada que ajustar y propone %d ajuste(s)", previa.ConAjuste)
+	}
+}

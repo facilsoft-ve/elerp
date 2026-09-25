@@ -364,6 +364,43 @@ func (s *Service) RepartirSalidaFEFO(empresaID, sedeID, almacenID, productoID st
 // convertiría una discrepancia que YA existía en una caja parada. El faltante no
 // se esconde: sale como saldo NEGATIVO del lote vacío, visible en la existencia
 // por lote, que es donde alguien puede arreglarlo.
+/* repartirSalidaEntreCasillas reparte una salida entre las casillas reales del
+ * producto, acotando a UN LOTE si se declaró.
+ *
+ * Es el caso de quien cuenta leyendo la etiqueta de la caja: sabe de qué lote es y
+ * no mira el número del anaquel. Sin acotar se repartiría por FEFO entre todos los
+ * lotes y descontaría del equivocado; sin repartir saldría «sin ubicar» y dejaría
+ * esa casilla en negativo con los estantes intactos.
+ */
+func (s *Service) repartirSalidaEntreCasillas(empresaID, sedeID, almacenID, productoID, lote string, cantidad float64) []TramoSalida {
+	if lote == "" {
+		return s.repartirSalidaFEFOTolerante(empresaID, sedeID, almacenID, productoID, cantidad)
+	}
+	cubierto := 0.0
+	tramos := []TramoSalida{}
+	for _, b := range s.bucketsDe(empresaID, sedeID, almacenID, productoID) {
+		if b.Lote != lote || cubierto >= cantidad-0.0001 {
+			continue
+		}
+		toma := b.Cantidad
+		if toma > cantidad-cubierto {
+			toma = cantidad - cubierto
+		}
+		tramos = append(tramos, TramoSalida{
+			Lote: b.Lote, Vencimiento: b.Vencimiento,
+			AlmacenID: b.AlmacenID, UbicacionID: b.UbicacionID, Cantidad: round2(toma),
+		})
+		cubierto = round2(cubierto + toma)
+	}
+	// Lo que no cubre ninguna casilla se anota igual: el ajuste no se puede negar a
+	// registrar una merma porque el sitio no cuadre, pero queda marcado como
+	// descubierto para que se vea dónde hay que ir a mirar.
+	if falta := round2(cantidad - cubierto); falta > 0.0001 {
+		tramos = append(tramos, TramoSalida{Lote: lote, AlmacenID: almacenID, Cantidad: falta, Descubierto: true})
+	}
+	return tramos
+}
+
 func (s *Service) repartirSalidaFEFOTolerante(empresaID, sedeID, almacenID, productoID string, cantidad float64) []TramoSalida {
 	tramos, err := s.RepartirSalidaFEFO(empresaID, sedeID, almacenID, productoID, cantidad)
 	if err == nil {
