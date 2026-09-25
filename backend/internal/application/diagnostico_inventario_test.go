@@ -203,3 +203,32 @@ func TestDiagnostico_NoAcusaLaTransferencia(t *testing.T) {
 		}
 	}
 }
+
+// TestDiagnostico_VeLosIdsRepetidos: dos movimientos con el mismo id no rompen
+// ninguna suma —el fold recorre la lista— pero envenenan todo lo que INDEXA por id:
+// asentar uno da por asentado al otro, y el rastro de lotes enlaza al equivocado.
+// Apareció en la demo del restaurante buscando otra cosa.
+func TestDiagnostico_VeLosIdsRepetidos(t *testing.T) {
+	svc, st := nuevoServicio(t)
+	svc.ConAlmacenes(st.Almacenes)
+	svc.ConSedes(st.Sedes)
+	sku := primerSKU(t, svc)
+	p, _ := svc.ProductoPorSKU(empDemo, sku)
+
+	base := inventario.Movimiento{
+		ID: "mov_colision", EmpresaID: empDemo, SedeID: sede1, ProductoID: p.ID, SKU: sku,
+		Tipo: inventario.MovEntrada, Cantidad: 3, CostoUnitario: 100,
+		Motivo: "primero", Actor: actorA, Fecha: "2026-01-01T00:00:00Z",
+	}
+	st.Movimientos.Append(base)
+	base.Cantidad, base.Motivo = 9, "segundo"
+	st.Movimientos.Append(base)
+
+	hs := hallazgosDe(svc.DiagnosticarInventario(empDemo), application.ClaseIDDuplicado)
+	if len(hs) != 1 {
+		t.Fatalf("esperaba un hallazgo de id repetido, hay %d", len(hs))
+	}
+	if hs[0].Ref != "mov_colision" {
+		t.Errorf("el hallazgo debe señalar el id colisionado, señala %q", hs[0].Ref)
+	}
+}

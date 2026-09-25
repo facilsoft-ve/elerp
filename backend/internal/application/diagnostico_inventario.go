@@ -41,6 +41,7 @@ const (
 	ClaseApartadoExcedido     = "apartado-excede-existencia"
 	ClaseExistenciaNegativa   = "existencia-negativa"
 	ClaseCostoInvalido        = "costo-invalido"
+	ClaseIDDuplicado          = "id-de-movimiento-duplicado"
 )
 
 // En qué está expresado un hallazgo. La pantalla NO puede adivinarlo: una
@@ -91,6 +92,7 @@ func (s *Service) DiagnosticarInventario(empresaID string) DiagnosticoInventario
 
 	add := func(h HallazgoInventario) { res.Hallazgos = append(res.Hallazgos, h) }
 
+	s.revisarIdentidad(empresaID, add)
 	s.revisarAsientos(empresaID, add)
 	s.revisarProyecciones(empresaID, add)
 	s.revisarSaldos(empresaID, add)
@@ -104,6 +106,7 @@ func (s *Service) DiagnosticarInventario(empresaID string) DiagnosticoInventario
 	// conocidas; al final los saldos raros. Alfabéticamente, «existencia-negativa»
 	// salía antes que «no-cuadra-con-contabilidad» y el titular quedaba sepultado.
 	prioridad := map[string]int{
+		ClaseIDDuplicado:          -1,
 		ClaseNoCuadraContabilidad: 0,
 		ClaseDocumentoSinAsiento:  1,
 		ClaseMovimientoSinAsiento: 2,
@@ -129,6 +132,40 @@ func (s *Service) DiagnosticarInventario(empresaID string) DiagnosticoInventario
 	})
 	res.Sano = len(res.Hallazgos) == 0
 	return res
+}
+
+/* --- Identidad --- */
+
+// revisarIdentidad busca ids de movimiento repetidos.
+//
+// El ledger es de solo-anexado y TODO lo demás se apoya en que cada movimiento tiene
+// una identidad propia: el asiento lo referencia por id, la recontabilización marca
+// por id lo que ya asentó, el rastro de lotes enlaza por id. Dos movimientos
+// distintos con el mismo id no rompen la suma —el fold recorre la lista, no el
+// mapa— pero envenenan todo lo que indexa: asentar uno da por asentado al otro.
+//
+// Se encontró en la demostración del restaurante: seis ids compartidos entre el
+// juego de insumos de cocina y el de repostería, sembrados por caminos distintos que
+// reiniciaban la misma secuencia. Se buscaba otra cosa —una proyección que contaba
+// el doble— y la causa estaba acá, dos capas más abajo.
+func (s *Service) revisarIdentidad(empresaID string, add func(HallazgoInventario)) {
+	vistos := map[string]inventario.Movimiento{}
+	for _, m := range s.movimientos.List(empresaID, inventario.FiltroMovimiento{}) {
+		if m.ID == "" {
+			continue
+		}
+		otro, repetido := vistos[m.ID]
+		if !repetido {
+			vistos[m.ID] = m
+			continue
+		}
+		add(HallazgoInventario{
+			Clase: ClaseIDDuplicado, Gravedad: GravedadAlta, Medida: MedidaCantidad,
+			Detalle: "el id " + m.ID + " lo usan dos movimientos distintos (" + otro.SKU + " y " + m.SKU + ")",
+			SKU:     m.SKU, Ref: m.ID,
+			Esperado: round2(otro.Cantidad), Encontrado: round2(m.Cantidad),
+		})
+	}
 }
 
 /* --- Respaldo contable --- */
