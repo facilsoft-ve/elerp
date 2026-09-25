@@ -121,7 +121,13 @@ import (
 // repartido entre ellas, dejando uno de cada siete sin ubicar a propósito. Sin esto
 // el informe de valoración decía «SIN UBICAR» en todas sus líneas y media Ola A
 // quedaba invisible para quien evalúa el producto.
-const versionSeedDemo = 49
+// v50: los ALMACENES y UBICACIONES del seed llevan id derivado de la sede y del
+// código, no del contador del proceso. Con el contador, cada arranque que sembraba
+// creaba OTRO «Almacén Principal» en la misma sede —producción llegó a tener tres,
+// y dos documentos compartiendo el id `alm_9`—, y como la proyección hace que el
+// principal absorba los movimientos sin almacén, tres principales contaban tres
+// veces la misma mercancía. La regeneración de v50 los reemplaza.
+const versionSeedDemo = 51
 
 // v34: la demo trae el MÓDULO DE PEDIDOS configurado y trabajando —canales,
 // zonas, repartidores y un tablero con pedidos en todos los estados—. Un módulo
@@ -518,6 +524,18 @@ func limpiarDemo(st *Store, demoID string) {
 	 * Solo aplica a tenants de DEMOSTRACIÓN, que es lo único que esta función toca.
 	 * Un cierre contable de verdad no se reabre nunca (§7.3). */
 	n += st.Periodos.c.delMany(f)
+	/* ALMACENES Y UBICACIONES TAMBIÉN: son parte del dato de negocio, no de la
+	 * identidad, y sin borrarlos la regeneración los ACUMULA.
+	 *
+	 * Al resembrar se crea el «Almacén Principal» de cada sede; si el anterior sigue
+	 * ahí, la sede acaba con dos, y la proyección hace que CADA principal absorba
+	 * los movimientos sin almacén — o sea, cuenta la misma mercancía dos veces. Con
+	 * los ids del contador del proceso llegaron a ser tres en producción.
+	 *
+	 * Se lleva por delante los almacenes que alguien creara a mano en la demo, y eso
+	 * es lo coherente: es un tenant de demostración que se regenera entero, igual
+	 * que se lleva sus productos y su ledger. */
+	n += st.Almacenes.c.delMany(f) + st.Ubicaciones.c.delMany(f)
 	// El módulo de pedidos también: sin limpiarlo, una base ya sembrada nunca
 	// vería el tablero nuevo y la demo quedaría con los pedidos de la versión
 	// anterior.

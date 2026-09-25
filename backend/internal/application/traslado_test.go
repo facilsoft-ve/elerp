@@ -30,7 +30,7 @@ func saldoEn(t *testing.T, svc *application.Service, sku, ubicacionID string) fl
 func TestTraslado_MueveElSitioYNadaMas(t *testing.T) {
 	svc := servicioConUbicaciones(t)
 	alm := almacenPrincipalID(t, svc)
-	muelle := nuevaUbicacion(t, svc, alm, "MUELLE")
+	muelle := nuevaUbicacion(t, svc, alm, "T-MUELLE")
 	estante := nuevaUbicacion(t, svc, alm, "E-01")
 	sku := primerSKU(t, svc)
 
@@ -77,8 +77,8 @@ func TestTraslado_MueveElSitioYNadaMas(t *testing.T) {
 func TestTraslado_NoMueveLoQueNoEsta(t *testing.T) {
 	svc := servicioConUbicaciones(t)
 	alm := almacenPrincipalID(t, svc)
-	a := nuevaUbicacion(t, svc, alm, "A-01")
-	b := nuevaUbicacion(t, svc, alm, "B-01")
+	a := nuevaUbicacion(t, svc, alm, "T-01")
+	b := nuevaUbicacion(t, svc, alm, "T-B01")
 	sku := primerSKU(t, svc)
 
 	if _, err := svc.AjustarEnUbicacion(empDemo, sede1, alm, a, sku, "carga", 5, "", "", actorA, origenTst); err != nil {
@@ -103,7 +103,7 @@ func TestTraslado_NoMueveLoQueNoEsta(t *testing.T) {
 func TestTraslado_ElDestinoInvalidoNoCaeEnSilencio(t *testing.T) {
 	svc := servicioConUbicaciones(t)
 	alm := almacenPrincipalID(t, svc)
-	a := nuevaUbicacion(t, svc, alm, "A-01")
+	a := nuevaUbicacion(t, svc, alm, "T-01")
 	sku := primerSKU(t, svc)
 
 	if _, err := svc.AjustarEnUbicacion(empDemo, sede1, alm, a, sku, "carga", 5, "", "", actorA, origenTst); err != nil {
@@ -130,7 +130,7 @@ func TestTraslado_ElDestinoInvalidoNoCaeEnSilencio(t *testing.T) {
 func TestTraslado_ElVencidoSiSeMueve(t *testing.T) {
 	svc := servicioConUbicaciones(t)
 	alm := almacenPrincipalID(t, svc)
-	anaquel := nuevaUbicacion(t, svc, alm, "A-01")
+	anaquel := nuevaUbicacion(t, svc, alm, "T-01")
 	cuarentena := nuevaUbicacion(t, svc, alm, "CUARENTENA")
 	sku := "TRASL-LOTE-1"
 	prodID := productoConLote(t, svc, sku, true)
@@ -164,8 +164,8 @@ func TestTraslado_ElVencidoSiSeMueve(t *testing.T) {
 func TestTraslado_ElLoteViajaConLaMercancia(t *testing.T) {
 	svc := servicioConUbicaciones(t)
 	alm := almacenPrincipalID(t, svc)
-	a := nuevaUbicacion(t, svc, alm, "A-01")
-	b := nuevaUbicacion(t, svc, alm, "B-01")
+	a := nuevaUbicacion(t, svc, alm, "T-01")
+	b := nuevaUbicacion(t, svc, alm, "T-B01")
 	sku := "TRASL-LOTE-2"
 	prodID := productoConLote(t, svc, sku, true)
 

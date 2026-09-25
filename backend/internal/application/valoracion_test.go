@@ -29,7 +29,7 @@ func servicioCompleto(t *testing.T) *application.Service {
 func TestValoracion_ElDesgloseSumaElTotal(t *testing.T) {
 	svc := servicioCompleto(t)
 	alm := almacenPrincipalID(t, svc)
-	a01 := nuevaUbicacion(t, svc, alm, "A-01")
+	a01 := nuevaUbicacion(t, svc, alm, "T-01")
 	sku := primerSKU(t, svc)
 
 	if _, err := svc.AjustarEnUbicacion(empDemo, sede1, alm, a01, sku, "carga", 10, "", "", actorA, origenTst); err != nil {
@@ -64,7 +64,7 @@ func TestValoracion_ElDesgloseSumaElTotal(t *testing.T) {
 	// Y la ubicación tiene que aparecer: es la razón de ser del informe.
 	vistaA01 := false
 	for _, f := range v.Filas {
-		if f.Ubicacion == "A-01" {
+		if f.Ubicacion == "T-01" {
 			vistaA01 = true
 		}
 	}
@@ -321,7 +321,7 @@ func TestCorregirCosto_SinExistenciaSeNiega(t *testing.T) {
 func TestConteo_SoloTocaLoQueSeDeclara(t *testing.T) {
 	svc := servicioCompleto(t)
 	alm := almacenPrincipalID(t, svc)
-	a01 := nuevaUbicacion(t, svc, alm, "A-01")
+	a01 := nuevaUbicacion(t, svc, alm, "T-01")
 	b02 := nuevaUbicacion(t, svc, alm, "B-02")
 	sku := primerSKU(t, svc)
 
@@ -351,7 +351,7 @@ func TestConteo_SoloTocaLoQueSeDeclara(t *testing.T) {
 func TestConteo_PrevisualizarNoTocaNada(t *testing.T) {
 	svc := servicioCompleto(t)
 	alm := almacenPrincipalID(t, svc)
-	a01 := nuevaUbicacion(t, svc, alm, "A-01")
+	a01 := nuevaUbicacion(t, svc, alm, "T-01")
 	sku := primerSKU(t, svc)
 	svc.AjustarEnUbicacion(empDemo, sede1, alm, a01, sku, "carga", 500, "", "", actorA, origenTst)
 
@@ -434,7 +434,7 @@ func TestCuentasDeInventario_LasListaTodas(t *testing.T) {
 func TestConteo_ContarSinDecirElEstanteComparaContraTodoElAlmacen(t *testing.T) {
 	svc := servicioCompleto(t)
 	alm := almacenPrincipalID(t, svc)
-	a01 := nuevaUbicacion(t, svc, alm, "A-01")
+	a01 := nuevaUbicacion(t, svc, alm, "T-01")
 	sku := primerSKU(t, svc)
 
 	// Diez unidades EN UN ESTANTE: el caso de cualquier almacén ordenado.

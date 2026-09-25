@@ -36,7 +36,21 @@ func (s *Store) almacenDeSede(empresaID, sedeID string) string {
 			return a.ID
 		}
 	}
+	/* EL ID LLEVA LA SEDE, por lo mismo que lo llevan los movimientos.
+	 *
+	 * Dejarlo al contador global del proceso —que arranca en cero cada vez— hizo que
+	 * la demo de producción acabara con TRES «Almacén Principal» en la misma sede:
+	 * `alm_9`, `alm_32`, `alm_36`, uno por arranque que sembró. Y con dos documentos
+	 * compartiendo el id `alm_9`.
+	 *
+	 * El daño no es cosmético: la proyección por almacén hace que EL PRINCIPAL
+	 * ABSORBA los movimientos sin almacén, así que tres principales en una sede
+	 * cuentan tres veces la misma mercancía. El chequeo de inventario lo cazó como
+	 * «los almacenes de la sede no suman la existencia de la sede», que es
+	 * exactamente lo que pasaba.
+	 */
 	a := s.Almacenes.Create(almacen.Almacen{
+		ID:        "alm_" + sedeID,
 		EmpresaID: empresaID, SedeID: sedeID,
 		Nombre: "Almacén Principal", Tipo: "principal",
 		Principal: true, Activo: true,
@@ -62,7 +76,10 @@ func (s *Store) crearUbicacionesDe(empresaID, almacenID string) {
 		{"B-01", "Pasillo B, estante 1", almacen.UbicAlmacenamiento},
 		{"MUELLE", "Muelle de recepción", almacen.UbicMuelle},
 	} {
+		// El id, derivado del almacén y el código: estable entre arranques y único
+		// sin depender del contador del proceso (ver almacenDeSede).
 		s.Ubicaciones.Create(almacen.Ubicacion{
+			ID:        "ubi_" + almacenID + "_" + u.codigo,
 			EmpresaID: empresaID, AlmacenID: almacenID,
 			Codigo: u.codigo, Nombre: u.nombre, Tipo: u.tipo, Activa: true,
 		})
@@ -88,6 +105,16 @@ func (s *Store) ubicacionDeProducto(empresaID, almacenID, productoID string) str
 	if almacenID == "" || productoID == "" {
 		return ""
 	}
+	/* EL REPARTO SE DECIDE POR EL SKU, no por el id del producto.
+	 *
+	 * El id sale del contador del proceso, así que cambia según cuántas cosas se
+	 * hayan creado antes: el mismo producto caía en un estante distinto en cada
+	 * arranque, y en las pruebas hacía que un test pasara o fallara según el orden
+	 * en que se ejecutara. El SKU es estable, legible y no depende de nada. */
+	sku := productoID
+	if p, ok := s.Productos.ByID(empresaID, productoID); ok && p.SKU != "" {
+		sku = p.SKU
+	}
 	estantes := []almacen.Ubicacion{}
 	for _, u := range s.Ubicaciones.List(empresaID) {
 		if u.AlmacenID == almacenID && u.Activa && u.Tipo == almacen.UbicAlmacenamiento {
@@ -97,11 +124,10 @@ func (s *Store) ubicacionDeProducto(empresaID, almacenID, productoID string) str
 	if len(estantes) == 0 {
 		return ""
 	}
-	// Suma de los bytes del id: estable entre arranques y repartido de sobra para
-	// lo que hace falta acá.
+	// Suma de los bytes del SKU: repartido de sobra para lo que hace falta acá.
 	h := 0
-	for i := 0; i < len(productoID); i++ {
-		h += int(productoID[i])
+	for i := 0; i < len(sku); i++ {
+		h += int(sku[i])
 	}
 	if h%7 == 0 {
 		return "" // el que queda por ubicar

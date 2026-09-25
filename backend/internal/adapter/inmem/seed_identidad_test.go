@@ -89,3 +89,62 @@ func TestSeed_NadaNaceEnNegativo(t *testing.T) {
 		}
 	}
 }
+
+// TestSeed_UnSoloAlmacenPrincipalPorSede: la proyección por almacén hace que EL
+// PRINCIPAL absorba los movimientos que no llevan almacén. Dos principales en una
+// sede cuentan dos veces la misma mercancía — y la demo de producción llegó a tener
+// TRES, uno por arranque que sembró, porque su id salía del contador del proceso.
+func TestSeed_UnSoloAlmacenPrincipalPorSede(t *testing.T) {
+	st := inmem.New()
+	for _, n := range inmem.NichosDemo() {
+		principales := map[string]int{}
+		ids := map[string]int{}
+		for _, a := range st.Almacenes.List(n.EmpresaID) {
+			ids[a.ID]++
+			if a.Principal && a.Activo {
+				principales[a.SedeID]++
+			}
+		}
+		for sede, n2 := range principales {
+			if n2 > 1 {
+				t.Errorf("%s: la sede %s tiene %d almacenes principales", n.Giro, sede, n2)
+			}
+		}
+		for id, veces := range ids {
+			if veces > 1 {
+				t.Errorf("%s: el id de almacén %s está %d veces", n.Giro, id, veces)
+			}
+		}
+	}
+}
+
+// TestSeed_LosIDsDeAlmacenYUbicacionNoDependenDelArranque: misma propiedad que la
+// de los movimientos, y por la misma razón — el seed escribe en una base que
+// persiste entre arranques, así que sus ids tienen que ser los mismos cada vez.
+func TestSeed_LosIDsDeAlmacenYUbicacionNoDependenDelArranque(t *testing.T) {
+	ids := func() []string {
+		st := inmem.New()
+		out := []string{}
+		for _, n := range inmem.NichosDemo() {
+			for _, a := range st.Almacenes.List(n.EmpresaID) {
+				out = append(out, a.ID)
+			}
+			for _, u := range st.Ubicaciones.List(n.EmpresaID) {
+				out = append(out, u.ID)
+			}
+		}
+		return out
+	}
+	a, b := ids(), ids()
+	if len(a) == 0 {
+		t.Fatal("el seed no creó almacenes; el test no prueba nada")
+	}
+	if len(a) != len(b) {
+		t.Fatalf("dos siembras dieron distinta cantidad: %d y %d", len(a), len(b))
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			t.Fatalf("el id %d cambió entre siembras: %s vs %s", i, a[i], b[i])
+		}
+	}
+}

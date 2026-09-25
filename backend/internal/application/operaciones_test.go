@@ -48,7 +48,7 @@ func recibirSimple(t *testing.T, svc *application.Service, sku string, cant floa
 func TestOperacion_SinConfigurarTodoSigueIgual(t *testing.T) {
 	svc := servicioConOperaciones(t) // ...con el maestro cableado pero VACÍO
 	alm := almacenPrincipalID(t, svc)
-	estante := nuevaUbicacion(t, svc, alm, "A-01")
+	estante := nuevaUbicacion(t, svc, alm, "T-01")
 	sku := primerSKU(t, svc)
 
 	if _, hay := svc.OperacionPara(empDemo, sede1, almacen.ClaseRecepcion); hay {
@@ -129,7 +129,7 @@ func TestOperacion_ElMaestroSeDefiende(t *testing.T) {
 func TestOperacion_NoSeConfiguraLoQueNoExiste(t *testing.T) {
 	svc := servicioConOperaciones(t)
 	alm := almacenPrincipalID(t, svc)
-	muelle := nuevaUbicacion(t, svc, alm, "MUELLE")
+	muelle := nuevaUbicacion(t, svc, alm, "T-MUELLE")
 	svc.SembrarTiposOperacion(empDemo, actorA, origenTst)
 
 	// La recepción sí admite dos pasos.
@@ -204,8 +204,8 @@ func TestOperacion_SoloUnPorDefectoPorClase(t *testing.T) {
 func TestOperacion_DosPasosDejaLaMercanciaEnElMuelle(t *testing.T) {
 	svc := servicioConOperaciones(t)
 	alm := almacenPrincipalID(t, svc)
-	muelle := nuevaUbicacion(t, svc, alm, "MUELLE")
-	estante := nuevaUbicacion(t, svc, alm, "A-01")
+	muelle := nuevaUbicacion(t, svc, alm, "T-MUELLE")
+	estante := nuevaUbicacion(t, svc, alm, "T-01")
 	sku := primerSKU(t, svc)
 
 	if _, err := svc.CrearTipoOperacion(empDemo, actorA, origenTst, almacen.TipoOperacion{
@@ -262,7 +262,7 @@ func TestOperacion_DosPasosDejaLaMercanciaEnElMuelle(t *testing.T) {
 func TestOperacion_ElDeLaSedeGanaAlGeneral(t *testing.T) {
 	svc := servicioConOperaciones(t)
 	alm := almacenPrincipalID(t, svc)
-	muelle := nuevaUbicacion(t, svc, alm, "MUELLE")
+	muelle := nuevaUbicacion(t, svc, alm, "T-MUELLE")
 	svc.SembrarTiposOperacion(empDemo, actorA, origenTst) // REC general, un paso
 
 	if _, err := svc.CrearTipoOperacion(empDemo, actorA, origenTst, almacen.TipoOperacion{

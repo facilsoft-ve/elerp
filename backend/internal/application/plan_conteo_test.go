@@ -115,7 +115,7 @@ func TestPlanConteo_LaHojaTraeLoQueDeberiaEstar(t *testing.T) {
 func TestPlanConteo_ContarSellaElPlan(t *testing.T) {
 	svc := servicioConPlanes(t)
 	alm := almacenPrincipalID(t, svc)
-	pasillo := nuevaUbicacion(t, svc, alm, "A-01")
+	pasillo := nuevaUbicacion(t, svc, alm, "T-01")
 	sku := primerSKU(t, svc)
 	svc.AjustarEnUbicacion(empDemo, sede1, alm, pasillo, sku, "carga", 20, "", "", actorA, origenTst)
 

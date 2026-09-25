@@ -91,17 +91,17 @@ func TestUbicacion_ElMaestroSeDefiende(t *testing.T) {
 		t.Errorf("sin código debía rechazarse: %v", err)
 	}
 	if _, err := svc.CrearUbicacion(empDemo, actorA, origenTst, almacen.Ubicacion{
-		Codigo: "A-01",
+		Codigo: "T-01",
 	}); !errors.Is(err, application.ErrUbicacionSinAlmacen) {
 		t.Errorf("sin almacén debía rechazarse: %v", err)
 	}
 	if _, err := svc.CrearUbicacion(empDemo, actorA, origenTst, almacen.Ubicacion{
-		AlmacenID: alm, Codigo: "A-01", Tipo: "sótano",
+		AlmacenID: alm, Codigo: "T-01", Tipo: "sótano",
 	}); !errors.Is(err, application.ErrUbicacionTipoInvalido) {
 		t.Errorf("un tipo inventado debía rechazarse: %v", err)
 	}
 
-	nuevaUbicacion(t, svc, alm, "A-01")
+	nuevaUbicacion(t, svc, alm, "T-01")
 	// El código se normaliza, así que "a-01" es la misma ubicación y choca.
 	if _, err := svc.CrearUbicacion(empDemo, actorA, origenTst, almacen.Ubicacion{
 		AlmacenID: alm, Codigo: "a-01",
@@ -116,7 +116,7 @@ func TestUbicacion_ElMaestroSeDefiende(t *testing.T) {
 func TestUbicacion_LaRecepcionUbicaYLaSalidaConsume(t *testing.T) {
 	svc := servicioConUbicaciones(t)
 	alm := almacenPrincipalID(t, svc)
-	pasillo := nuevaUbicacion(t, svc, alm, "A-01")
+	pasillo := nuevaUbicacion(t, svc, alm, "T-01")
 	sku := primerSKU(t, svc)
 
 	// Se recibe ubicando en A-01.
