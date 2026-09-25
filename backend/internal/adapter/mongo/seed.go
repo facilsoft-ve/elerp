@@ -117,7 +117,11 @@ import (
 // CERRADOS, sin lo cual el libro no se puede reconstruir (el inventario inicial
 // del restaurante es de julio y tenía agosto cerrado), y se vuelven a cerrar al
 // final del arranque, cuando ya hay libro (ver periodos_demo.go).
-const versionSeedDemo = 48
+// v49: el almacén demo nace con UBICACIONES (tres estantes y un muelle) y su stock
+// repartido entre ellas, dejando uno de cada siete sin ubicar a propósito. Sin esto
+// el informe de valoración decía «SIN UBICAR» en todas sus líneas y media Ola A
+// quedaba invisible para quien evalúa el producto.
+const versionSeedDemo = 49
 
 // v34: la demo trae el MÓDULO DE PEDIDOS configurado y trabajando —canales,
 // zonas, repartidores y un tablero con pedidos en todos los estados—. Un módulo
