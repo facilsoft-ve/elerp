@@ -681,6 +681,9 @@ export const api = {
   // VALORACIÓN: dónde está el valor y si coincide con la contabilidad. Sin sede
   // mira la empresa entera, que es lo único comparable con el diario.
   valoracion: (sedeId = '') => request('/api/inventario/valoracion' + (sedeId ? '?sede=' + encodeURIComponent(sedeId) : '')),
+  // El diagnóstico responde POR QUÉ no cuadra. Es de solo lectura y mira el ledger
+  // entero, así que se pide bajo demanda y no en cada carga de pantalla.
+  diagnosticoInventario: () => request('/api/inventario/diagnostico'),
   // CORRECCIÓN DE COSTO: revaluar sin mover unidades.
   corregirCosto: (sku, body) =>
     request(`/api/inventario/existencias/${encodeURIComponent(sku)}/corregir-costo`, { method: 'POST', body: JSON.stringify(body) }),

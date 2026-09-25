@@ -36,6 +36,11 @@ func (s *Server) registerInventario(r fiber.Router) {
 	// VALORACIÓN: dónde está el valor y si coincide con la contabilidad.
 	g.Get("/valoracion", s.handleValoracion)
 
+	// DIAGNÓSTICO: qué está torcido y dónde. Es de SOLO LECTURA —no asienta ni
+	// ajusta— así que no exige el permiso de escritura: hay que poder mirar antes
+	// de decidir si se toca algo, y quien no puede tocar igual necesita saberlo.
+	g.Get("/diagnostico", s.handleDiagnosticoInventario)
+
 	// REABASTECIMIENTO: cuándo volver a comprar, y cuánto.
 	g.Get("/reabastecimiento/reglas", s.handleReglasReabastecimiento)
 	g.Post("/reabastecimiento/reglas", s.escribirInventario, s.handleCrearReglaReabastecimiento)
@@ -635,6 +640,10 @@ func (s *Server) handleValoracion(c *fiber.Ctx) error {
 	// Sin ?sede= mira la empresa entera, que es lo único que se puede comparar con
 	// el diario: el saldo de una cuenta contable no es de una sede.
 	return c.JSON(s.svc.Valoracion(empresaIDOf(c), c.Query("sede")))
+}
+
+func (s *Server) handleDiagnosticoInventario(c *fiber.Ctx) error {
+	return c.JSON(s.svc.DiagnosticarInventario(empresaIDOf(c)))
 }
 
 func (s *Server) handleCorregirCosto(c *fiber.Ctx) error {

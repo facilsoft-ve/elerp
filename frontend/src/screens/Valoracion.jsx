@@ -22,14 +22,36 @@ export function Valoracion() {
   const [ambito, setAmbito] = useState('empresa')
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
+  // El diagnóstico se pide APARTE: recorre el ledger entero, así que no se carga en
+  // cada pintada. `diag` es null hasta que se pide, y `revisando` evita pedirlo dos
+  // veces mientras llega.
+  const [diag, setDiag] = useState(null)
+  const [revisando, setRevisando] = useState(false)
 
   const cargar = () => {
-    setData(null); setError(null)
+    setData(null); setError(null); setDiag(null)
     api.valoracion(ambito === 'sede' ? activeSedeId : '')
       .then(setData)
       .catch((e) => setError(e))
   }
   useEffect(cargar, [ambito, activeSedeId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const revisar = () => {
+    if (revisando) return
+    setRevisando(true)
+    api.diagnosticoInventario()
+      .then(setDiag)
+      .catch((e) => setDiag({ error: String(e?.message || e) }))
+      .finally(() => setRevisando(false))
+  }
+
+  // Cuando algo NO cuadra, el porqué se busca solo: ahí la pregunta ya existe y
+  // obligar a pulsar un botón para responderla es esconder la respuesta. Cuando
+  // cuadra, el botón queda a mano y no se gasta nada.
+  useEffect(() => {
+    if (ambito !== 'empresa' || !data) return
+    if ((data.porCuenta || []).some((c) => !c.cuadra)) revisar()
+  }, [data, ambito]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (error) {
     return <Empty icon={<Icon.CircleAlert size={22} />} title="No se pudo cargar la valoración"
@@ -91,6 +113,10 @@ export function Valoracion() {
           entera, y la diferencia sería el inventario de las demás sedes.
         </div>
       )}
+
+      {ambito === 'empresa' ? (
+        <Revision diag={diag} revisando={revisando} onRevisar={revisar} ccy={ui.ccy} />
+      ) : null}
 
       <div className="grid gap-3 md:grid-cols-2 mb-3">
         <Resumen titulo="Por almacén" filas={data.porAlmacen} ccy={ui.ccy} />
@@ -163,6 +189,102 @@ function Resumen({ titulo, filas, ccy, conCuenta }) {
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+/* LA REVISIÓN: por qué no cuadra.
+ *
+ * Que dos cifras no coincidan es el síntoma; esto es lo que hay que mirar para
+ * saber dónde tocar. Antes había que salir a buscarlo a mano comparando pantallas,
+ * y la función que lo respondía existía en el backend sin estar conectada a nada.
+ *
+ * Los hallazgos se agrupan por CLASE y no se listan de corrido: veinte líneas de
+ * «movimiento sin asiento» son un solo problema, y leerlas una por una hace perder
+ * el que aparece una sola vez. */
+const ROTULOS = {
+  'no-cuadra-con-contabilidad': 'El inventario no vale lo que dice la cuenta',
+  'documento-sin-asiento': 'Documentos que movieron inventario sin asentar',
+  'movimiento-sin-asiento': 'Movimientos sin respaldo contable',
+  'almacenes-no-suman': 'Los almacenes no suman la existencia de la sede',
+  'ubicaciones-no-suman': 'Las ubicaciones no suman la existencia del almacén',
+  'lotes-no-suman': 'Los lotes no suman la existencia del producto',
+  'apartado-excede-existencia': 'Hay más apartado que existencia',
+  'existencia-negativa': 'Existencias en negativo',
+  'costo-invalido': 'Existencia con costo en cero',
+}
+
+// cifra pinta el número en SU unidad. Sin esto, una existencia negativa de −726,73
+// unidades de vaselina se leía «−Bs 726,73»: un faltante de mercancía disfrazado de
+// pérdida contable que nadie tiene.
+const cifra = (v, medida, ccy) => (medida === 'cantidad' ? fmtNum(v) : fmtCurrency(v, ccy))
+
+function Revision({ diag, revisando, onRevisar, ccy }) {
+  if (revisando && !diag) {
+    return <div className="mb-3 text-[12px] text-slate-500">Revisando el inventario…</div>
+  }
+  if (!diag) {
+    return (
+      <div className="mb-3">
+        <Button variant="ghost" size="sm" onClick={onRevisar} icon={<Icon.Search size={14} />}>
+          Revisar el inventario
+        </Button>
+      </div>
+    )
+  }
+  if (diag.error) {
+    return (
+      <div className="mb-3 text-[12px] text-red-600 dark:text-red-400">
+        No se pudo revisar: {diag.error}{' '}
+        <button type="button" className="underline" onClick={onRevisar}>Reintentar</button>
+      </div>
+    )
+  }
+  if (diag.sano) {
+    return (
+      <div className="mb-3 text-[12px] text-slate-500">
+        Revisión completa sobre {diag.revisados} movimiento(s): no se encontró nada torcido.
+      </div>
+    )
+  }
+
+  const grupos = {}
+  for (const h of diag.hallazgos || []) (grupos[h.clase] ||= []).push(h)
+
+  return (
+    <div className="mb-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-card overflow-hidden">
+      <div className="px-4 py-2 flex items-center gap-2 bg-slate-50/60 dark:bg-slate-800/40">
+        <span className="text-[11.5px] uppercase tracking-wide text-slate-400">Qué está torcido</span>
+        <span className="ml-auto text-[11.5px] text-slate-400">{diag.revisados} movimiento(s) revisados</span>
+      </div>
+      <div className="divide-y divide-slate-100 dark:divide-slate-800">
+        {Object.entries(grupos).map(([clase, hs]) => (
+          <div key={clase} className="px-4 py-2.5">
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <span className={`text-[13px] font-medium ${hs[0].gravedad === 'alta' ? 'text-red-700 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'}`}>
+                {ROTULOS[clase] || clase}
+              </span>
+              <span className="text-[11.5px] text-slate-400">{hs.length}</span>
+            </div>
+            {/* Se muestran los primeros y se dice cuántos quedan: la lista completa
+                de un problema repetido no añade nada y tapa los demás. */}
+            <div className="mt-1 space-y-0.5">
+              {hs.slice(0, 5).map((h, i) => (
+                <div key={i} className="text-[11.5px] text-slate-500 flex items-baseline gap-2 flex-wrap">
+                  {h.sku ? <span className="num">{h.sku}</span> : null}
+                  <span className="min-w-0">{h.detalle}</span>
+                  <span className="num">
+                    {cifra(h.esperado, h.medida, ccy)} vs {cifra(h.encontrado, h.medida, ccy)}
+                  </span>
+                </div>
+              ))}
+              {hs.length > 5 ? (
+                <div className="text-[11.5px] text-slate-400">y {hs.length - 5} más</div>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
