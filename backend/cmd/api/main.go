@@ -155,6 +155,14 @@ func main() {
 		}
 	}
 
+	// Los meses cerrados de la DEMOSTRACIÓN van al final, cuando el libro ya está
+	// reconstruido: un cierre puesto antes rechazaría los asientos que el
+	// recontabilizado acaba de crear y dejaría al tenant sin libro (ver
+	// periodos_demo.go). Idempotente.
+	if n := svc.AsegurarPeriodosDemo(); n > 0 {
+		log.Printf("Demo: %d período(s) de demostración cerrados", n)
+	}
+
 	// Almacén de archivos: un bucket por cliente bajo ARCHIVOS_DIR.
 	arch, err := almacen.New(os.Getenv("ARCHIVOS_DIR"), "/api/archivos")
 	if err != nil {

@@ -39,6 +39,22 @@ func sembrarNichos(st *Store, semilla *inmem.Store, refrescar bool) {
 			continue
 		}
 
+		/* AL REFRESCAR, EL NICHO SE LIMPIA COMO SE LIMPIA LA BODEGA.
+		 *
+		 * Hasta ahora `refrescar` solo alcanzaba a los pedidos, las órdenes de
+		 * fabricación y el plano del salón; el catálogo y el ledger quedaban
+		 * intactos porque su bloque exige que estén VACÍOS. Eso dejaba a los nichos
+		 * congelados en la versión con la que se sembraron: los seis ids duplicados
+		 * del restaurante y sus movimientos sin referencia seguían ahí por mucho que
+		 * el seed se arreglara, porque nadie los iba a borrar nunca.
+		 *
+		 * Se limpian los datos de NEGOCIO, jamás la identidad: la organización, la
+		 * empresa, las sedes, los usuarios y sus membresías se quedan. Quien entró a
+		 * la demo sigue entrando. */
+		if refrescar {
+			limpiarDemo(st, n.EmpresaID)
+		}
+
 		/* NO SE BORRAN LOS ASIENTOS DEL NICHO AL REGENERAR, y se intentó.
 		 *
 		 * Parecía correcto —el libro es una proyección, que se rehaga— y el

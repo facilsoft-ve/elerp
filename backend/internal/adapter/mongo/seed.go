@@ -109,7 +109,15 @@ import (
 // v32: el salón del restaurante trae sus ÁREAS (Salón, Terraza) y sus
 // MOSTRADORES (caja, barra, postres), que antes eran celdas bloqueadas — el
 // plano decía «acá no va nada» donde hay una barra con su nombre.
-const versionSeedDemo = 47
+// v48: los NICHOS se regeneran como la bodega. Hasta ahora `refrescar` no
+// alcanzaba su catálogo ni su ledger —su bloque exige que estén vacíos—, así que
+// quedaban congelados en la versión con la que se sembraron: los seis ids de
+// movimiento duplicados del restaurante y sus movimientos sin referencia seguían
+// ahí por mucho que el seed se arreglara. Se limpian también sus PERÍODOS
+// CERRADOS, sin lo cual el libro no se puede reconstruir (el inventario inicial
+// del restaurante es de julio y tenía agosto cerrado), y se vuelven a cerrar al
+// final del arranque, cuando ya hay libro (ver periodos_demo.go).
+const versionSeedDemo = 48
 
 // v34: la demo trae el MÓDULO DE PEDIDOS configurado y trabajando —canales,
 // zonas, repartidores y un tablero con pedidos en todos los estados—. Un módulo
@@ -491,6 +499,18 @@ func limpiarDemo(st *Store, demoID string) {
 	// con los valores de hoy. Un maestro de impuestos sembrado antes de que
 	// existiera la alícuota suntuaria se quedaría sin ella para siempre.
 	n += st.Alicuotas.c.delMany(f) + st.ConceptosISLR.c.delMany(f)
+	/* LOS PERÍODOS CERRADOS TAMBIÉN, y es lo que hace que regenerar funcione.
+	 *
+	 * Un período cerrado rechaza todo asiento con fecha anterior. Si se borran los
+	 * asientos de un tenant y se deja su cierre en pie, el recontabilizado del
+	 * arranque no puede recrear ni uno solo: el tenant queda SIN LIBRO en vez de con
+	 * un libro viejo, que es bastante peor. Le pasó a la demo del restaurante —su
+	 * inventario inicial es del 1 de julio y tenía agosto cerrado—, y está
+	 * documentado en seed_nichos.go como camino de ida.
+	 *
+	 * Solo aplica a tenants de DEMOSTRACIÓN, que es lo único que esta función toca.
+	 * Un cierre contable de verdad no se reabre nunca (§7.3). */
+	n += st.Periodos.c.delMany(f)
 	// El módulo de pedidos también: sin limpiarlo, una base ya sembrada nunca
 	// vería el tablero nuevo y la demo quedaría con los pedidos de la versión
 	// anterior.
