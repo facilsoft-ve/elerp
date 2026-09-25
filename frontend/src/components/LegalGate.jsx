@@ -109,7 +109,7 @@ function AceptacionLegal({ pendientes, onListo }) {
         <div className="max-w-3xl mx-auto h-full flex flex-col px-4 py-5">
           <h1 className="font-display font-bold text-lg text-slate-900 dark:text-slate-50">Términos y privacidad</h1>
           <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-1">
-            Para usar ElERP necesitás leer y aceptar {mostrar.length > 1 ? 'los siguientes documentos' : 'el siguiente documento'}.
+            Para usar ElERP necesitas leer y aceptar {mostrar.length > 1 ? 'los siguientes documentos' : 'el siguiente documento'}.
             Tu aceptación queda registrada de forma auditable (versión, fecha y hora).
           </p>
 

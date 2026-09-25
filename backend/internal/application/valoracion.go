@@ -85,6 +85,7 @@ func (s *Service) Valoracion(empresaID, sedeID string) ValoracionResult {
 
 	type clave struct{ Almacen, Ubicacion, Producto, Sede string }
 	cantidades := map[clave]float64{}
+	// Sobre por qué no se agrupa por `m.AlmacenID` a secas, ver almacenAtribuido.
 	/* COSTO PROMEDIO POR (PRODUCTO, SEDE), que es como lo lleva el resto de la
 	 * aplicación —el Kardex y las existencias filtran por sede—.
 	 *
@@ -112,7 +113,7 @@ func (s *Service) Valoracion(empresaID, sedeID string) ValoracionResult {
 				porSede[m.SedeID] = append(porSede[m.SedeID], m)
 				continue
 			}
-			cantidades[clave{m.AlmacenID, m.UbicacionID, p.ID, m.SedeID}] += m.Cantidad
+			cantidades[clave{s.almacenAtribuido(empresaID, m), m.UbicacionID, p.ID, m.SedeID}] += m.Cantidad
 			sedeDe[m.SedeID] = m.SedeID
 			porSede[m.SedeID] = append(porSede[m.SedeID], m)
 		}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mornix/elerp/internal/domain/almacen"
+	"github.com/mornix/elerp/internal/domain/inventario"
 )
 
 var (
@@ -93,6 +94,28 @@ func (s *Service) almacenParaEscritura(empresaID, sedeID, deseado string) string
 		}
 	}
 	if a, ok := s.AlmacenPrincipalDe(empresaID, sedeID); ok {
+		return a.ID
+	}
+	return ""
+}
+
+// almacenAtribuido dice a QUÉ ALMACÉN pertenece un movimiento a efectos de informe.
+//
+// Un movimiento sin almacén no es un movimiento sin sitio: es anterior a que
+// existieran los almacenes, y la mercancía está en el principal de su sede. Toda
+// proyección por almacén ya lo resuelve así —movsDeAlmacen, el reparto en buckets,
+// los lotes—, y quien agrupe por `m.AlmacenID` a secas se sale de esa convención.
+//
+// Se agrega porque la valoración lo hacía: en la base de demostración, cuyo
+// inventario inicial se siembra sin almacén, Existencias decía «Almacén Principal»
+// y Valoración decía «Sin almacén» PARA EL MISMO STOCK. Ninguna de las dos fallaba,
+// y el total cuadraba contra la contabilidad, así que el desacuerdo solo se veía
+// mirando las dos pantallas a la vez.
+func (s *Service) almacenAtribuido(empresaID string, m inventario.Movimiento) string {
+	if m.AlmacenID != "" || s.almacenes == nil {
+		return m.AlmacenID
+	}
+	if a, ok := s.AlmacenPrincipalDe(empresaID, m.SedeID); ok {
 		return a.ID
 	}
 	return ""

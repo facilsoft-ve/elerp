@@ -30,7 +30,6 @@ func (s *Server) registerPedidos(api fiber.Router) {
 	// mostrador. Quien cobra también atiende pedidos.
 	g.Get("/", s.handlePedidos)
 	g.Post("/", s.handleCrearPedido)
-	g.Get("/:id", s.handlePedido)
 	g.Post("/:id/confirmar", s.handleConfirmarPedido)
 	g.Post("/:id/rechazar", s.handleRechazarPedido)
 	g.Post("/:id/listo", s.handleListoPedido)
@@ -70,6 +69,13 @@ func (s *Server) registerPedidos(api fiber.Router) {
 	g.Get("/config/zonas", admin, s.handleZonasPedido)
 	g.Put("/config/zonas", admin, s.handleGuardarZonaPedido)
 	g.Get("/config/repartidores", s.handleRepartidores)
+	// EL COMODÍN VA AL FINAL, y no es estilo: Fiber resuelve por orden de registro,
+	// así que un "/:id" declarado antes se traga toda ruta literal de un segmento que
+	// venga después. Estaba arriba y se comía /mis-entregas y /liquidaciones: las dos
+	// respondían «el pedido no existe» con un 404 que parecía un dato que falta. La
+	// pantalla de cierre de repartidor salía vacía sin decir por qué.
+	g.Get("/:id", s.handlePedido)
+
 	g.Put("/config/repartidores", admin, s.handleGuardarRepartidor)
 }
 

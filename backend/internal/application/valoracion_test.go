@@ -155,6 +155,42 @@ func TestValoracion_PorSedeNoComparaConElDiario(t *testing.T) {
 	}
 }
 
+// TestValoracion_LoQueNoTieneAlmacenCuentaEnElPrincipal fija la convención que el
+// resto del sistema ya seguía: un movimiento sin almacén es anterior a que hubiera
+// almacenes, y su mercancía está en el principal de la sede.
+//
+// La valoración agrupaba por el AlmacenID literal, así que ese stock aparecía bajo
+// «Sin almacén» mientras Existencias —que pasa por movsDeAlmacen— lo mostraba en el
+// Almacén Principal. Dos pantallas, el mismo stock, dos respuestas; y como el total
+// seguía cuadrando contra la contabilidad, nada fallaba.
+func TestValoracion_LoQueNoTieneAlmacenCuentaEnElPrincipal(t *testing.T) {
+	svc := servicioCompleto(t)
+	sku := primerSKU(t, svc)
+	// Ajuste SIN almacén: es como nace el histórico y como siembra el seed.
+	if _, err := svc.Ajustar(empDemo, sede1, "", sku, "carga", 7, actorA, origenTst); err != nil {
+		t.Fatalf("ajustar: %v", err)
+	}
+	prin := almacenPrincipalID(t, svc)
+
+	// Se mira SOLO la sede que tiene almacén. El seed trae una segunda sede sin
+	// almacenes, y ahí «Sin almacén» es la respuesta honesta: no hay dónde
+	// atribuirlo. Lo que se prueba es la atribución, no que el seed esté completo.
+	v := svc.Valoracion(empDemo, sede1)
+	if len(v.Filas) == 0 {
+		t.Fatal("el informe de la sede salió vacío")
+	}
+	for _, f := range v.Filas {
+		if f.AlmacenID != prin {
+			t.Errorf("%s quedó en almacén %q; tenía que atribuirse al principal (%s)", f.SKU, f.AlmacenID, prin)
+		}
+	}
+	for _, tot := range v.PorAlmacen {
+		if tot.Nombre == "Sin almacén" {
+			t.Errorf("el desglose por almacén no debe traer «Sin almacén» habiendo principal: %+v", tot)
+		}
+	}
+}
+
 // TestCorregirCosto_CambiaElValorNoLasUnidades es la prueba central de la
 // corrección: mueve lo que vale, no cuánto hay.
 func TestCorregirCosto_CambiaElValorNoLasUnidades(t *testing.T) {
