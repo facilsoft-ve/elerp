@@ -203,6 +203,8 @@ function Resumen({ titulo, filas, ccy, conCuenta }) {
  * «movimiento sin asiento» son un solo problema, y leerlas una por una hace perder
  * el que aparece una sola vez. */
 const ROTULOS = {
+  'id-de-movimiento-duplicado': 'Dos movimientos comparten el mismo identificador',
+  'movimiento-sin-su-documento': 'Movimientos que no dicen de qué documento vienen',
   'no-cuadra-con-contabilidad': 'El inventario no vale lo que dice la cuenta',
   'documento-sin-asiento': 'Documentos que movieron inventario sin asentar',
   'movimiento-sin-asiento': 'Movimientos sin respaldo contable',

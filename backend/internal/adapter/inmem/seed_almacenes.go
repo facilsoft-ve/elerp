@@ -1,6 +1,8 @@
 package inmem
 
 import (
+	"strconv"
+
 	"github.com/mornix/elerp/internal/domain/almacen"
 	"github.com/mornix/elerp/internal/domain/inventario"
 )
@@ -42,11 +44,47 @@ func (s *Store) almacenDeSede(empresaID, sedeID string) string {
 	return a.ID
 }
 
-// appendMov siembra un movimiento resolviendo su almacén si no trae uno. Respeta el
-// que venga puesto: sembrar en un almacén concreto sigue siendo posible.
+/* IDENTIDAD DE LO QUE SIEMBRA EL SEED.
+ *
+ * `nextID` cuenta con un contador global del PROCESO, que arranca en cero cada vez
+ * que el servidor se levanta. Para datos que viven en memoria da igual; para el
+ * seed no, porque sus filas se insertan en una base PERSISTENTE a lo largo de
+ * muchos arranques: el que siembra hoy los insumos de cocina y el que mañana añade
+ * los de repostería recorren la misma secuencia y emiten los mismos `mov_180`.
+ *
+ * Así llegaron a producción seis ids compartidos por dos movimientos distintos cada
+ * uno. No rompe ninguna suma —el fold recorre la lista, no el mapa— pero envenena
+ * todo lo que indexa por id: el asiento referencia por id, la recontabilización
+ * marca por id lo ya asentado, el rastro de lotes enlaza por id. Asentar uno da por
+ * asentado al otro. Y los guards de «esto ya está sembrado» preguntan por id, así
+ * que una colisión hace que se salte una fila legítima.
+ *
+ * El id sembrado lleva ahora LA EMPRESA y un contador propio de ella. Dos empresas
+ * no pueden chocar, y dos arranques con el mismo seed producen los mismos ids: los
+ * guards por id vuelven a significar lo que dicen.
+ *
+ * Los ids ya emitidos NO cambian —hay asientos que los referencian—: esto evita la
+ * próxima colisión, no repara la que ya está en la base.
+ */
+func (s *Store) idDeMovimiento(empresaID string) string {
+	s.muSeedMov.Lock()
+	defer s.muSeedMov.Unlock()
+	if s.seedMovSeq == nil {
+		s.seedMovSeq = map[string]int{}
+	}
+	s.seedMovSeq[empresaID]++
+	return "mov_" + empresaID + "_" + strconv.Itoa(s.seedMovSeq[empresaID])
+}
+
+// appendMov siembra un movimiento resolviendo su almacén y su id si no traen uno.
+// Respeta los que vengan puestos: sembrar en un almacén concreto, o con un id
+// elegido a mano, sigue siendo posible.
 func (s *Store) appendMov(m inventario.Movimiento) inventario.Movimiento {
 	if m.AlmacenID == "" {
 		m.AlmacenID = s.almacenDeSede(m.EmpresaID, m.SedeID)
+	}
+	if m.ID == "" && m.EmpresaID != "" {
+		m.ID = s.idDeMovimiento(m.EmpresaID)
 	}
 	return s.Movimientos.Append(m)
 }

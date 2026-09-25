@@ -125,6 +125,13 @@ func main() {
 		if n := svc.RecontabilizarPendientes(emp.ID, "sistema"); n > 0 {
 			log.Printf("Contabilidad: %d documento(s) de %s recibieron su asiento", n, emp.ID)
 		}
+		// Y las RECEPCIONES DE COMPRA que llegaron a la base ya recibidas sin pasar
+		// por el caso de uso que asienta. Van aparte porque su contrapartida es la
+		// cuenta por pagar y no el capital: la recontabilización de arriba las
+		// excluye a propósito, y hasta ahora nadie las recogía.
+		if n := svc.RecontabilizarComprasPendientes(emp.ID, "sistema"); n > 0 {
+			log.Printf("Contabilidad: %d recepción(es) de compra de %s recibieron su asiento", n, emp.ID)
+		}
 		// Unidades de medida: las equivalencias del juego por defecto (kg=1, g=0,001…)
 		// para las empresas cuyas unidades se sembraron antes de que el campo
 		// existiera. Sin esto la conversión queda viva pero inerte: el selector no

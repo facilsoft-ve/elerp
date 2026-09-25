@@ -42,6 +42,7 @@ const (
 	ClaseExistenciaNegativa   = "existencia-negativa"
 	ClaseCostoInvalido        = "costo-invalido"
 	ClaseIDDuplicado          = "id-de-movimiento-duplicado"
+	ClaseReferenciaHuerfana   = "movimiento-sin-su-documento"
 )
 
 // En qué está expresado un hallazgo. La pantalla NO puede adivinarlo: una
@@ -106,7 +107,8 @@ func (s *Service) DiagnosticarInventario(empresaID string) DiagnosticoInventario
 	// conocidas; al final los saldos raros. Alfabéticamente, «existencia-negativa»
 	// salía antes que «no-cuadra-con-contabilidad» y el titular quedaba sepultado.
 	prioridad := map[string]int{
-		ClaseIDDuplicado:          -1,
+		ClaseIDDuplicado:          -2,
+		ClaseReferenciaHuerfana:   -1,
 		ClaseNoCuadraContabilidad: 0,
 		ClaseDocumentoSinAsiento:  1,
 		ClaseMovimientoSinAsiento: 2,
@@ -220,7 +222,8 @@ func (s *Service) revisarAsientos(empresaID string, add func(HallazgoInventario)
 	type doc struct {
 		refTipo string
 		movs    int
-		valor   float64
+		valor   float64 // lo que movió, en valor absoluto
+		neto    float64 // lo que el inventario ganó o perdió por su causa
 		sku     string
 	}
 	docs := map[string]*doc{}
@@ -238,6 +241,27 @@ func (s *Service) revisarAsientos(empresaID string, add func(HallazgoInventario)
 	}
 
 	for _, m := range s.movimientos.List(empresaID, inventario.FiltroMovimiento{}) {
+		/* DICE DE DÓNDE VIENE PERO NO DE CUÁL: el peor sitio donde estar.
+		 *
+		 * Un movimiento con RefTipo y sin RefID queda fuera de TODAS las
+		 * comprobaciones: la recontabilización lo salta porque «tiene documento», y
+		 * la de abajo no puede preguntar por un asiento que no sabe cuál sería.
+		 * Es invisible por partida doble, y así estaban los 17 movimientos de
+		 * fabricación de la demo del restaurante — anexados con el id de su orden
+		 * antes de que la orden tuviera id.
+		 */
+		if m.RefTipo != "" && m.RefID == "" && m.Tipo != inventario.MovTransferencia {
+			valor := m.Cantidad * m.CostoUnitario
+			if valor < 0 {
+				valor = -valor
+			}
+			add(HallazgoInventario{
+				Clase: ClaseReferenciaHuerfana, Gravedad: GravedadAlta, Medida: MedidaMonto,
+				Detalle: "dice venir de un " + m.RefTipo + " y no dice de cuál: ninguna comprobación lo alcanza",
+				SKU:     m.SKU, Ref: m.ID, Esperado: round2(valor), Encontrado: 0,
+			})
+			continue
+		}
 		if m.RefTipo == "" || m.RefID == "" || conAsiento[m.RefID] {
 			continue
 		}
@@ -253,15 +277,38 @@ func (s *Service) revisarAsientos(empresaID string, add func(HallazgoInventario)
 		}
 		d.movs++
 		v := m.Cantidad * m.CostoUnitario
+		d.neto += v
 		if v < 0 {
 			v = -v
 		}
 		d.valor += v
 	}
 	for refID, d := range docs {
+		/* SIN EFECTO NETO NO FALTA NINGÚN ASIENTO, y esto no es una excepción: es la
+		 * definición de lo que se busca.
+		 *
+		 * Una fabricación terminada saca valor de los insumos y lo mete en el
+		 * producto por el mismo importe. Con una sola cuenta de inventario —el caso
+		 * normal— su asiento sería debe y haber sobre la misma línea, así que no
+		 * existe a propósito. Acusarlo llenaría el informe de órdenes correctas, y
+		 * una alarma que suena siempre se termina apagando.
+		 *
+		 * El umbral es de una unidad monetaria y no de un céntimo: repartir un costo
+		 * entre seis líneas deja diferencias de redondeo de centavos que no son un
+		 * descuadre de nadie. */
+		if d.neto > -1 && d.neto < 1 {
+			continue
+		}
+		detalle := fmt.Sprintf("%s movió inventario (%d movimiento(s)) y no tiene asiento", d.refTipo, d.movs)
+		if d.refTipo == RefFabricacion && d.neto < 0 {
+			// El caso de la orden ABIERTA: los insumos ya salieron y el producto
+			// todavía no entró, así que ese valor no está en ninguna cuenta. No es
+			// que falte el asiento — es que no hay dónde ponerlo mientras dura.
+			detalle = fmt.Sprintf("fabricación en curso: %d insumo(s) salieron del inventario y su valor no está en ninguna cuenta hasta que la orden termine", d.movs)
+		}
 		add(HallazgoInventario{
 			Clase: ClaseDocumentoSinAsiento, Gravedad: GravedadAlta, Medida: MedidaMonto,
-			Detalle: fmt.Sprintf("%s movió inventario (%d movimiento(s)) y no tiene asiento", d.refTipo, d.movs),
+			Detalle: detalle,
 			SKU:     d.sku, Ref: refID, Esperado: round2(d.valor), Encontrado: 0,
 		})
 	}

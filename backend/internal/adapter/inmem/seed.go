@@ -3,6 +3,7 @@ package inmem
 import (
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/mornix/elerp/internal/application"
@@ -38,6 +39,11 @@ func round2Demo(v float64) float64 { return math.Round(v*100) / 100 }
 // Store agrupa todos los repos en memoria (equivalente al window.DB del
 // prototipo). Se siembra con una empresa demo para el modo DEV_LOGIN.
 type Store struct {
+	// seedMovSeq cuenta los movimientos sembrados POR EMPRESA, para darles un id
+	// estable que no dependa del contador global del proceso (ver idDeMovimiento).
+	muSeedMov  sync.Mutex
+	seedMovSeq map[string]int
+
 	Productos              *ProductoRepo
 	Movimientos            *MovimientoRepo
 	Transferencias         *TransferenciaRepo

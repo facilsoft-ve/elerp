@@ -357,7 +357,11 @@ func farmaciaDemo() especNicho {
 			{sku: "PA-SALICILICO", nombre: "Ácido salicílico USP", rubro: "Materia prima", unidad: "g", costo: 180, stock: 800, porPeso: true, insumo: true, exento: true},
 			{sku: "PA-OXIDO-ZN", nombre: "Óxido de zinc USP", rubro: "Materia prima", unidad: "g", costo: 95, stock: 1500, porPeso: true, insumo: true, exento: true},
 			{sku: "PA-NISTATINA", nombre: "Nistatina (polvo)", rubro: "Materia prima", unidad: "g", costo: 2600, stock: 120, porPeso: true, insumo: true, exento: true},
-			{sku: "EXC-VASELINA", nombre: "Vaselina sólida", rubro: "Materia prima", unidad: "g", costo: 28, stock: 6000, porPeso: true, insumo: true, exento: true},
+			// 12 kg y no 6: las cuatro órdenes de fabricación sembradas consumen 6.726,73 g
+			// entre todas, así que con 6.000 la demostración arrancaba con la vaselina en
+			// −726,73. El insumo de una fórmula tiene que cubrir las órdenes que la usan
+			// (lo fija TestSeed_NadaNaceEnNegativo).
+			{sku: "EXC-VASELINA", nombre: "Vaselina sólida", rubro: "Materia prima", unidad: "g", costo: 28, stock: 12000, porPeso: true, insumo: true, exento: true},
 			{sku: "EXC-GLICERINA", nombre: "Glicerina USP", rubro: "Materia prima", unidad: "ml", costo: 35, stock: 4000, porPeso: true, insumo: true, exento: true},
 			{sku: "EXC-JARABE", nombre: "Jarabe simple", rubro: "Materia prima", unidad: "ml", costo: 12, stock: 9000, porPeso: true, insumo: true, exento: true},
 			{sku: "EXC-AGUA-DES", nombre: "Agua destilada", rubro: "Materia prima", unidad: "ml", costo: 4, stock: 20000, porPeso: true, insumo: true, exento: true},

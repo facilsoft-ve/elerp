@@ -68,9 +68,16 @@ func (s *Service) CrearReglaReabastecimiento(empresaID, actor, origen string, r 
 	if !ok {
 		return inventario.ReglaReabastecimiento{}, fmt.Errorf("%w: %s", ErrReglaProductoNoExiste, r.SKU)
 	}
-	// Un combo o un plato no se reponen: lo que se compra son sus componentes, y
-	// una regla sobre ellos pediría un producto que nunca entra al almacén.
-	if p.EsCombo || p.EsPlato {
+	/* ACÁ NO SE PREGUNTA SeStockea, y la diferencia es deliberada.
+	 *
+	 * El reabastecimiento genera SOLICITUDES DE COMPRA, así que la pregunta no es
+	 * «¿esto tiene existencia?» sino «¿esto se repone COMPRÁNDOLO?». Un plato que se
+	 * fabrica para stock sí tiene existencia —está en la vitrina y se cuenta— pero se
+	 * repone fabricándolo: una regla sobre él le pediría tortas al proveedor.
+	 *
+	 * Lo que sí faltaba era el SERVICIO: no se stockea ni se compra, y se colaba.
+	 */
+	if p.EsCombo || p.EsPlato || p.EsServicio {
 		return inventario.ReglaReabastecimiento{}, fmt.Errorf("%w: %s", ErrComboNoStockeable, r.SKU)
 	}
 	if err := validarNivelesRegla(r); err != nil {

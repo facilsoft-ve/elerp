@@ -158,7 +158,12 @@ func (s *Service) alcanceDelPlan(empresaID string, p inventario.PlanConteo) []Li
 	}
 	rubro := strings.TrimSpace(p.Rubro)
 	for _, prod := range s.productos.List(empresaID) {
-		if prod.EsCombo || prod.EsPlato {
+		// Se cuenta lo que se puede contar, que es la pregunta de SeStockea. Acá
+		// decía «combo o plato» y dejaba fuera de la hoja el PLATO QUE SE FABRICA
+		// PARA STOCK: ese está en la vitrina, tiene existencia y se cuenta como
+		// cualquier cosa — quedaba invisible para el recuento y su ajuste nunca
+		// llegaba. También se cuela un servicio, que no se cuenta nunca.
+		if !prod.SeStockea() {
 			continue
 		}
 		if rubro != "" && prod.Rubro != rubro {

@@ -204,6 +204,48 @@ func TestDiagnostico_NoAcusaLaTransferencia(t *testing.T) {
 	}
 }
 
+// TestProyecciones_LaSedeYElAlmacenListanLoMismo fija la coherencia que faltaba.
+//
+// «Qué productos tienen existencia» se respondía en cinco sitios y cada uno decía
+// algo distinto: la proyección por sede preguntaba a SeStockea, la de almacén
+// excluía «combo o servicio» —dejando pasar el plato bajo pedido, que no tiene
+// existencia propia— y la hoja de conteo excluía «combo o plato», dejando FUERA el
+// plato que se fabrica para stock, que está en la vitrina y sí se cuenta.
+//
+// En la demostración del restaurante eso daba un postre con 17 unidades en el
+// almacén y ausente del listado de la sede: el mismo stock contado con dos reglas.
+func TestProyecciones_LaSedeYElAlmacenListanLoMismo(t *testing.T) {
+	svc := servicioCompleto(t)
+	alm := almacenPrincipalID(t, svc)
+
+	enSede := map[string]bool{}
+	for _, e := range svc.Existencias(empDemo, sede1) {
+		enSede[e.SKU] = true
+	}
+	filas, err := svc.ExistenciasDeAlmacen(empDemo, alm)
+	if err != nil {
+		t.Fatalf("existencias del almacén: %v", err)
+	}
+	if len(filas) == 0 {
+		t.Fatal("el almacén no listó nada; el test no probó nada")
+	}
+	for _, f := range filas {
+		if !enSede[f.SKU] {
+			t.Errorf("%s aparece en el almacén y no en la sede: las dos proyecciones usan criterios distintos", f.SKU)
+		}
+	}
+	// Y al revés: lo que la sede lista tiene que poder mirarse por almacén.
+	enAlmacen := map[string]bool{}
+	for _, f := range filas {
+		enAlmacen[f.SKU] = true
+	}
+	for sku := range enSede {
+		if !enAlmacen[sku] {
+			t.Errorf("%s aparece en la sede y no en el almacén", sku)
+		}
+	}
+}
+
 // TestDiagnostico_VeLosIdsRepetidos: dos movimientos con el mismo id no rompen
 // ninguna suma —el fold recorre la lista— pero envenenan todo lo que INDEXA por id:
 // asentar uno da por asentado al otro, y el rastro de lotes enlaza al equivocado.
@@ -230,5 +272,47 @@ func TestDiagnostico_VeLosIdsRepetidos(t *testing.T) {
 	}
 	if hs[0].Ref != "mov_colision" {
 		t.Errorf("el hallazgo debe señalar el id colisionado, señala %q", hs[0].Ref)
+	}
+}
+
+// TestRecontabilizarCompras_AsientaLaRecepcionHuerfana: una orden que llegó a la
+// base ya recibida —como las siembra el seed— movió inventario sin que la
+// contabilidad se enterara. Se asienta contra la CUENTA POR PAGAR, no contra
+// capital: la mercancía se le debe al proveedor.
+func TestRecontabilizarCompras_AsientaLaRecepcionHuerfana(t *testing.T) {
+	svc, st := nuevoServicio(t)
+	svc.ConAlmacenes(st.Almacenes)
+	svc.ConSedes(st.Sedes)
+	sku := primerSKU(t, svc)
+	p, _ := svc.ProductoPorSKU(empDemo, sku)
+
+	ocs := svc.OrdenesCompra(empDemo)
+	if len(ocs) == 0 {
+		t.Skip("el seed no trae órdenes de compra")
+	}
+	oc := ocs[0]
+	st.Movimientos.Append(inventario.Movimiento{
+		EmpresaID: empDemo, SedeID: sede1, ProductoID: p.ID, SKU: sku,
+		Tipo: inventario.MovEntrada, Cantidad: 10, CostoUnitario: 50,
+		RefTipo: "compra", RefID: oc.ID,
+		Motivo: "recepción sembrada", Actor: actorA, Fecha: "2026-01-01T00:00:00Z",
+	})
+
+	antes := len(hallazgosDe(svc.DiagnosticarInventario(empDemo), application.ClaseDocumentoSinAsiento))
+	if antes == 0 {
+		t.Fatal("el diagnóstico no vio la recepción sin asiento")
+	}
+	if n := svc.RecontabilizarComprasPendientes(empDemo, "sistema"); n == 0 {
+		t.Fatal("no asentó ninguna recepción")
+	}
+	// Y ya no la acusa: el hallazgo desapareció porque se arregló, no porque se calle.
+	for _, h := range hallazgosDe(svc.DiagnosticarInventario(empDemo), application.ClaseDocumentoSinAsiento) {
+		if h.Ref == oc.ID {
+			t.Error("la recepción sigue acusada tras asentarla")
+		}
+	}
+	// Idempotente: correrlo otra vez no duplica el asiento.
+	if n := svc.RecontabilizarComprasPendientes(empDemo, "sistema"); n != 0 {
+		t.Errorf("la segunda pasada asentó %d recepción(es); debía ser idempotente", n)
 	}
 }

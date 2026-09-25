@@ -97,7 +97,21 @@ func (s *Store) seedFabricacion(empID, sedeID string) {
 
 	crear := func(estado string, objetivo, producida float64, horas int) fabricacion.Orden {
 		num++
+		/* EL ID VA PUESTO DESDE EL PRINCIPIO, y no es una preferencia de estilo.
+		 *
+		 * Los movimientos de la orden se anexan con `RefID: o.ID` ANTES del Append que
+		 * se lo asignaba, así que salían todos con la referencia VACÍA: movimientos
+		 * que decían venir de una fabricación sin decir de cuál. Nada fallaba —la
+		 * existencia es la suma de las cantidades, y esa estaba bien— pero la orden y
+		 * su consumo quedaban sin enlace, y con él se pierde todo lo que se apoya en
+		 * la referencia: asentarlos después, rastrearlos, o siquiera saber que les
+		 * falta el asiento.
+		 *
+		 * Lleva la empresa por la misma razón que los ids de movimiento: el contador
+		 * global se reinicia en cada arranque y el seed escribe en una base que
+		 * persiste entre ellos (ver idDeMovimiento). */
 		o := fabricacion.Orden{
+			ID:        fmt.Sprintf("of_%s_%d", empID, num),
 			EmpresaID: empID, SedeID: sedeID,
 			Numero: num, NumeroCompleto: fmt.Sprintf("OF-%06d", num),
 			ProductoID: brownie.ID, SKU: brownie.SKU, Nombre: brownie.Nombre,
@@ -218,7 +232,10 @@ func (s *Store) seedRecetarioFarmacia(empID, sedeID string) {
 		num++
 		inicio := hace(horas)
 		fin := hace(horas - 1)
+		// El id, desde el principio: ver la nota de arriba (los movimientos lo
+		// referencian antes de que el Append pudiera asignarlo).
 		o := fabricacion.Orden{
+			ID:        fmt.Sprintf("of_%s_%d", empID, num),
 			EmpresaID: empID, SedeID: sedeID,
 			Numero: num, NumeroCompleto: fmt.Sprintf("OF-%06d", num),
 			ProductoID: p.ID, SKU: p.SKU, Nombre: p.Nombre,

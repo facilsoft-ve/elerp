@@ -116,7 +116,7 @@ func (s *Service) validarPlato(empresaID string, p *inventario.Producto) error {
 		 * sándwich la consume como cualquier insumo. Lo que sigue prohibido es
 		 * anidar un plato BAJO PEDIDO: ese no tiene existencia, así que no hay nada
 		 * que consumir — la orden pediría algo que no está en ningún estante. */
-		if ins.EsCombo || (ins.EsPlato && !ins.SeFabricaParaStock()) {
+		if !ins.SeStockea() {
 			return fmt.Errorf("%w: %s", ErrPlatoAnidado, sku)
 		}
 		p.Receta[i].SKU = sku
@@ -756,7 +756,12 @@ func (s *Service) ExistenciasDeAlmacen(empresaID, almacenID string) ([]Existenci
 	prods := s.productos.List(empresaID)
 	out := make([]ExistenciaView, 0, len(prods))
 	for _, p := range prods {
-		if p.EsCombo || p.EsServicio {
+		// MISMO CRITERIO QUE LA PROYECCIÓN POR SEDE, y por eso se pregunta a
+		// SeStockea en vez de repetir la condición: acá decía «combo o servicio» y
+		// dejaba pasar los platos bajo pedido, que no tienen existencia propia. El
+		// resultado era un producto con 17 unidades en el almacén y ausente del
+		// listado de la sede — el mismo stock contado con dos reglas distintas.
+		if !p.SeStockea() {
 			continue
 		}
 		cant, avg := fold(s.movsDeAlmacen(empresaID, alm, inventario.FiltroMovimiento{ProductoID: p.ID}))
