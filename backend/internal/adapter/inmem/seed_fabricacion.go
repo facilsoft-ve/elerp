@@ -118,7 +118,7 @@ func (s *Store) seedFabricacion(empID, sedeID string) {
 			Cuando: o.Iniciada, Estado: fabricacion.EstadoEnProceso, Actor: application.DemoUserID,
 		})
 		for _, c := range consumos {
-			s.Movimientos.Append(inventario.Movimiento{
+			s.appendMov(inventario.Movimiento{
 				EmpresaID: empID, SedeID: sedeID, ProductoID: c.ProductoID, SKU: c.SKU,
 				Tipo: inventario.MovSalida, Cantidad: -c.Cantidad, CostoUnitario: c.CostoUnitario,
 				Motivo:  "fabricación " + o.NumeroCompleto,
@@ -141,7 +141,7 @@ func (s *Store) seedFabricacion(empID, sedeID string) {
 		o.Bitacora = append(o.Bitacora, fabricacion.Evento{
 			Cuando: o.Terminada, Estado: fabricacion.EstadoTerminada, Actor: application.DemoUserID,
 		})
-		s.Movimientos.Append(inventario.Movimiento{
+		s.appendMov(inventario.Movimiento{
 			EmpresaID: empID, SedeID: sedeID, ProductoID: brownie.ID, SKU: brownie.SKU,
 			Tipo: inventario.MovEntrada, Cantidad: producida, CostoUnitario: o.CostoUnitario,
 			Motivo:  "fabricación " + o.NumeroCompleto,
@@ -248,7 +248,7 @@ func (s *Store) seedRecetarioFarmacia(empID, sedeID string) {
 			}
 			o.Consumos = append(o.Consumos, c)
 			o.CostoTotal = r2Semilla(o.CostoTotal + c.Total())
-			s.Movimientos.Append(inventario.Movimiento{
+			s.appendMov(inventario.Movimiento{
 				EmpresaID: empID, SedeID: sedeID, ProductoID: c.ProductoID, SKU: c.SKU,
 				Tipo: inventario.MovSalida, Cantidad: -c.Cantidad, CostoUnitario: c.CostoUnitario,
 				Motivo: "preparación " + o.NumeroCompleto, RefTipo: application.RefFabricacion, RefID: o.ID,
@@ -268,7 +268,7 @@ func (s *Store) seedRecetarioFarmacia(empID, sedeID string) {
 		o.Bitacora = append(o.Bitacora, fabricacion.Evento{
 			Cuando: o.Terminada, Estado: fabricacion.EstadoTerminada, Actor: application.DemoUserID,
 		})
-		s.Movimientos.Append(inventario.Movimiento{
+		s.appendMov(inventario.Movimiento{
 			EmpresaID: empID, SedeID: sedeID, ProductoID: p.ID, SKU: p.SKU,
 			Tipo: inventario.MovEntrada, Cantidad: producida, CostoUnitario: o.CostoUnitario,
 			Lote: o.Lote, Vencimiento: o.Vencimiento,

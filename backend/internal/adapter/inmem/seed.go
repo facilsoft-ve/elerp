@@ -8,6 +8,7 @@ import (
 	"github.com/mornix/elerp/internal/application"
 	"github.com/mornix/elerp/internal/domain/cliente"
 
+	"github.com/mornix/elerp/internal/domain/almacen"
 	"github.com/mornix/elerp/internal/domain/aplicacion"
 	"github.com/mornix/elerp/internal/domain/caja"
 	"github.com/mornix/elerp/internal/domain/compra"
@@ -400,7 +401,7 @@ func (s *Store) seedDemo() {
 		if c.cant <= 0 {
 			continue
 		}
-		s.Movimientos.Append(inventario.Movimiento{
+		s.appendMov(inventario.Movimiento{
 			EmpresaID: demoEmpID, SedeID: demoSede1ID, ProductoID: p.ID, SKU: p.SKU,
 			Tipo: inventario.MovEntrada, Cantidad: c.cant, CostoUnitario: c.costo,
 			Motivo: "inventario inicial", Actor: application.DemoUserID, Fecha: fecha,
@@ -414,7 +415,7 @@ func (s *Store) seedDemo() {
 	// el asiento entero, no una de sus patas—, así que nada lo delataba hasta que el
 	// informe de valoración las comparó.
 	if p, ok := s.Productos.BySKU(demoEmpID, "HAR-001"); ok {
-		s.Movimientos.Append(inventario.Movimiento{
+		s.appendMov(inventario.Movimiento{
 			EmpresaID: demoEmpID, SedeID: demoSede1ID, ProductoID: p.ID, SKU: p.SKU,
 			Tipo: inventario.MovSalida, Cantidad: -15, Motivo: "venta mostrador",
 			// Con su costo: una salida sin costo saca las unidades del Kardex y no
@@ -443,7 +444,7 @@ func (s *Store) seedDemo() {
 			continue
 		}
 		if p, ok := s.Productos.BySKU(demoEmpID, e.sku); ok {
-			s.Movimientos.Append(inventario.Movimiento{
+			s.appendMov(inventario.Movimiento{
 				EmpresaID: demoEmpID, SedeID: demoSede2ID, ProductoID: p.ID, SKU: p.SKU,
 				Tipo: inventario.MovEntrada, Cantidad: e.cant, CostoUnitario: p.Precio * 0.7,
 				Motivo: "inventario inicial", Actor: application.DemoUserID, Fecha: fecha,
@@ -454,7 +455,7 @@ func (s *Store) seedDemo() {
 	// Un ajuste auditado con motivo, para que el Kardex muestre los tres tipos
 	// de movimiento (entrada, salida y ajuste).
 	if p, ok := s.Productos.BySKU(demoEmpID, "JAB-001"); ok {
-		s.Movimientos.Append(inventario.Movimiento{
+		s.appendMov(inventario.Movimiento{
 			EmpresaID: demoEmpID, SedeID: demoSede1ID, ProductoID: p.ID, SKU: p.SKU,
 			Tipo: inventario.MovAjuste, Cantidad: -4, Motivo: "merma por rotura en almacén",
 			// EL COSTO VA, y no es un detalle: un ajuste sin costo baja las unidades
@@ -671,7 +672,7 @@ func (s *Store) seedDemo() {
 		if tipo != fiscal.TipoFactura {
 			signo = 1.0
 		}
-		s.Movimientos.Append(inventario.Movimiento{
+		s.appendMov(inventario.Movimiento{
 			EmpresaID: demoEmpID, SedeID: demoSede1ID, ProductoID: prod.ID, SKU: prod.SKU,
 			Tipo:     map[bool]string{true: inventario.MovSalida, false: inventario.MovEntrada}[signo < 0],
 			Cantidad: signo * cant, CostoUnitario: costoPorSKU[prod.SKU],
@@ -1174,14 +1175,18 @@ func (s *Store) seedDemo() {
 // Snapshot expone todos los registros sembrados (para que el adaptador Mongo
 // siembre desde la misma fuente que in-memory).
 type Snapshot struct {
-	Orgs           []organizacion.Organizacion
-	Empresas       []empresa.Empresa
-	Sedes          []sede.Sede
-	Usuarios       []usuario.Usuario
-	Membresias     []usuario.Membresia
-	Rubros         []inventario.Rubro
-	Productos      []inventario.Producto
-	Movimientos    []inventario.Movimiento
+	Orgs        []organizacion.Organizacion
+	Empresas    []empresa.Empresa
+	Sedes       []sede.Sede
+	Usuarios    []usuario.Usuario
+	Membresias  []usuario.Membresia
+	Rubros      []inventario.Rubro
+	Productos   []inventario.Producto
+	Movimientos []inventario.Movimiento
+	// Los ALMACENES van con los movimientos y no después: cada movimiento sembrado
+	// referencia el suyo, y un almacenId que no resuelve deja el stock bajo «Sin
+	// almacén» —con los datos diciendo lo contrario— en vez de fallar.
+	Almacenes      []almacen.Almacen
 	Clientes       []cliente.Cliente
 	CuentasCobro   []fiscal.CuentaCobro
 	MetodosPago    []fiscal.MetodoPago
@@ -1225,6 +1230,7 @@ func (s *Store) Snapshot() Snapshot {
 		Rubros:         s.Rubros.List(demoEmpID),
 		Productos:      s.Productos.List(demoEmpID),
 		Movimientos:    s.Movimientos.List(demoEmpID, inventario.FiltroMovimiento{}),
+		Almacenes:      s.Almacenes.List(demoEmpID),
 		Clientes:       s.Clientes.List(demoEmpID),
 		CuentasCobro:   s.CuentasCobro.List(demoEmpID),
 		MetodosPago:    s.MetodosPago.List(demoEmpID),

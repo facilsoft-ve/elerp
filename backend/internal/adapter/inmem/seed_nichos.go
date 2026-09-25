@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mornix/elerp/internal/application"
+	"github.com/mornix/elerp/internal/domain/almacen"
 	"github.com/mornix/elerp/internal/domain/aplicacion"
 	"github.com/mornix/elerp/internal/domain/caja"
 	"github.com/mornix/elerp/internal/domain/cliente"
@@ -240,7 +241,7 @@ func (s *Store) seedEmpresaNicho(e especNicho) {
 		if p.stock <= 0 {
 			continue
 		}
-		s.Movimientos.Append(inventario.Movimiento{
+		s.appendMov(inventario.Movimiento{
 			EmpresaID: e.empID, SedeID: e.sedeID, ProductoID: prod.ID, SKU: prod.SKU,
 			Tipo: inventario.MovEntrada, Cantidad: p.stock, CostoUnitario: p.costo,
 			Motivo: "inventario inicial", Actor: application.DemoUserID, Fecha: fecha,
@@ -338,11 +339,15 @@ type SnapshotEmpresa struct {
 	Rubros      []inventario.Rubro
 	Productos   []inventario.Producto
 	Movimientos []inventario.Movimiento
-	Clientes    []cliente.Cliente
-	Modulos     []aplicacion.Instalacion
-	Mesas       []mesa.Mesa
-	Plano       mesa.Plano
-	TienePlano  bool
+	// Los ALMACENES van con los movimientos y no después: cada movimiento sembrado
+	// referencia el suyo, y un almacenId que no resuelve deja el stock bajo «Sin
+	// almacén» —con los datos diciendo lo contrario— en vez de fallar.
+	Almacenes  []almacen.Almacen
+	Clientes   []cliente.Cliente
+	Modulos    []aplicacion.Instalacion
+	Mesas      []mesa.Mesa
+	Plano      mesa.Plano
+	TienePlano bool
 
 	// Operación (ver seed_nichos_operacion.go).
 	Usuarios     []usuario.Usuario
@@ -419,6 +424,7 @@ func (s *Store) SnapshotNicho(n NichoDemo) SnapshotEmpresa {
 		Rubros:      s.Rubros.List(n.EmpresaID),
 		Productos:   s.Productos.List(n.EmpresaID),
 		Movimientos: s.Movimientos.List(n.EmpresaID, inventario.FiltroMovimiento{}),
+		Almacenes:   s.Almacenes.List(n.EmpresaID),
 		Clientes:    s.Clientes.List(n.EmpresaID),
 		Modulos:     s.Modulos.List(n.EmpresaID),
 		Mesas:       s.Mesas.List(n.EmpresaID, ""),

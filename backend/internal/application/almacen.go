@@ -121,6 +121,32 @@ func (s *Service) almacenAtribuido(empresaID string, m inventario.Movimiento) st
 	return ""
 }
 
+// etiquetaDeAlmacen nombra un almacén para un informe que cruza sedes, añadiendo la
+// sede SOLO si otra tiene un almacén que se llama igual.
+//
+// Cada sede nace con su «Almacén Principal», así que en cuanto hay dos sedes el
+// nombre a secas deja de identificar nada. Se añade la sede solo cuando hace falta
+// porque en el caso normal —una sede— «Almacén Principal (Sede Principal)» es ruido.
+func (s *Service) etiquetaDeAlmacen(empresaID string, a almacen.Almacen) string {
+	if s.almacenes == nil {
+		return a.Nombre
+	}
+	repetido := false
+	for _, otro := range s.almacenes.List(empresaID) {
+		if otro.ID != a.ID && strings.EqualFold(strings.TrimSpace(otro.Nombre), strings.TrimSpace(a.Nombre)) {
+			repetido = true
+			break
+		}
+	}
+	if !repetido {
+		return a.Nombre
+	}
+	if sede := s.nombreSede(s.sedesDeEmpresa(empresaID), a.SedeID); sede != "" && sede != a.SedeID {
+		return a.Nombre + " (" + sede + ")"
+	}
+	return a.Nombre
+}
+
 // esAlmacenPrincipal indica si el almacén dado es el principal de su sede (usado
 // por las proyecciones por almacén para la retrocompat de movimientos sin almacén).
 func (s *Service) esAlmacenPrincipal(empresaID string, a almacen.Almacen) bool {

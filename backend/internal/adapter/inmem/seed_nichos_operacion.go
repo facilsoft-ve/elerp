@@ -334,7 +334,7 @@ func (s *Store) emitirNicho(e especNicho, em emisionNicho) fiscal.Documento {
 		if salida {
 			signo, tipoMov = -1.0, inventario.MovSalida
 		}
-		s.Movimientos.Append(inventario.Movimiento{
+		s.appendMov(inventario.Movimiento{
 			EmpresaID: e.empID, SedeID: e.sedeID, ProductoID: p2.ID, SKU: p2.SKU,
 			Tipo: tipoMov, Cantidad: signo * c.cantidad, CostoUnitario: e.costoDe(c.sku),
 			Motivo: "venta " + doc.NumeroCompleto, RefTipo: "documento", RefID: doc.ID,

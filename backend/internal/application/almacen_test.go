@@ -15,18 +15,25 @@ func servicioAlmacenes(t *testing.T) *application.Service {
 	return svc
 }
 
+// sedeVirgen es una sede SIN nada sembrado. Las sedes del seed ya vienen con su
+// "Almacén Principal" —lo crea al sembrar los movimientos, igual que el backfill
+// del arranque lo crea en producción—, así que probar aquí «el primero nace
+// principal» daría siempre el segundo. La regla es del dominio y no depende de qué
+// sede sea, de modo que se prueba donde se puede ver: en una que empieza vacía.
+const sedeVirgen = "sede_sin_sembrar"
+
 // El primer almacén de una sede nace como principal; marcar otro principal degrada
 // al anterior (exactamente uno principal por sede).
 func TestAlmacen_PrimeroEsPrincipalYSoloUno(t *testing.T) {
 	svc := servicioAlmacenes(t)
-	a1, err := svc.CrearAlmacen(empDemo, actorA, origenTst, almacen.Almacen{SedeID: sede1, Nombre: "Principal"})
+	a1, err := svc.CrearAlmacen(empDemo, actorA, origenTst, almacen.Almacen{SedeID: sedeVirgen, Nombre: "Principal"})
 	if err != nil {
 		t.Fatalf("crear a1: %v", err)
 	}
 	if !a1.Principal {
 		t.Error("el primer almacén de la sede debe quedar como principal")
 	}
-	a2, err := svc.CrearAlmacen(empDemo, actorA, origenTst, almacen.Almacen{SedeID: sede1, Nombre: "Depósito", Tipo: "Refrigerado"})
+	a2, err := svc.CrearAlmacen(empDemo, actorA, origenTst, almacen.Almacen{SedeID: sedeVirgen, Nombre: "Depósito", Tipo: "Refrigerado"})
 	if err != nil {
 		t.Fatalf("crear a2 (tipo Refrigerado): %v", err)
 	}
@@ -40,7 +47,7 @@ func TestAlmacen_PrimeroEsPrincipalYSoloUno(t *testing.T) {
 	if _, err := svc.ActualizarAlmacen(empDemo, a2.ID, actorA, origenTst, almacen.Almacen{Nombre: "Depósito", Tipo: "refrigerado", Principal: true}, nil); err != nil {
 		t.Fatalf("marcar a2 principal: %v", err)
 	}
-	prin, ok := svc.AlmacenPrincipalDe(empDemo, sede1)
+	prin, ok := svc.AlmacenPrincipalDe(empDemo, sedeVirgen)
 	if !ok || prin.ID != a2.ID {
 		t.Errorf("el principal de la sede debe ser a2 (%s), es %+v", a2.ID, prin)
 	}
@@ -48,13 +55,13 @@ func TestAlmacen_PrimeroEsPrincipalYSoloUno(t *testing.T) {
 
 func TestAlmacen_NoDesactivarPrincipalNiUltimo(t *testing.T) {
 	svc := servicioAlmacenes(t)
-	a1, _ := svc.CrearAlmacen(empDemo, actorA, origenTst, almacen.Almacen{SedeID: sede1, Nombre: "Principal"})
+	a1, _ := svc.CrearAlmacen(empDemo, actorA, origenTst, almacen.Almacen{SedeID: sedeVirgen, Nombre: "Principal"})
 	// Único y principal: no se puede desactivar (ambas reglas aplican).
 	if err := svc.DesactivarAlmacen(empDemo, a1.ID, actorA, origenTst); !errors.Is(err, application.ErrAlmacenPrincipal) {
 		t.Errorf("desactivar el principal debe dar ErrAlmacenPrincipal, se obtuvo %v", err)
 	}
 	// Con un segundo no-principal, ese sí se puede desactivar; el principal no.
-	a2, _ := svc.CrearAlmacen(empDemo, actorA, origenTst, almacen.Almacen{SedeID: sede1, Nombre: "Depósito"})
+	a2, _ := svc.CrearAlmacen(empDemo, actorA, origenTst, almacen.Almacen{SedeID: sedeVirgen, Nombre: "Depósito"})
 	if err := svc.DesactivarAlmacen(empDemo, a2.ID, actorA, origenTst); err != nil {
 		t.Errorf("desactivar un almacén no principal debía funcionar, se obtuvo %v", err)
 	}

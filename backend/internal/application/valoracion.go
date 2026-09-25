@@ -125,6 +125,7 @@ func (s *Service) Valoracion(empresaID, sedeID string) ValoracionResult {
 
 	valorPorAlmacen := map[string]float64{}
 	lineasPorAlmacen := map[string]int{}
+	nombreDeAlmacen := map[string]string{}
 	valorPorCuenta := map[string]float64{}
 	lineasPorCuenta := map[string]int{}
 
@@ -143,9 +144,12 @@ func (s *Service) Valoracion(empresaID, sedeID string) ValoracionResult {
 			Cantidad: round2(cant), CostoPromedio: round2(costo[costoClave(k.Producto, k.Sede)]),
 			Valor: round2(cant * costo[costoClave(k.Producto, k.Sede)]),
 		}
+		// El nombre lleva la SEDE cuando hace falta distinguir: cada sede tiene su
+		// «Almacén Principal», así que dos sedes dan dos almacenes homónimos y a
+		// secas no se sabe cuál es cuál.
 		f.AlmacenNombre = "Sin almacén"
 		if a, ok := s.almacenes.ByID(empresaID, k.Almacen); ok {
-			f.AlmacenNombre = a.Nombre
+			f.AlmacenNombre = s.etiquetaDeAlmacen(empresaID, a)
 		}
 		f.Ubicacion = "SIN UBICAR"
 		if k.Ubicacion != "" && s.ubicaciones != nil {
@@ -157,8 +161,12 @@ func (s *Service) Valoracion(empresaID, sedeID string) ValoracionResult {
 		}
 		res.Filas = append(res.Filas, f)
 		res.ValorTotal += f.Valor
-		valorPorAlmacen[f.AlmacenNombre] += f.Valor
-		lineasPorAlmacen[f.AlmacenNombre]++
+		// Se agrupa por ID, NO por nombre: dos almacenes homónimos de sedes
+		// distintas se fundían en una fila que sumaba el stock de los dos y no
+		// correspondía a ningún almacén real.
+		valorPorAlmacen[k.Almacen] += f.Valor
+		lineasPorAlmacen[k.Almacen]++
+		nombreDeAlmacen[k.Almacen] = f.AlmacenNombre
 		valorPorCuenta[cuenta] += f.Valor
 		lineasPorCuenta[cuenta]++
 	}
@@ -174,9 +182,9 @@ func (s *Service) Valoracion(empresaID, sedeID string) ValoracionResult {
 		return res.Filas[i].SKU < res.Filas[j].SKU
 	})
 
-	for nombre, valor := range valorPorAlmacen {
+	for id, valor := range valorPorAlmacen {
 		res.PorAlmacen = append(res.PorAlmacen, TotalValoracion{
-			Clave: nombre, Nombre: nombre, Valor: round2(valor), Lineas: lineasPorAlmacen[nombre], Cuadra: true,
+			Clave: id, Nombre: nombreDeAlmacen[id], Valor: round2(valor), Lineas: lineasPorAlmacen[id], Cuadra: true,
 		})
 	}
 	sort.SliceStable(res.PorAlmacen, func(i, j int) bool { return res.PorAlmacen[i].Nombre < res.PorAlmacen[j].Nombre })

@@ -251,10 +251,16 @@ func Seed(db *gomongo.Database) {
 		for _, pr := range snap.Productos {
 			st.Productos.c.insert(pr)
 		}
+		// Los almacenes ANTES que los movimientos: cada movimiento sembrado
+		// referencia el suyo, y un almacenId que no resuelve no falla —deja el stock
+		// bajo «Sin almacén» mientras el dato dice otra cosa—.
+		for _, a := range snap.Almacenes {
+			st.Almacenes.c.insert(a)
+		}
 		for _, mv := range snap.Movimientos {
 			st.Movimientos.c.insert(mv)
 		}
-		log.Printf("Mongo: sembrados %d productos y %d movimientos", len(snap.Productos), len(snap.Movimientos))
+		log.Printf("Mongo: sembrados %d productos, %d movimientos y %d almacén(es)", len(snap.Productos), len(snap.Movimientos), len(snap.Almacenes))
 	} else {
 		// La base ya tiene catálogo, pero puede haberse sembrado antes de que la
 		// demo cubriera un caso nuevo (p. ej. el producto con precio en US$ de

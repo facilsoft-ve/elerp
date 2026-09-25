@@ -81,10 +81,16 @@ func sembrarNichos(st *Store, semilla *inmem.Store, refrescar bool) {
 			for _, pr := range snap.Productos {
 				st.Productos.c.insert(pr)
 			}
+			// Los almacenes ANTES que los movimientos: cada movimiento sembrado
+			// referencia el suyo, y un almacenId que no resuelve no falla —deja el
+			// stock bajo «Sin almacén» mientras el dato dice otra cosa—.
+			for _, a := range snap.Almacenes {
+				st.Almacenes.c.insert(a)
+			}
 			for _, mv := range snap.Movimientos {
 				st.Movimientos.c.insert(mv)
 			}
-			log.Printf("Mongo: %s → %d productos y %d movimientos", n.Giro, len(snap.Productos), len(snap.Movimientos))
+			log.Printf("Mongo: %s → %d productos, %d movimientos y %d almacén(es)", n.Giro, len(snap.Productos), len(snap.Movimientos), len(snap.Almacenes))
 		}
 
 		// Puesta al día del CATÁLOGO demo (solo tenants demo).

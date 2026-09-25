@@ -191,6 +191,52 @@ func TestValoracion_LoQueNoTieneAlmacenCuentaEnElPrincipal(t *testing.T) {
 	}
 }
 
+// TestValoracion_DosAlmacenesHomonimosNoSeFunden: el desglose agrupaba por NOMBRE,
+// y como cada sede nace con su «Almacén Principal», dos sedes daban una sola fila
+// que sumaba el stock de ambas — un almacén que no existe, con un valor que no es
+// de nadie. Se agrupa por id, y el nombre lleva la sede cuando se repite.
+func TestValoracion_DosAlmacenesHomonimosNoSeFunden(t *testing.T) {
+	svc := servicioCompleto(t)
+	sku := primerSKU(t, svc)
+	// Stock en las dos sedes; cada una resuelve a su propio almacén principal.
+	if _, err := svc.Ajustar(empDemo, sede1, "", sku, "carga", 4, actorA, origenTst); err != nil {
+		t.Fatalf("ajustar sede1: %v", err)
+	}
+	if _, err := svc.Ajustar(empDemo, sede2, "", sku, "carga", 6, actorA, origenTst); err != nil {
+		t.Fatalf("ajustar sede2: %v", err)
+	}
+	a1 := almacenPrincipalID(t, svc)
+	a2, err := svc.AsegurarAlmacenPrincipal(empDemo, sede2, "sistema", origenTst)
+	if err != nil {
+		t.Fatalf("almacén de sede2: %v", err)
+	}
+	if a1 == a2.ID {
+		t.Fatal("las dos sedes comparten almacén; el caso no se está probando")
+	}
+
+	v := svc.Valoracion(empDemo, "")
+	claves := map[string]bool{}
+	for _, tot := range v.PorAlmacen {
+		if claves[tot.Clave] {
+			t.Errorf("el almacén %q aparece dos veces en el desglose", tot.Clave)
+		}
+		claves[tot.Clave] = true
+	}
+	if !claves[a1] || !claves[a2.ID] {
+		t.Errorf("faltan almacenes en el desglose: %v (esperaba %s y %s)", claves, a1, a2.ID)
+	}
+	// Y con el nombre repetido, la etiqueta tiene que distinguirlos.
+	nombres := map[string]int{}
+	for _, tot := range v.PorAlmacen {
+		nombres[tot.Nombre]++
+	}
+	for n, veces := range nombres {
+		if veces > 1 {
+			t.Errorf("%d almacenes distintos se muestran como %q", veces, n)
+		}
+	}
+}
+
 // TestCorregirCosto_CambiaElValorNoLasUnidades es la prueba central de la
 // corrección: mueve lo que vale, no cuánto hay.
 func TestCorregirCosto_CambiaElValorNoLasUnidades(t *testing.T) {
