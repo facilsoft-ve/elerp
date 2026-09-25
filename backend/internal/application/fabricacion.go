@@ -232,6 +232,9 @@ func (s *Service) IniciarOrden(empresaID, id, actor, origen string) (fabricacion
 	o.Iniciada = ahora()
 	o = s.marcarOrden(o, fabricacion.EstadoEnProceso, actor, "")
 	out, _ := s.ordenesFabricacion.Update(o)
+	// El valor de los insumos pasa a Producción en proceso: salieron del almacén y
+	// todavía no son producto (ver asentarArranqueDeFabricacion).
+	s.asentarArranqueDeFabricacion(empresaID, actor, out)
 	s.audit.Append(evento(empresaID, actor, origen, "fabricacion.orden.iniciar", out.NumeroCompleto,
 		fmt.Sprintf("%d insumo(s) por %.2f", len(out.Consumos), out.CostoTotal)))
 	return out, nil
@@ -387,6 +390,11 @@ func (s *Service) CancelarOrden(empresaID, id, motivo, actor, origen string) (fa
 			})
 		}
 	}
+	// El asiento ANTES de marcarla cancelada: lee los consumos, que siguen en la
+	// orden, y devuelve a las cuentas de los insumos lo que quedó en curso.
+	if o.Estado == fabricacion.EstadoEnProceso {
+		s.asentarCancelacionDeFabricacion(empresaID, actor, o)
+	}
 	o = s.marcarOrden(o, fabricacion.EstadoCancelada, actor, motivo)
 	out, _ := s.ordenesFabricacion.Update(o)
 	s.audit.Append(evento(empresaID, actor, origen, "fabricacion.orden.cancelar", out.NumeroCompleto, motivo))
@@ -435,41 +443,107 @@ func (s *Service) marcarOrden(o fabricacion.Orden, estado, actor, nota string) f
 	return o
 }
 
-/* asentarFabricacion mueve el valor entre cuentas de inventario.
+/* LA FABRICACIÓN SE ASIENTA EN DOS TIEMPOS, y ese es el cambio de fondo.
  *
- * FABRICAR NO ES UN GASTO NI UNA GANANCIA: el valor sale de los insumos y entra
- * al producto terminado, y el patrimonio no cambia. Por eso acá NO se asienta
- * costo de ventas —eso declararía un gasto que no ocurrió— y solo se asienta
- * cuando insumos y producto terminado viven en cuentas DISTINTAS, que es cuando
- * el valor sí cambió de sitio.
+ * Antes solo se asentaba AL TERMINAR, y solo si insumos y producto vivían en
+ * cuentas distintas. El razonamiento era correcto para la foto final —fabricar no
+ * es un gasto ni una ganancia, el valor cambia de forma y el patrimonio no— pero se
+ * olvidaba de la película: ENTRE el arranque y el cierre, los insumos ya salieron
+ * del almacén y el producto todavía no entró. Ese valor no estaba en ninguna parte.
  *
- * Con la misma cuenta para todo (el caso normal) el asiento sería debe y haber
- * sobre la misma línea: cero información y un libro más largo.
+ * El efecto era un descuadre INTERMITENTE: la contabilidad dejaba de cuadrar contra
+ * el inventario mientras la orden estuviera abierta —días, en un taller— y volvía a
+ * cuadrar sola al cerrarla. Un descuadre que se arregla solo es el más caro de
+ * todos: quien lo ve no puede reproducirlo, y quien no lo ve no sabe que existió.
+ *
+ * Ahora el valor tiene dónde estar mientras dura:
+ *
+ *   ARRANCAR   Debe 1202 Producción en proceso / Haber la cuenta de cada insumo
+ *   TERMINAR   Debe la cuenta del producto     / Haber 1202
+ *              (y la merma anormal a costo de ventas, contra 1202)
+ *   CANCELAR   Debe la cuenta de cada insumo   / Haber 1202
+ *
+ * Con esto desaparece la excepción de «misma cuenta, no se asienta»: 1202 nunca es
+ * la cuenta de un producto, así que el asiento siempre dice algo.
  */
+func (s *Service) asentarArranqueDeFabricacion(empresaID, actor string, o fabricacion.Orden) {
+	if s.asientos == nil || o.CostoTotal <= 0.004 {
+		return
+	}
+	salidas := map[string]float64{}
+	total := 0.0
+	for _, c := range o.Consumos {
+		cta := s.cuentaInventarioDe(empresaID, c.ProductoID)
+		salidas[cta] = round2(salidas[cta] + c.Total())
+		total = round2(total + c.Total())
+	}
+	lineas := []contabilidad.Linea{{Codigo: contabilidad.CtaProduccionEnProceso, Debe: total}}
+	for cta, monto := range salidas {
+		lineas = append(lineas, contabilidad.Linea{Codigo: cta, Haber: monto})
+	}
+	s.asentar(empresaID, actor, o.Iniciada,
+		"Insumos a producción "+o.NumeroCompleto+" — "+o.Nombre, RefFabricacion, o.ID, lineas)
+}
+
+// enProduccionDe devuelve cuánto cargó esta orden a Producción en proceso.
+//
+// Se lee del LIBRO y no de la orden porque es lo que hay que descargar: una orden
+// que arrancó antes de que existiera la cuenta —las que estaban en vuelo al
+// desplegar esto— no cargó nada, y acreditarle 1202 la dejaría en negativo por un
+// valor que nunca entró. Con cero, el cierre asienta como antes: directo desde las
+// cuentas de los insumos.
+func (s *Service) enProduccionDe(empresaID, ordenID string) float64 {
+	total := 0.0
+	for _, a := range s.LibroDiario(empresaID) {
+		if a.RefTipo != RefFabricacion || a.RefID != ordenID {
+			continue
+		}
+		for _, l := range a.Lineas {
+			if l.Codigo == contabilidad.CtaProduccionEnProceso {
+				total += l.Debe - l.Haber
+			}
+		}
+	}
+	return round2(total)
+}
+
 func (s *Service) asentarFabricacion(empresaID, actor string, o fabricacion.Orden) {
 	if s.asientos == nil || o.CostoTotal <= 0.004 {
 		return
 	}
 	destino := s.cuentaInventarioDe(empresaID, o.ProductoID)
-	salidas := map[string]float64{}
-	for _, c := range o.Consumos {
-		cta := s.cuentaInventarioDe(empresaID, c.ProductoID)
-		if cta == destino {
-			continue // mismo bolsillo: no hay nada que mover
+	enProceso := s.enProduccionDe(empresaID, o.ID)
+
+	// De dónde sale el valor que entra al producto: de Producción en proceso si la
+	// orden pasó por ahí, y si no de las cuentas de los insumos (retrocompatible con
+	// las órdenes que arrancaron antes de que la cuenta existiera).
+	origen := map[string]float64{}
+	if enProceso > 0.004 {
+		origen[contabilidad.CtaProduccionEnProceso] = enProceso
+	} else {
+		for _, c := range o.Consumos {
+			cta := s.cuentaInventarioDe(empresaID, c.ProductoID)
+			if cta == destino {
+				continue // mismo bolsillo: no hay nada que mover
+			}
+			origen[cta] = round2(origen[cta] + c.Total())
 		}
-		salidas[cta] = round2(salidas[cta] + c.Total())
 	}
-	/* LA PÉRDIDA ANORMAL SALE DEL INVENTARIO Y VA A RESULTADOS.
+
+	/* LA PÉRDIDA ANORMAL SALE DEL VALOR EN CURSO Y VA A RESULTADOS.
 	 *
 	 * Es valor que se consumió y no quedó en ningún producto. Dejarlo dentro del
 	 * inventario lo dejaría contando mercancía que no existe; cargárselo a los
 	 * buenos inflaría su costo. Va a costo del período, que es donde se ve. */
 	if o.PerdidaAnormal > 0.004 {
-		origenPerdida := destino
-		for _, c := range o.Consumos {
-			if cta := s.cuentaInventarioDe(empresaID, c.ProductoID); cta != "" {
-				origenPerdida = cta
-				break
+		origenPerdida := contabilidad.CtaProduccionEnProceso
+		if enProceso <= 0.004 {
+			origenPerdida = destino
+			for _, c := range o.Consumos {
+				if cta := s.cuentaInventarioDe(empresaID, c.ProductoID); cta != "" {
+					origenPerdida = cta
+					break
+				}
 			}
 		}
 		s.asentar(empresaID, actor, o.Terminada,
@@ -478,19 +552,52 @@ func (s *Service) asentarFabricacion(empresaID, actor string, o fabricacion.Orde
 				{Codigo: contabilidad.CtaCostoDeVentas, Debe: o.PerdidaAnormal},
 				{Codigo: origenPerdida, Haber: o.PerdidaAnormal},
 			})
+		// Lo que se fue a resultados ya no entra al producto.
+		if enProceso > 0.004 {
+			origen[contabilidad.CtaProduccionEnProceso] = round2(enProceso - o.PerdidaAnormal)
+		}
 	}
-	if len(salidas) == 0 {
+	if len(origen) == 0 {
 		return
 	}
 	lineas := []contabilidad.Linea{}
 	total := 0.0
-	for cta, monto := range salidas {
+	for cta, monto := range origen {
+		if monto <= 0.004 {
+			continue
+		}
 		lineas = append(lineas, contabilidad.Linea{Codigo: cta, Haber: monto})
 		total = round2(total + monto)
+	}
+	if total <= 0.004 {
+		return
 	}
 	lineas = append([]contabilidad.Linea{{Codigo: destino, Debe: total}}, lineas...)
 	s.asentar(empresaID, actor, o.Terminada,
 		"Fabricación "+o.NumeroCompleto+" — "+o.Nombre, RefFabricacion, o.ID, lineas)
+}
+
+// asentarCancelacionDeFabricacion devuelve a las cuentas de los insumos el valor que
+// quedó en curso. Sin esto, cancelar dejaría 1202 cargada para siempre con una orden
+// que ya no existe — y esa cuenta solo tiene sentido si siempre está vacía cuando no
+// hay nada fabricándose.
+func (s *Service) asentarCancelacionDeFabricacion(empresaID, actor string, o fabricacion.Orden) {
+	enProceso := s.enProduccionDe(empresaID, o.ID)
+	if s.asientos == nil || enProceso <= 0.004 {
+		return
+	}
+	vuelta := map[string]float64{}
+	for _, c := range o.Consumos {
+		cta := s.cuentaInventarioDe(empresaID, c.ProductoID)
+		vuelta[cta] = round2(vuelta[cta] + c.Total())
+	}
+	lineas := []contabilidad.Linea{}
+	for cta, monto := range vuelta {
+		lineas = append(lineas, contabilidad.Linea{Codigo: cta, Debe: monto})
+	}
+	lineas = append(lineas, contabilidad.Linea{Codigo: contabilidad.CtaProduccionEnProceso, Haber: enProceso})
+	s.asentar(empresaID, actor, "",
+		"Devolución de insumos por cancelar "+o.NumeroCompleto, RefFabricacion, o.ID, lineas)
 }
 
 // almacenDeDescarte busca el almacén donde va lo que ya no se puede vender.

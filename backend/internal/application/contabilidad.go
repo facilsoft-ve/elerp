@@ -55,6 +55,7 @@ func PlanBase() []contabilidad.Cuenta {
 		{contabilidad.CtaRetencionIVAaFavor, "Retenciones de IVA a favor", contabilidad.TipoActivo},
 		{contabilidad.CtaRetencionISLRaFavor, "Retenciones de ISLR a favor / anticipo", contabilidad.TipoActivo},
 		{contabilidad.CtaInventario, "Inventario de mercancía", contabilidad.TipoActivo},
+		{contabilidad.CtaProduccionEnProceso, "Producción en proceso", contabilidad.TipoActivo},
 		{contabilidad.CtaCuentasPorPagar, "Cuentas por pagar", contabilidad.TipoPasivo},
 		{contabilidad.CtaIVADebito, "IVA débito fiscal", contabilidad.TipoPasivo},
 		{contabilidad.CtaIGTFPorPagar, "IGTF por pagar", contabilidad.TipoPasivo},

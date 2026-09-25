@@ -6,6 +6,7 @@ import (
 
 	"github.com/mornix/elerp/internal/adapter/inmem"
 	"github.com/mornix/elerp/internal/application"
+	"github.com/mornix/elerp/internal/domain/contabilidad"
 	"github.com/mornix/elerp/internal/domain/fabricacion"
 	"github.com/mornix/elerp/internal/domain/inventario"
 )
@@ -800,5 +801,119 @@ func TestFabricacion_ElResumenAgrupaLoQuePasoEnElTaller(t *testing.T) {
 	}
 	if r2.Planificado != r.Planificado || r2.Producido != r.Producido || r2.CostoInsumos != r.CostoInsumos {
 		t.Fatalf("arrancar una tanda no puede mover el rendimiento del período: %+v vs %+v", r2, r)
+	}
+}
+
+/* EL VALOR MIENTRAS SE FABRICA.
+ *
+ * Entre que la orden arranca y termina, los insumos ya salieron del almacén y el
+ * producto todavía no entró. Antes ese valor no estaba en ninguna cuenta: la
+ * contabilidad dejaba de cuadrar contra el inventario DURANTE toda la fabricación y
+ * volvía a cuadrar sola al cerrar. Un descuadre que se arregla solo es el más caro
+ * de todos — quien lo ve no puede reproducirlo, y quien no lo ve no sabe que pasó.
+ */
+
+// saldoCuenta suma debe menos haber de una cuenta en el libro diario.
+func saldoCuenta(svc *application.Service, codigo string) float64 {
+	total := 0.0
+	for _, a := range svc.LibroDiario(empDemo) {
+		for _, l := range a.Lineas {
+			if l.Codigo == codigo {
+				total += l.Debe - l.Haber
+			}
+		}
+	}
+	return round2Test(total)
+}
+
+// TestFabricacion_ElValorEnCursoViveEnSuCuenta: con la orden abierta, lo que salió
+// del inventario tiene que estar en Producción en proceso. Ni perdido ni en el
+// almacén: en curso.
+func TestFabricacion_ElValorEnCursoViveEnSuCuenta(t *testing.T) {
+	svc, st := servicioFabricacion(t)
+	plato, _, _ := recetaDePrueba(t, svc, st, inventario.FabricaParaStock)
+
+	o, _ := svc.CrearOrdenFabricacion(empDemo, application.EntradaOrden{
+		SedeID: sede1, SKU: plato.SKU, Cantidad: 10, Actor: actorA, Origen: origenTst,
+	})
+	if s := saldoCuenta(svc, contabilidad.CtaProduccionEnProceso); s != 0 {
+		t.Fatalf("antes de arrancar, producción en proceso debía estar en cero y está en %v", s)
+	}
+	iniciada, err := svc.IniciarOrden(empDemo, o.ID, actorA, origenTst)
+	if err != nil {
+		t.Fatalf("iniciar: %v", err)
+	}
+	enCurso := saldoCuenta(svc, contabilidad.CtaProduccionEnProceso)
+	if !casi(enCurso, round2Test(iniciada.CostoTotal)) {
+		t.Errorf("producción en proceso debía tener el costo de los insumos (%v), tiene %v",
+			iniciada.CostoTotal, enCurso)
+	}
+
+	if _, err := svc.TerminarOrden(empDemo, o.ID, 10, actorA, origenTst); err != nil {
+		t.Fatalf("terminar: %v", err)
+	}
+	// Y AL CERRAR TIENE QUE QUEDAR VACÍA: si algo se queda ahí, es valor que no
+	// está ni en el almacén ni en resultados, y nadie lo va a buscar en una cuenta
+	// que se supone transitoria.
+	if s := saldoCuenta(svc, contabilidad.CtaProduccionEnProceso); !casi(s, 0) {
+		t.Errorf("tras terminar, producción en proceso debía quedar en cero y quedó en %v", s)
+	}
+}
+
+// TestFabricacion_CancelarVaciaLaCuentaEnCurso: cancelar devuelve los insumos al
+// almacén, así que su valor tiene que volver también. Sin esto, 1202 quedaría
+// cargada para siempre por una orden que ya no existe.
+func TestFabricacion_CancelarVaciaLaCuentaEnCurso(t *testing.T) {
+	svc, st := servicioFabricacion(t)
+	plato, _, _ := recetaDePrueba(t, svc, st, inventario.FabricaParaStock)
+
+	o, _ := svc.CrearOrdenFabricacion(empDemo, application.EntradaOrden{
+		SedeID: sede1, SKU: plato.SKU, Cantidad: 10, Actor: actorA, Origen: origenTst,
+	})
+	if _, err := svc.IniciarOrden(empDemo, o.ID, actorA, origenTst); err != nil {
+		t.Fatalf("iniciar: %v", err)
+	}
+	if s := saldoCuenta(svc, contabilidad.CtaProduccionEnProceso); s <= 0 {
+		t.Fatal("la orden arrancó y no cargó nada en producción en proceso")
+	}
+	if _, err := svc.CancelarOrden(empDemo, o.ID, "se dañó el horno", actorA, origenTst); err != nil {
+		t.Fatalf("cancelar: %v", err)
+	}
+	if s := saldoCuenta(svc, contabilidad.CtaProduccionEnProceso); !casi(s, 0) {
+		t.Errorf("tras cancelar, producción en proceso debía quedar en cero y quedó en %v", s)
+	}
+}
+
+// TestFabricacion_ElInventarioCuadraConLaOrdenAbierta es la razón de todo esto: con
+// la orden en curso, la valoración del almacén y el saldo de la cuenta de inventario
+// tienen que seguir diciendo lo mismo. Antes no: el almacén bajaba y la cuenta no.
+func TestFabricacion_ElInventarioCuadraConLaOrdenAbierta(t *testing.T) {
+	svc, st := servicioFabricacion(t)
+	svc.ConAlmacenes(st.Almacenes)
+	svc.ConSedes(st.Sedes)
+	plato, _, _ := recetaDePrueba(t, svc, st, inventario.FabricaParaStock)
+
+	o, _ := svc.CrearOrdenFabricacion(empDemo, application.EntradaOrden{
+		SedeID: sede1, SKU: plato.SKU, Cantidad: 10, Actor: actorA, Origen: origenTst,
+	})
+	if _, err := svc.IniciarOrden(empDemo, o.ID, actorA, origenTst); err != nil {
+		t.Fatalf("iniciar: %v", err)
+	}
+
+	// El movimiento del inventario y el de su cuenta tienen que ser el MISMO: no se
+	// mide el saldo absoluto (el seed carga existencias sin asentar) sino que los dos
+	// lados se muevan igual por causa de la fabricación.
+	consumido := 0.0
+	for _, c := range o.Consumos {
+		consumido += c.Total()
+	}
+	iniciada, _ := svc.OrdenFabricacion(empDemo, o.ID)
+	bajaDeInventario := round2Test(iniciada.CostoTotal)
+	if bajaDeInventario <= 0 {
+		t.Fatal("la orden no consumió nada; el test no prueba nada")
+	}
+	if s := saldoCuenta(svc, contabilidad.CtaInventario); !casi(s, -bajaDeInventario) {
+		t.Errorf("la cuenta de inventario debía bajar %v por la fabricación en curso, movió %v",
+			bajaDeInventario, s)
 	}
 }

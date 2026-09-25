@@ -23,7 +23,12 @@ import (
  * nadie declare una cuenta, los asientos tienen que salir exactamente como antes. */
 
 // cuentaInventarioAlterna da de alta una cuenta de activo para pruebas.
-const ctaInvAlterna = "1202"
+//
+// 1210 y no 1202: esta última la ocupa Producción en proceso desde que la
+// fabricación se asienta en dos tiempos. Es una cuenta del plan base, así que darla
+// de alta otra vez falla — y el test que la creaba dejó de compilar el día que se
+// añadió, que es exactamente lo que tenía que pasar.
+const ctaInvAlterna = "1210"
 
 func crearCuentaAlterna(t *testing.T, svc *application.Service) {
 	t.Helper()

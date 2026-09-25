@@ -47,6 +47,18 @@ const (
 	// contra el impuesto sobre la renta a pagar en la declaración.
 	CtaRetencionISLRaFavor = "1105"
 	CtaInventario          = "1201"
+	/* CtaProduccionEnProceso es dónde vive el valor MIENTRAS SE FABRICA.
+	 *
+	 * Entre que la orden arranca y termina, los insumos ya salieron del almacén y el
+	 * producto todavía no entró. Sin esta cuenta ese valor no está en ningún sitio:
+	 * el inventario baja y nada lo recibe, así que la contabilidad deja de cuadrar
+	 * contra el almacén DURANTE toda la fabricación —días, en un taller— y vuelve a
+	 * cuadrar sola al cerrar, que es la peor forma de un descuadre: intermitente y
+	 * sin culpable.
+	 *
+	 * No es inventario disponible: es materia en curso. Por eso va en su propia
+	 * cuenta y no se compara contra el almacén. */
+	CtaProduccionEnProceso = "1202"
 	CtaCuentasPorPagar     = "2101"
 	CtaIVADebito           = "2201"
 	CtaIGTFPorPagar        = "2202"

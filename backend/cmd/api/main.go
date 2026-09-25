@@ -132,6 +132,12 @@ func main() {
 		if n := svc.RecontabilizarComprasPendientes(emp.ID, "sistema"); n > 0 {
 			log.Printf("Contabilidad: %d recepción(es) de compra de %s recibieron su asiento", n, emp.ID)
 		}
+		// Y las órdenes de fabricación que quedaron EN CURSO sin cargar su valor a
+		// Producción en proceso: las que siembra el seed y las que ya estaban
+		// abiertas cuando esa cuenta no existía.
+		if n := svc.RecontabilizarFabricacionesEnCurso(emp.ID, "sistema"); n > 0 {
+			log.Printf("Contabilidad: %d fabricación(es) en curso de %s cargaron su valor en proceso", n, emp.ID)
+		}
 		// Unidades de medida: las equivalencias del juego por defecto (kg=1, g=0,001…)
 		// para las empresas cuyas unidades se sembraron antes de que el campo
 		// existiera. Sin esto la conversión queda viva pero inerte: el selector no

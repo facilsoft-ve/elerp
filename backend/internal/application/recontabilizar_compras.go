@@ -1,6 +1,9 @@
 package application
 
-import "github.com/mornix/elerp/internal/domain/inventario"
+import (
+	"github.com/mornix/elerp/internal/domain/fabricacion"
+	"github.com/mornix/elerp/internal/domain/inventario"
+)
 
 /* COMPRAS RECIBIDAS QUE NUNCA ASENTARON.
  *
@@ -69,6 +72,37 @@ func (s *Service) RecontabilizarComprasPendientes(empresaID, actor string) int {
 			continue
 		}
 		s.asentarCompra(empresaID, actor, o, round2(total), porProducto[o.ID])
+		n++
+	}
+	return n
+}
+
+/* ÓRDENES DE FABRICACIÓN QUE ARRANCARON SIN PASAR POR CAJA.
+ *
+ * Mismo caso que las compras y misma razón: el seed las siembra ya en proceso, con
+ * sus consumos anexados, sin pasar por IniciarOrden —que es quien lleva el valor a
+ * Producción en proceso—. El resultado es el descuadre que esta tanda persigue: los
+ * insumos salieron del almacén y su valor no está en ninguna cuenta.
+ *
+ * También cubre a las órdenes que ya estaban en curso cuando se desplegó la cuenta
+ * 1202: arrancaron cuando no existía, así que nadie les cargó nada.
+ */
+func (s *Service) RecontabilizarFabricacionesEnCurso(empresaID, actor string) int {
+	if s.asientos == nil || s.ordenesFabricacion == nil {
+		return 0
+	}
+	n := 0
+	for _, o := range s.OrdenesFabricacion(empresaID, "") {
+		// Solo las ABIERTAS: una terminada ya pasó por su asiento de cierre, y
+		// cargarle ahora el de arranque dejaría 1202 con saldo de una orden que no
+		// tiene nada en curso.
+		if o.Estado != fabricacion.EstadoEnProceso || o.CostoTotal <= 0.004 {
+			continue
+		}
+		if s.enProduccionDe(empresaID, o.ID) > 0.004 {
+			continue // ya está cargada: idempotente
+		}
+		s.asentarArranqueDeFabricacion(empresaID, actor, o)
 		n++
 	}
 	return n

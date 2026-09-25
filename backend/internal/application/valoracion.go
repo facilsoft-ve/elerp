@@ -203,7 +203,21 @@ func (s *Service) Valoracion(empresaID, sedeID string) ValoracionResult {
 		if sedeID == "" {
 			t.Contable = s.saldoContableDe(empresaID, cod)
 			t.Diferencia = round2(t.Valor - t.Contable)
-			t.Cuadra = t.Diferencia > -0.05 && t.Diferencia < 0.05
+			/* LA TOLERANCIA CRECE CON LAS LÍNEAS, y antes era fija en 0,05.
+			 *
+			 * El redondeo se produce POR LÍNEA —cada costo unitario se redondea, y
+			 * repartir el costo de una fabricación entre seis insumos redondea seis
+			 * veces—, así que el residuo acumulado depende de cuántas haya. Con el
+			 * tope fijo, una empresa con treinta líneas acusaba «no cuadra» por 23
+			 * céntimos: cierto, inútil, y manda a buscar un descuadre que no existe.
+			 *
+			 * La diferencia SIGUE VIÉNDOSE en la pantalla aunque cuadre: esto decide
+			 * cuándo se enciende la alarma, no cuándo se oculta la cifra. */
+			tolerancia := 0.01 * float64(t.Lineas)
+			if tolerancia < 0.05 {
+				tolerancia = 0.05
+			}
+			t.Cuadra = t.Diferencia > -tolerancia && t.Diferencia < tolerancia
 			if !t.Cuadra {
 				res.TodoCuadrado = false
 			}
